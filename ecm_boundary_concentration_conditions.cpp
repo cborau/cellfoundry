@@ -1,5 +1,6 @@
 // interacts with the boundaries in there is external diffusion
 FLAMEGPU_AGENT_FUNCTION(ecm_boundary_concentration_conditions, flamegpu::MessageNone, flamegpu::MessageNone) {
+  // TODO: implement boundary conditions for ECM agents
   //Get agent variables (agent calling the function)
   int agent_id = FLAMEGPU->getVariable<int>("id");
   float agent_x = FLAMEGPU->getVariable<float>("x");

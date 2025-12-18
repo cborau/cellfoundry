@@ -12,6 +12,7 @@ import pathlib, time, math, sys
 from dataclasses import make_dataclass
 import pandas as pd
 import numpy as np
+from random import random
 
 start_time = time.time()
 
@@ -144,7 +145,7 @@ BOUNDARY_CONC_FIXED_MULTI = [[-1.0, -1.0, -1.0, -1.0, -1.0, -1.0],
                              [-1.0, -1.0, -1.0, -1.0, -1.0, -1.0]]  # add as many lines as different species
 
 INIT_ECM_CONCENTRATION_VALS = [0.0, 0.0]  # initial concentration of each species on the ECM agents
-
+INIT_CELL_CONCENTRATION_VALS = [0.0, 0.0]  # initial concentration of each species on the CELL agents
 
 # Cell agent related paramenters
 # +--------------------------------------------------------------------+
@@ -261,7 +262,6 @@ ecm_boundary_interaction_file = "ecm_boundary_interaction.cpp"
 ecm_ecm_interaction_file = "ecm_ecm_interaction.cpp"
 ecm_boundary_concentration_conditions_file = "ecm_boundary_concentration_conditions.cpp"
 ecm_move_file = "ecm_move.cpp"
-ecm_output_spatial_location_data_file = "ecm_output_spatial_location_data.cpp"
 ecm_Csp_update_file = "ecm_Csp_update.cpp"
 
 """
@@ -379,26 +379,10 @@ ECM_grid_location_message.newVariableUInt8("grid_j")
 ECM_grid_location_message.newVariableUInt8("grid_k")
 ECM_grid_location_message.newVariableArrayFloat("C_sp", N_SPECIES) 
 ECM_grid_location_message.newVariableFloat("k_elast")
-ECM_grid_location_message.newVariableUInt8("d_dumping")
+ECM_grid_location_message.newVariableFloat("d_dumping")
 ECM_grid_location_message.newVariableFloat("vx")
 ECM_grid_location_message.newVariableFloat("vy")
 ECM_grid_location_message.newVariableFloat("vz")
-# TODO: add or remove variables manually to leave only those that need to be reported. If message type is MessageSpatial3D, variables x, y, z are included internally.
-
-ECM_spatial_location_message = model.newMessageSpatial3D("ECM_spatial_location_message")
-ECM_spatial_location_message.setRadius(MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION)
-ECM_spatial_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS)
-ECM_spatial_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS)
-ECM_spatial_location_message.newVariableInt("id")
-ECM_spatial_location_message.newVariableUInt8("grid_i")
-ECM_spatial_location_message.newVariableUInt8("grid_j")
-ECM_spatial_location_message.newVariableUInt8("grid_k")
-ECM_spatial_location_message.newVariableArrayFloat("C_sp", N_SPECIES) 
-ECM_spatial_location_message.newVariableFloat("k_elast")
-ECM_spatial_location_message.newVariableUInt8("d_dumping")
-ECM_spatial_location_message.newVariableFloat("vx")
-ECM_spatial_location_message.newVariableFloat("vy")
-ECM_spatial_location_message.newVariableFloat("vz")
 # TODO: add or remove variables manually to leave only those that need to be reported. If message type is MessageSpatial3D, variables x, y, z are included internally.
 
 CELL_spatial_location_message = model.newMessageSpatial3D("CELL_spatial_location_message")
@@ -409,9 +393,17 @@ CELL_spatial_location_message.newVariableInt("id")
 CELL_spatial_location_message.newVariableFloat("vx")
 CELL_spatial_location_message.newVariableFloat("vy")
 CELL_spatial_location_message.newVariableFloat("vz")
+CELL_spatial_location_message.newVariableFloat("orx")
+CELL_spatial_location_message.newVariableFloat("ory")
+CELL_spatial_location_message.newVariableFloat("orz")
+CELL_spatial_location_message.newVariableFloat("alignment")
 CELL_spatial_location_message.newVariableArrayFloat("k_consumption", N_SPECIES) 
 CELL_spatial_location_message.newVariableArrayFloat("k_production", N_SPECIES) 
 CELL_spatial_location_message.newVariableArrayFloat("C_sp", N_SPECIES) 
+CELL_spatial_location_message.newVariableFloat("radius")
+CELL_spatial_location_message.newVariableFloat("cycle_phase")
+CELL_spatial_location_message.newVariableFloat("clock")
+CELL_spatial_location_message.newVariableInt("completed_cycles")
 # TODO: add or remove variables manually to leave only those that need to be reported. If message type is MessageSpatial3D, variables x, y, z are included internally.
 
 
@@ -433,7 +425,7 @@ ECM_agent.newVariableUInt8("grid_k", 0)
 ECM_agent.newVariableArrayFloat("C_sp", N_SPECIES) 
 # TODO: default array values must be explicitly defined when initializing agent populations
 ECM_agent.newVariableFloat("k_elast")
-ECM_agent.newVariableUInt8("d_dumping")
+ECM_agent.newVariableFloat("d_dumping")
 ECM_agent.newVariableFloat("vx")
 ECM_agent.newVariableFloat("vy")
 ECM_agent.newVariableFloat("vz")
@@ -443,29 +435,37 @@ ECM_agent.newRTCFunctionFile("ecm_boundary_interaction", ecm_boundary_interactio
 ECM_agent.newRTCFunctionFile("ecm_ecm_interaction", ecm_ecm_interaction_file).setMessageInput("ECM_grid_location_message ")
 ECM_agent.newRTCFunctionFile("ecm_boundary_concentration_conditions", ecm_boundary_concentration_conditions_file)
 ECM_agent.newRTCFunctionFile("ecm_move", ecm_move_file)
-ECM_agent.newRTCFunctionFile("ecm_output_spatial_location_data", ecm_output_spatial_location_data_file).setMessageOutput("ECM_spatial_location_message ")
 ECM_agent.newRTCFunctionFile("ecm_Csp_update", ecm_Csp_update_file)
 
 """
   CELL agent
 """
-CELL_agent = model.newAgent("CELL")
-CELL_agent.newVariableInt("id", 0)
-CELL_agent.newVariableFloat("x", 0.0)
-CELL_agent.newVariableFloat("y", 0.0)
-CELL_agent.newVariableFloat("z", 0.0)
-CELL_agent.newVariableFloat("vx", 0.0)
-CELL_agent.newVariableFloat("vy", 0.0)
-CELL_agent.newVariableFloat("vz", 0.0)
-CELL_agent.newVariableArrayFloat("k_consumption", N_SPECIES) 
-# TODO: default array values must be explicitly defined when initializing agent populations
-CELL_agent.newVariableArrayFloat("k_production", N_SPECIES) 
-# TODO: default array values must be explicitly defined when initializing agent populations
-CELL_agent.newVariableArrayFloat("C_sp", N_SPECIES) 
-# TODO: default array values must be explicitly defined when initializing agent populations
-CELL_agent.newRTCFunctionFile("cell_output_location_data", cell_output_location_data_file).setMessageOutput("CELL_spatial_location_message ")
-CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ECM_spatial_location_message ")
-CELL_agent.newRTCFunctionFile("cell_move", cell_move_file)
+if INCLUDE_CELLS:
+    CELL_agent = model.newAgent("CELL")
+    CELL_agent.newVariableInt("id", 0)
+    CELL_agent.newVariableFloat("x", 0.0)
+    CELL_agent.newVariableFloat("y", 0.0)
+    CELL_agent.newVariableFloat("z", 0.0)
+    CELL_agent.newVariableFloat("vx", 0.0)
+    CELL_agent.newVariableFloat("vy", 0.0)
+    CELL_agent.newVariableFloat("vz", 0.0)
+    CELL_agent.newVariableFloat("orx")
+    CELL_agent.newVariableFloat("ory")
+    CELL_agent.newVariableFloat("orz")
+    CELL_agent.newVariableFloat("alignment", 0.0)
+    CELL_agent.newVariableArrayFloat("k_consumption", N_SPECIES) 
+    # TODO: default array values must be explicitly defined when initializing agent populations
+    CELL_agent.newVariableArrayFloat("k_production", N_SPECIES) 
+    # TODO: default array values must be explicitly defined when initializing agent populations
+    CELL_agent.newVariableArrayFloat("C_sp", N_SPECIES) 
+    # TODO: default array values must be explicitly defined when initializing agent populations
+    CELL_agent.newVariableFloat("radius", CELL_RADIUS)
+    CELL_agent.newVariableInt("cycle_phase", 1) # [1:G1] [2:S] [3:G2] [4:M]
+    CELL_agent.newVariableFloat("clock", 0.0) # internal clock of the cell to switch phases
+    CELL_agent.newVariableInt("completed_cycles", 0)
+    CELL_agent.newRTCFunctionFile("cell_output_location_data", cell_output_location_data_file).setMessageOutput("CELL_spatial_location_message ")
+    CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ECM_grid_location_message ")
+    CELL_agent.newRTCFunctionFile("cell_move", cell_move_file)
 
 
 """
@@ -482,6 +482,117 @@ bcorner_agent.newRTCFunctionFile("bcorner_output_location_data", bcorner_output_
 bcorner_agent.newRTCFunctionFile("bcorner_move", bcorner_move_file)
 
 
+def getRandomCoords3D(n, minx, maxx, miny, maxy, minz, maxz):
+    """
+    Generates an array (nx3 matrix) of random numbers with specific ranges for each column.
+
+    Args:
+        n (int): Number of rows in the array.
+        minx, maxx (float): Range for the values in the first column [minx, maxx].
+        miny, maxy (float): Range for the values in the second column [miny, maxy].
+        minz, maxz (float): Range for the values in the third column [minz, maxz].
+
+    Returns:
+        numpy.ndarray: Array of random numbers with shape (n, 3).
+    """
+    np.random.seed()
+    random_array = np.random.uniform(low=[minx, miny, minz], high=[maxx, maxy, maxz], size=(n, 3))
+    return random_array
+    
+
+def randomVector3D():
+    """
+    Generates a random 3D unit vector (direction) with a uniform spherical distribution
+
+    Returns
+    -------
+    (x,y,z) : tuple
+        Coordinates of the vector.
+    """
+    np.random.seed()
+    phi = np.random.uniform(0.0, np.pi * 2.0)
+    costheta = np.random.uniform(-1.0, 1.0)
+    theta = np.arccos(costheta)
+    x = np.sin(theta) * np.cos(phi)
+    y = np.sin(theta) * np.sin(phi)
+    z = np.cos(theta)
+    return (x, y, z)
+
+
+def getRandomVectors3D(n_vectors: int):
+    """
+    Generates an array of random 3D unit vectors (directions) with a uniform spherical distribution
+
+    Parameters
+    ----------
+    n_vectors : int
+        Number of vectors to be generated
+    Returns
+    -------
+    v_array : Numpy array
+        Coordinates of the vectors. Shape: [n_vectors, 3].
+    """
+    v_array = np.zeros((n_vectors, 3))
+    for i in range(n_vectors):
+        vi = randomVector3D()
+        v_array[i, :] = np.array(vi, dtype='float')
+
+    return v_array
+
+
+def getFixedVectors3D(n_vectors: int, v_dir: np.array):
+    """
+    Generates an array of 3D unit vectors (directions) in the specified direction
+
+    Parameters
+    ----------
+    n_vectors : int
+        Number of vectors to be generated
+    v_dir : Numpy array
+        Direction of the vectors
+    Returns
+    -------
+    v_array : Numpy array
+        Coordinates of the vectors. Shape: [n_vectors, 3].
+    """
+    v_array = np.tile(v_dir, (n_vectors, 1))
+
+    return v_array
+    
+    
+def getRandomCoordsAroundPoint(n, px, py, pz, radius):
+    """
+    Generates N random 3D coordinates within a sphere of a specific radius around a central point.
+
+    Parameters
+    ----------
+    n : int
+        The number of random coordinates to generate.
+    px : float
+        The x-coordinate of the central point.
+    py : float
+        The y-coordinate of the central point.
+    pz : float
+        The z-coordinate of the central point.
+    radius : float
+        The radius of the sphere.
+
+    Returns
+    -------
+    coords
+        A numpy array of randomly generated 3D coordinates with shape (n, 3).
+    """
+    central_point = np.array([px, py, pz])
+    rand_dirs = getRandomVectors3D(n)
+    coords = np.zeros((n, 3))
+    np.random.seed()
+    for i in range(n):
+        radius_i = np.random.uniform(0.0, 1.0) * radius        
+        coords[i, :] = central_point + np.array(rand_dirs[i, :] * radius_i, dtype='float')
+    
+
+    return coords
+
 """
   Population initialisation functions
 """
@@ -490,7 +601,7 @@ bcorner_agent.newRTCFunctionFile("bcorner_move", bcorner_move_file)
 # This class is used to ensure that corner agents are assigned the first 8 ids
 class initAgentPopulations(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
-        global INIT_ECM_CONCENTRATION_VALS, N_SPECIES, INCLUDE_DIFFUSION, INCLUDE_CELLS, N_CELLS
+        global INIT_ECM_CONCENTRATION_VALS, INIT_CELL_CONCENTRATION_VALS, N_SPECIES, INCLUDE_DIFFUSION, INCLUDE_CELLS, N_CELLS
         # BOUNDARY CORNERS
         current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
         coord_boundary = FLAMEGPU.environment.getPropertyArrayFloat("COORDS_BOUNDARIES")
@@ -608,8 +719,52 @@ class initAgentPopulations(pyflamegpu.HostFunction):
 
         FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
 
+        # CELLS
+        if INCLUDE_CELLS:
+            current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
+            current_id += 1
+            count = -1
+            cell_orientations = getRandomVectors3D(N_CELLS)
+            k_elast = FLAMEGPU.environment.getPropertyFloat("CELL_K_ELAST")
+            d_dumping = FLAMEGPU.environment.getPropertyFloat("CELL_D_DUMPING")
+            radius = FLAMEGPU.environment.getPropertyFloat("CELL_RADIUS")
+            for i in range(N_CELLS):
+                count += 1
+                instance = FLAMEGPU.agent("CELL").newAgent()
+                instance.setVariableInt("id", current_id + count)
+                instance.setVariableFloat("x", 0.0)
+                instance.setVariableFloat("y", 0.0)
+                instance.setVariableFloat("z", 0.0)
+                instance.setVariableFloat("vx", 0.0)
+                instance.setVariableFloat("vy", 0.0)
+                instance.setVariableFloat("vz", 0.0)
+                instance.setVariableFloat("orx", cell_orientations[count, 0])
+                instance.setVariableFloat("ory", cell_orientations[count, 1])
+                instance.setVariableFloat("orz", cell_orientations[count, 2])
+                instance.setVariableFloat("alignment", 0.0)
+                instance.setVariableFloat("k_elast", k_elast)
+                instance.setVariableFloat("d_dumping", d_dumping)
+                instance.setVariableArrayFloat("C_sp", INIT_CELL_CONCENTRATION_VALS)
+                instance.setVariableFloat("radius", radius)
+                cycle_phase = random.randint(1, 4) # [1:G1] [2:S] [3:G2] [4:M]
+                instance.setVariableInt("cycle_phase", cycle_phase)
+                cycle_clock = 0.0
+                if cycle_phase == 1:
+                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G1_START") 
+                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G1_DURATION")                
+                elif cycle_phase == 2:
+                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_S_START")
+                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_S_DURATION")                    
+                elif cycle_phase == 3:
+                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G2_START")
+                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G2_DURATION")                    
+                elif cycle_phase == 4:
+                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_M_START")
+                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_M_DURATION")                    
+                instance.setVariableFloat("clock", cycle_clock)
+                instance.setVariableInt("completed_cycles",0)
 
-
+            FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
         
         return
 
@@ -617,12 +772,30 @@ class initAgentPopulations(pyflamegpu.HostFunction):
 # Add function callback to INIT functions for population generation
 initialAgentPopulation = initAgentPopulations()
 model.addInitFunction(initialAgentPopulation)
+# WARNING: MacroProperties have getters but no setters, meaning they are automatically updated here
+def resetMacroProperties(self, FLAMEGPU):
+    global BOUNDARY_CONC_INIT_MULTI, BOUNDARY_CONC_FIXED_MULTI
+    bcim = FLAMEGPU.environment.getMacroPropertyFloat("BOUNDARY_CONC_INIT_MULTI")
+    bcfm = FLAMEGPU.environment.getMacroPropertyFloat("BOUNDARY_CONC_FIXED_MULTI")
+    for i in range(len(BOUNDARY_CONC_INIT_MULTI)):
+        for j in range(len(BOUNDARY_CONC_INIT_MULTI[i])):
+            bcim[i][j] = BOUNDARY_CONC_INIT_MULTI[i][j]
+    for i in range(len(BOUNDARY_CONC_FIXED_MULTI)):
+        for j in range(len(BOUNDARY_CONC_FIXED_MULTI[i])):
+            bcfm[i][j] = BOUNDARY_CONC_FIXED_MULTI[i][j]
+    print("Reseting MacroProperties")
+    print(BOUNDARY_CONC_INIT_MULTI)
+    print(BOUNDARY_CONC_FIXED_MULTI)
+    return
 # Initialize the MacroProperties
 class initMacroProperties(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
-        # Get property handles and modify their values.  Replace getMacroPropertyFloat by getMacroPropertyInt if needed
-        C_SP_MACRO = FLAMEGPU.environment.getMacroPropertyFloat("C_SP_MACRO")
-        # TODO: initialize values. All 0 by default
+        global INIT_ECM_CONCENTRATION_VALS, ECM_POPULATION_SIZE, N_SPECIES
+        resetMacroProperties(self, FLAMEGPU)
+        c_sp_macro = FLAMEGPU.environment.getMacroPropertyFloat("C_SP_MACRO")
+        for i in range(ECM_POPULATION_SIZE):
+            for j in range(N_SPECIES):
+                c_sp_macro[j][i] = INIT_ECM_CONCENTRATION_VALS[j]
 
         return
 
@@ -637,7 +810,7 @@ model.addInitFunction(initialMacroProperties)
 # TODO: remove unnecessary parts
 class SaveDataToFile(pyflamegpu.HostFunction):
     def __init__(self):
-        global ECM_AGENTS_PER_DIR, N_VASCULARIZATION_POINTS
+        global ECM_AGENTS_PER_DIR
         super().__init__()
         self.header = list()
         self.header.append("# vtk DataFile Version 3.0")
@@ -694,8 +867,7 @@ class SaveDataToFile(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
         global SAVE_DATA_TO_FILE, SAVE_EVERY_N_STEPS, N_SPECIES
         global RES_PATH, ENSEMBLE
-        global fileCounter, INCLUDE_VASCULARIZATION
-        global INCLUDE_CELLS
+        global INCLUDE_CELLS, ECM_POPULATION_SIZE
         BUCKLING_COEFF_D0 = FLAMEGPU.environment.getPropertyFloat("BUCKLING_COEFF_D0")
         STRAIN_STIFFENING_COEFF_DS = FLAMEGPU.environment.getPropertyFloat("STRAIN_STIFFENING_COEFF_DS")
         CRITICAL_STRAIN = FLAMEGPU.environment.getPropertyFloat("CRITICAL_STRAIN")
@@ -705,24 +877,6 @@ class SaveDataToFile(pyflamegpu.HostFunction):
 
         if SAVE_DATA_TO_FILE:
             if stepCounter % SAVE_EVERY_N_STEPS == 0 or stepCounter == 1:
-
-                if INCLUDE_VASCULARIZATION:
-                    vasc_coords = list()
-                    file_name = 'vascularization_points_t{:04d}.vtk'.format(stepCounter)
-                    file_path = RES_PATH / file_name
-                    vasc_agent = FLAMEGPU.agent("VASCULARIZATION")
-                    av = vasc_agent.getPopulationData()  # this returns a DeviceAgentVector
-                    for ai in av:
-                        coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
-                        vasc_coords.append(coords_ai)
-                    with open(str(file_path), 'w') as file:
-                        for line in self.vascularizationdata:
-                            file.write(line + '\n')
-                        file.write("POINTS {} float \n".format(FLAMEGPU.environment.getPropertyUInt(
-                            "N_VASCULARIZATION_POINTS")))  # number of vascularization agents
-                        for coords_ai in vasc_coords:
-                            file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
-
                 if INCLUDE_CELLS:
                     cell_coords = list()
                     cell_velocity = list()
@@ -731,6 +885,7 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                     cell_radius = list()
                     cell_clock = list()
                     cell_cycle_phase = list()
+                    concentration_multi = list()  # this is a list of tuples. Each tuple has N_SPECIES elements
                     file_name = 'cells_t{:04d}.vtk'.format(stepCounter)
                     file_path = RES_PATH / file_name
                     cell_agent = FLAMEGPU.agent("CELL")
@@ -739,12 +894,12 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                     for ai in av:
                         coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
                         velocity_ai = (ai.getVariableFloat("vx"), ai.getVariableFloat("vy"), ai.getVariableFloat("vz"))
-                        orientation_ai = (
-                        ai.getVariableFloat("orx"), ai.getVariableFloat("ory"), ai.getVariableFloat("orz"))
+                        orientation_ai = (ai.getVariableFloat("orx"), ai.getVariableFloat("ory"), ai.getVariableFloat("orz"))
                         alignment_ai = ai.getVariableFloat("alignment")
                         radius_ai = ai.getVariableFloat("radius")
                         clock_ai = ai.getVariableFloat("clock")
                         cycle_phase_ai = ai.getVariableInt("cycle_phase")
+                        concentration_multi.append(ai.getVariableArrayFloat("C_sp"))
                         cell_coords.append(coords_ai)
                         cell_velocity.append(velocity_ai)
                         cell_orientation.append(orientation_ai)
@@ -776,7 +931,12 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                         file.write("SCALARS cycle_phase int 1" + '\n')
                         file.write("LOOKUP_TABLE default" + '\n')
                         for ccp_ai in cell_cycle_phase:
-                            file.write("{} \n".format(ccp_ai))                       
+                            file.write("{} \n".format(ccp_ai))    
+                        for s in range(N_SPECIES):
+                            file.write("SCALARS concentration_species_{0} float 1 \n".format(s))
+                            file.write("LOOKUP_TABLE default" + '\n')
+                            for c_ai in concentration_multi:
+                                file.write("{:.4f} \n".format(c_ai[s]))              
                         file.write("VECTORS velocity float" + '\n')
                         for v_ai in cell_velocity:
                             file.write("{:.4f} {:.4f} {:.4f} \n".format(v_ai[0], v_ai[1], v_ai[2]))
@@ -794,48 +954,57 @@ class SaveDataToFile(pyflamegpu.HostFunction):
 
                 agent = FLAMEGPU.agent("ECM")
                 # reaction forces, thus, opposite to agent-applied forces
-                sum_bx_pos = -agent.sumFloat("f_bx_pos")
-                sum_bx_neg = -agent.sumFloat("f_bx_neg")
-                sum_by_pos = -agent.sumFloat("f_by_pos")
-                sum_by_neg = -agent.sumFloat("f_by_neg")
-                sum_bz_pos = -agent.sumFloat("f_bz_pos")
-                sum_bz_neg = -agent.sumFloat("f_bz_neg")
-                sum_bx_pos_y = -agent.sumFloat("f_bx_pos_y")
-                sum_bx_pos_z = -agent.sumFloat("f_bx_pos_z")
-                sum_bx_neg_y = -agent.sumFloat("f_bx_neg_y")
-                sum_bx_neg_z = -agent.sumFloat("f_bx_neg_z")
-                sum_by_pos_x = -agent.sumFloat("f_by_pos_x")
-                sum_by_pos_z = -agent.sumFloat("f_by_pos_z")
-                sum_by_neg_x = -agent.sumFloat("f_by_neg_x")
-                sum_by_neg_z = -agent.sumFloat("f_by_neg_z")
-                sum_bz_pos_x = -agent.sumFloat("f_bz_pos_x")
-                sum_bz_pos_y = -agent.sumFloat("f_bz_pos_y")
-                sum_bz_neg_x = -agent.sumFloat("f_bz_neg_x")
-                sum_bz_neg_y = -agent.sumFloat("f_bz_neg_y")
+                # TODO: add ECM_FIBRE agents that transmit forces to boundaries
+                # sum_bx_pos = -agent.sumFloat("f_bx_pos")
+                # sum_bx_neg = -agent.sumFloat("f_bx_neg")
+                # sum_by_pos = -agent.sumFloat("f_by_pos")
+                # sum_by_neg = -agent.sumFloat("f_by_neg")
+                # sum_bz_pos = -agent.sumFloat("f_bz_pos")
+                # sum_bz_neg = -agent.sumFloat("f_bz_neg")
+                # sum_bx_pos_y = -agent.sumFloat("f_bx_pos_y")
+                # sum_bx_pos_z = -agent.sumFloat("f_bx_pos_z")
+                # sum_bx_neg_y = -agent.sumFloat("f_bx_neg_y")
+                # sum_bx_neg_z = -agent.sumFloat("f_bx_neg_z")
+                # sum_by_pos_x = -agent.sumFloat("f_by_pos_x")
+                # sum_by_pos_z = -agent.sumFloat("f_by_pos_z")
+                # sum_by_neg_x = -agent.sumFloat("f_by_neg_x")
+                # sum_by_neg_z = -agent.sumFloat("f_by_neg_z")
+                # sum_bz_pos_x = -agent.sumFloat("f_bz_pos_x")
+                # sum_bz_pos_y = -agent.sumFloat("f_bz_pos_y")
+                # sum_bz_neg_x = -agent.sumFloat("f_bz_neg_x")
+                # sum_bz_neg_y = -agent.sumFloat("f_bz_neg_y")
+                sum_bx_pos = 0.0
+                sum_bx_neg = 0.0
+                sum_by_pos = 0.0
+                sum_by_neg = 0.0
+                sum_bz_pos = 0.0
+                sum_bz_neg = 0.0
+                sum_bx_pos_y = 0.0
+                sum_bx_pos_z = 0.0
+                sum_bx_neg_y = 0.0
+                sum_bx_neg_z = 0.0
+                sum_by_pos_x = 0.0
+                sum_by_pos_z = 0.0
+                sum_by_neg_x = 0.0
+                sum_by_neg_z = 0.0
+                sum_bz_pos_x = 0.0
+                sum_bz_pos_y = 0.0
+                sum_bz_neg_x = 0.0
+                sum_bz_neg_y = 0.0
 
                 coords = list()
                 velocity = list()
-                orientation = list()
-                alignment = list()
-                gel_conc = list()
                 force = list()
-                elastic_energy = list()
                 concentration_multi = list()  # this is a list of tuples. Each tuple has N_SPECIES elements
                 av = agent.getPopulationData()  # this returns a DeviceAgentVector
                 for ai in av:
                     coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
                     velocity_ai = (ai.getVariableFloat("vx"), ai.getVariableFloat("vy"), ai.getVariableFloat("vz"))
                     force_ai = (ai.getVariableFloat("fx"), ai.getVariableFloat("fy"), ai.getVariableFloat("fz"))
-                    orientation_ai = (
-                    ai.getVariableFloat("orx"), ai.getVariableFloat("ory"), ai.getVariableFloat("orz"))
-                    alignment.append(ai.getVariableFloat("alignment"))
-                    gel_conc.append(ai.getVariableFloat("gel_conc"))
                     coords.append(coords_ai)
                     velocity.append(velocity_ai)
                     force.append(force_ai)
-                    orientation.append(orientation_ai)
-                    elastic_energy.append(ai.getVariableFloat("elastic_energy"))
-                    concentration_multi.append(ai.getVariableArrayFloat("concentration_multi"))
+                    concentration_multi.append(ai.getVariableArrayFloat("C_sp"))
                 print("====== SAVING DATA FROM Step {:03d} TO FILE ======".format(stepCounter))
                 with open(str(file_path), 'w') as file:
                     for line in self.header:
@@ -925,37 +1094,16 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                     file.write("1 0 0 \n" if sum_bz_neg_x > 0 else "-1 0 0 \n")
                     file.write("0 1 0 \n" if sum_bz_neg_y > 0 else "0 -1 0 \n")
 
-                    file.write("POINT_DATA {} \n".format(8 + ECM_AGENTS_PER_DIR[0] * ECM_AGENTS_PER_DIR[1] * ECM_AGENTS_PER_DIR[2]))  # 8 corners + number of ECM agents
+                    file.write("POINT_DATA {} \n".format(8 + ECM_POPULATION_SIZE))  # 8 corners + number of ECM agents
 
                     file.write(
                         "SCALARS is_corner int 1" + '\n')  # create this variable to remove them from representations
                     file.write("LOOKUP_TABLE default" + '\n')
 
-                    for ee_ai in elastic_energy:
+                    for i in range(ECM_POPULATION_SIZE):
                         file.write("{0} \n".format(0))
                     for i in range(8):
                         file.write("1 \n")  # boundary corners
-
-                    file.write("SCALARS elastic_energy float 1" + '\n')
-                    file.write("LOOKUP_TABLE default" + '\n')
-                    for ee_ai in elastic_energy:
-                        file.write("{:.4f} \n".format(ee_ai))
-                    for i in range(8):
-                        file.write("0.0 \n")  # boundary corners
-
-                    file.write("SCALARS alignment float 1" + '\n')
-                    file.write("LOOKUP_TABLE default" + '\n')
-                    for a_ai in alignment:
-                        file.write("{:.4f} \n".format(a_ai))
-                    for i in range(8):
-                        file.write("0.0 \n")  # boundary corners
-
-                    file.write("SCALARS gel_conc float 1" + '\n')
-                    file.write("LOOKUP_TABLE default" + '\n')
-                    for gc_ai in gel_conc:
-                        file.write("{:.4f} \n".format(gc_ai))
-                    for i in range(8):
-                        file.write("0.0 \n")  # boundary corners
 
                     for s in range(N_SPECIES):
                         file.write("SCALARS concentration_species_{0} float 1 \n".format(s))
@@ -978,19 +1126,46 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                     for i in range(8):
                         file.write("0.0 0.0 0.0 \n")  # boundary corners
 
-                    file.write("VECTORS orientation float" + '\n')
-                    for o_ai in orientation:
-                        file.write("{:.4f} {:.4f} {:.4f} \n".format(o_ai[0], o_ai[1], o_ai[2]))
-                    for i in range(8):
-                        file.write("0.0 0.0 0.0 \n")  # boundary corners
-
                 print("... succesful save ")
                 print("=================================")
                           
 
+class UpdateBoundaryConcentrationMulti(pyflamegpu.HostFunction):
+    def __init__(self):
+        super().__init__()
+
+    def run(self, FLAMEGPU):
+        global BOUNDARY_CONC_INIT_MULTI, BOUNDARY_CONC_FIXED_MULTI
+        stepCounter = FLAMEGPU.getStepCounter() + 1
+        if stepCounter == 2:  # after first step BOUNDARY_CONC_INIT_MULTI is removed (set to -1.0) and BOUNDARY_CONC_FIXED_MULTI prevails
+            print("====== CONCENTRATION MULTI BOUNDARY CONDITIONS SET  ======")
+            print("Initial concentration boundary conditions [+X,-X,+Y,-Y,+Z,-Z]: ", BOUNDARY_CONC_INIT_MULTI)
+            print("Fixed concentration boundary conditions [+X,-X,+Y,-Y,+Z,-Z]: ", BOUNDARY_CONC_FIXED_MULTI)
+            for i in range(len(BOUNDARY_CONC_INIT_MULTI)):
+                for j in range(len(BOUNDARY_CONC_INIT_MULTI[i])):
+                    BOUNDARY_CONC_INIT_MULTI[i][j] = -1.0
+            resetMacroProperties(self, FLAMEGPU)
+            
+class UpdateAgentCount(pyflamegpu.HostFunction): # if cells proliferate, N_CELLS must be updated
+    def __init__(self):
+        super().__init__()
+
+    def run(self, FLAMEGPU):
+        FLAMEGPU.environment.setPropertyUInt("N_CELLS", FLAMEGPU.agent("CELL").count())
+         
+        
+if INCLUDE_DIFFUSION:
+    ubcm = UpdateBoundaryConcentrationMulti()
+    model.addStepFunction(ubcm)
+
+if INCLUDE_CELLS:
+    if INCLUDE_CELL_CYCLE:
+        uac = UpdateAgentCount()
+        model.addStepFunction(uac)
+
 sdf = SaveDataToFile()
 model.addStepFunction(sdf)
-
+#TODO: add moving boundaries
 
 """
   END OF STEP FUNCTIONS
@@ -1099,13 +1274,13 @@ else:
 """
   Create Visualisation
 """
-if pyflamegpu.VISUALISATION and VISUALISATION:
+if pyflamegpu.VISUALISATION and VISUALISATION and not ENSEMBLE:
     vis = simulation.getVisualisation()
     # Configure vis
-    domain_width = ?
-    INIT_CAM = ? # A value of the position of the domain by the end of the simulation, multiplied by 5, looks nice
+    domain_width = MAX_EXPECTED_BOUNDARY_POS - MIN_EXPECTED_BOUNDARY_POS
+    INIT_CAM = MAX_EXPECTED_BOUNDARY_POS * 4.5 # A value of the position of the domain by the end of the simulation, multiplied by 5, looks nice
     vis.setInitialCameraLocation(0.0, 0.0, INIT_CAM)
-    vis.setCameraSpeed(? * domain_width) # values <<1 (e.g. 0.002) work fine
+    vis.setCameraSpeed(0.002 * domain_width) # values <<1 (e.g. 0.002) work fine
     if DEBUG_PRINTING:
         vis.setSimulationSpeed(1)
     vis.setBeginPaused(True)
@@ -1113,14 +1288,19 @@ if pyflamegpu.VISUALISATION and VISUALISATION:
     CELL_vis_agent = vis.addAgent("CELL")
     # Position vars are named x, y, z so they are used by default
     CELL_vis_agent.setModel(pyflamegpu.ICOSPHERE)
-    CELL_vis_agent.setModelScale(? * domain_width) # values <<1 (e.g. 0.03) work fine
+    CELL_vis_agent.setModelScale(0.03 * domain_width) # values <<1 (e.g. 0.03) work fine
     CELL_vis_agent.setColor(pyflamegpu.Color("#00aaff"))
 
     ECM_vis_agent = vis.addAgent("ECM")
     # Position vars are named x, y, z so they are used by default
     ECM_vis_agent.setModel(pyflamegpu.CUBE)
-    ECM_vis_agent.setModelScale(? * domain_width) # values <<1 (e.g. 0.03) work fine
+    ECM_vis_agent.setModelScale(0.025 * domain_width) # values <<1 (e.g. 0.03) work fine
     ECM_vis_agent.setColor(pyflamegpu.Color("#ffaa00"))
+
+    BCORNER_vis_agent = visualisation.addAgent("BCORNER")
+    BCORNER_vis_agent.setModel(pyflamegpu.CUBE)
+    BCORNER_vis_agent.setModelScale(0.025 * domain_width)
+    BCORNER_vis_agent.setColor(pyflamegpu.RED)
 
     coord_boundary = list(env.getPropertyArrayFloat("BOUNDARY_COORDS"))
     pen = vis.newLineSketch(1, 1, 1, 0.8)
@@ -1174,11 +1354,11 @@ def manageLogs(steps, is_ensemble, idx):
     for step in steps:
         stepcount = step.getStepCount()
         if stepcount % SAVE_EVERY_N_STEPS == 0 or stepcount == 1:
-            ECM_agents = step.getAgent("ECM")
-            ECM_agent_counts[counter] = ECM_agents.getCount()
+            # ECM_agents = step.getAgent("ECM")
+            # ECM_agent_counts[counter] = ECM_agents.getCount()
 
-            CELL_agents = step.getAgent("CELL")
-            CELL_agent_counts[counter] = CELL_agents.getCount()
+            # CELL_agents = step.getAgent("CELL")
+            # CELL_agent_counts[counter] = CELL_agents.getCount()
             # TODO: print/plot/save data as needed
 
 # Deal with logs

@@ -1,5 +1,6 @@
 // interacts with neighbour ECM to compute the diffusion of species
 FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu::MessageNone) {
+  // TODO: implement diffusion between ECM agents
   //Get agent variables (agent calling the function)
   int agent_id = FLAMEGPU->getVariable<int>("id");
   float agent_x = FLAMEGPU->getVariable<float>("x");

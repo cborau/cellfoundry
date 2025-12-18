@@ -1,5 +1,6 @@
 // agents move if boundaries are moving
 FLAMEGPU_AGENT_FUNCTION(ecm_move, flamegpu::MessageNone, flamegpu::MessageNone) {
+  // TODO: implement ECM agent movement if boundaries are moving
   //Get agent variables (agent calling the function)
   int agent_id = FLAMEGPU->getVariable<int>("id");
   float agent_x = FLAMEGPU->getVariable<float>("x");

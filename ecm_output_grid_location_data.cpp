@@ -1,5 +1,6 @@
 // exposes i,j,k position of the ECM grid agents
 FLAMEGPU_AGENT_FUNCTION(ecm_output_grid_location_data, flamegpu::MessageNone, flamegpu::MessageArray3D) {
+  FLAMEGPU->message_out.setIndex(FLAMEGPU->getVariable<uint8_t>("grid_i"), FLAMEGPU->getVariable<uint8_t>("grid_j"), FLAMEGPU->getVariable<uint8_t>("grid_k"));
   FLAMEGPU->message_out.setVariable<int>("id", FLAMEGPU->getVariable<int>("id"));
   FLAMEGPU->message_out.setVariable<float>("x", FLAMEGPU->getVariable<float>("x"));
   FLAMEGPU->message_out.setVariable<float>("y", FLAMEGPU->getVariable<float>("y"));
@@ -8,7 +9,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_output_grid_location_data, flamegpu::MessageNone, fl
   FLAMEGPU->message_out.setVariable<uint8_t>("grid_j", FLAMEGPU->getVariable<uint8_t>("grid_j"));
   FLAMEGPU->message_out.setVariable<uint8_t>("grid_k", FLAMEGPU->getVariable<uint8_t>("grid_k"));
   // Agent array variables
-  const uint8_t C_sp_ARRAY_SIZE = ?; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  const uint8_t C_sp_ARRAY_SIZE = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
 
   for (int i = 0; i < C_sp_ARRAY_SIZE; i++) {
     float ncol = FLAMEGPU->getVariable<float, C_sp_ARRAY_SIZE>("C_sp", i);

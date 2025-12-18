@@ -1,5 +1,6 @@
 // interacts with boundaries if these are moving
 FLAMEGPU_AGENT_FUNCTION(ecm_boundary_interaction, flamegpu::MessageNone, flamegpu::MessageNone) {
+  // TODO: implement boundary conditions mechanics (movement)
   //Get agent variables (agent calling the function)
   int agent_id = FLAMEGPU->getVariable<int>("id");
   float agent_x = FLAMEGPU->getVariable<float>("x");

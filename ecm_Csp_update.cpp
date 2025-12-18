@@ -1,5 +1,7 @@
 // updates internal values by reading a Macro property, previously modified by CELL agents
 FLAMEGPU_AGENT_FUNCTION(ecm_Csp_update, flamegpu::MessageNone, flamegpu::MessageNone) {
+  
+  // TODO: update C_sp values based on Macro property modified by CELL agents
   //Get agent variables (agent calling the function)
   int agent_id = FLAMEGPU->getVariable<int>("id");
   float agent_x = FLAMEGPU->getVariable<float>("x");
