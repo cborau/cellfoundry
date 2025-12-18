@@ -8,9 +8,10 @@
 # | IMPORTS                                                            |
 # +====================================================================+
 from pyflamegpu import *
-import pathlib, time, math
+import pathlib, time, math, sys
 from dataclasses import make_dataclass
 import pandas as pd
+import numpy as np
 
 start_time = time.time()
 
@@ -270,6 +271,12 @@ cell_output_location_data_file = "cell_output_location_data.cpp"
 cell_ecm_interaction_metabolism_file = "cell_ecm_interaction_metabolism.cpp"
 cell_move_file = "cell_move.cpp"
 
+"""
+  BCORNER  
+"""
+bcorner_output_location_data_file = "bcorner_output_location_data.cpp"
+bcorner_move_file = "bcorner_move.cpp"
+
 
 model = pyflamegpu.ModelDescription("metabolism")
 
@@ -314,6 +321,7 @@ env.newMacroPropertyFloat("BOUNDARY_CONC_INIT_MULTI", N_SPECIES,
                           6)  # a 2D matrix with the 6 boundary conditions (columns) for each species (rows)
 env.newMacroPropertyFloat("BOUNDARY_CONC_FIXED_MULTI", N_SPECIES,
                           6)  # a 2D matrix with the 6 boundary conditions (columns) for each species (rows)
+env.newPropertyUInt("ECM_POPULATION_SIZE", ECM_POPULATION_SIZE)
 
 # Cell properties
 env.newPropertyUInt("INCLUDE_CELL_ORIENTATION", INCLUDE_CELL_ORIENTATION)
@@ -337,6 +345,20 @@ env.newPropertyFloat("CYCLE_PHASE_S_START", CYCLE_PHASE_S_START)
 env.newPropertyFloat("CYCLE_PHASE_G2_START", CYCLE_PHASE_G2_START)
 env.newPropertyFloat("CYCLE_PHASE_M_START", CYCLE_PHASE_M_START)
 
+# ECM BEHAVIOUR 
+# ------------------------------------------------------
+# Equilibrium radius at which elastic force is 0.  TODO: add ECM_FIBRE elements
+# If ECM_ECM_INTERACTION_RADIUS > ECM_ECM_EQUILIBRIUM_DISTANCE: both repulsion/atraction can occur
+# If ECM_ECM_INTERACTION_RADIUS <= ECM_ECM_EQUILIBRIUM_DISTANCE: only repulsion can occur
+env.newPropertyFloat("ECM_ECM_EQUILIBRIUM_DISTANCE", ECM_ECM_EQUILIBRIUM_DISTANCE)
+# Mechanical parameters
+env.newPropertyFloat("ECM_K_ELAST", ECM_K_ELAST)  # initial K_ELAST for agents
+env.newPropertyFloat("ECM_D_DUMPING", ECM_D_DUMPING)
+env.newPropertyFloat("ECM_MASS", ECM_MASS)
+env.newPropertyUInt("INCLUDE_FIBER_ALIGNMENT", INCLUDE_FIBER_ALIGNMENT)
+env.newPropertyFloat("BUCKLING_COEFF_D0", BUCKLING_COEFF_D0)
+env.newPropertyFloat("STRAIN_STIFFENING_COEFF_DS", STRAIN_STIFFENING_COEFF_DS)
+env.newPropertyFloat("CRITICAL_STRAIN", CRITICAL_STRAIN)
 
 # Other globals
 env.newPropertyFloat("PI", 3.1415)
@@ -404,6 +426,7 @@ ECM_agent.newVariableInt("id", 0)
 ECM_agent.newVariableFloat("x", 0.0)
 ECM_agent.newVariableFloat("y", 0.0)
 ECM_agent.newVariableFloat("z", 0.0)
+ECM_agent.newVariableInt("grid_lin_id", 0) # linear index in the 3D grid that maps to i,j,k positions
 ECM_agent.newVariableUInt8("grid_i", 0)
 ECM_agent.newVariableUInt8("grid_j", 0)
 ECM_agent.newVariableUInt8("grid_k", 0)
@@ -417,7 +440,7 @@ ECM_agent.newVariableFloat("vz")
 ECM_agent.newRTCFunctionFile("ecm_output_grid_location_data", ecm_output_grid_location_data_file).setMessageOutput("ECM_grid_location_message ")
 ECM_agent.newRTCFunctionFile("ecm_boundary_interaction", ecm_boundary_interaction_file)
 # TODO: connect message input for ECM::ecm_ecm_interaction
-ECM_agent.newRTCFunctionFile("ecm_ecm_interaction", ecm_ecm_interaction_file)
+ECM_agent.newRTCFunctionFile("ecm_ecm_interaction", ecm_ecm_interaction_file).setMessageInput("ECM_grid_location_message ")
 ECM_agent.newRTCFunctionFile("ecm_boundary_concentration_conditions", ecm_boundary_concentration_conditions_file)
 ECM_agent.newRTCFunctionFile("ecm_move", ecm_move_file)
 ECM_agent.newRTCFunctionFile("ecm_output_spatial_location_data", ecm_output_spatial_location_data_file).setMessageOutput("ECM_spatial_location_message ")
@@ -446,6 +469,20 @@ CELL_agent.newRTCFunctionFile("cell_move", cell_move_file)
 
 
 """
+  BCORNER agent
+"""
+bcorner_agent = model.newAgent("BCORNER") # boundary corner agent to track boundary positions
+bcorner_agent.newVariableInt("id")
+bcorner_agent.newVariableFloat("x")
+bcorner_agent.newVariableFloat("y")
+bcorner_agent.newVariableFloat("z")
+
+bcorner_agent.newRTCFunctionFile("bcorner_output_location_data", bcorner_output_location_data_file).setMessageOutput(
+    "bcorner_location_message")
+bcorner_agent.newRTCFunctionFile("bcorner_move", bcorner_move_file)
+
+
+"""
   Population initialisation functions
 """
 
@@ -453,9 +490,126 @@ CELL_agent.newRTCFunctionFile("cell_move", cell_move_file)
 # This class is used to ensure that corner agents are assigned the first 8 ids
 class initAgentPopulations(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
-        # TODO: code the initialization of agents. For example:
-        # instance = FLAMEGPU.agent("AGENT_NAME").newAgent()
-        # instance.setVariableFloat("VARX", 0.0)
+        global INIT_ECM_CONCENTRATION_VALS, N_SPECIES, INCLUDE_DIFFUSION, INCLUDE_CELLS, N_CELLS
+        # BOUNDARY CORNERS
+        current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
+        coord_boundary = FLAMEGPU.environment.getPropertyArrayFloat("COORDS_BOUNDARIES")
+        coord_boundary_x_pos = coord_boundary[0]
+        coord_boundary_x_neg = coord_boundary[1]
+        coord_boundary_y_pos = coord_boundary[2]
+        coord_boundary_y_neg = coord_boundary[3]
+        coord_boundary_z_pos = coord_boundary[4]
+        coord_boundary_z_neg = coord_boundary[5]
+        print("CORNERS:")
+        print("current_id:", current_id)
+
+        for i in range(1, 9):
+            instance = FLAMEGPU.agent("BCORNER").newAgent()
+            instance.setVariableInt("id", current_id + i)
+            if i == 1:
+                # +x,+y,+z
+                instance.setVariableFloat("x", coord_boundary_x_pos)
+                instance.setVariableFloat("y", coord_boundary_y_pos)
+                instance.setVariableFloat("z", coord_boundary_z_pos)
+            elif i == 2:
+                # -x,+y,+z
+                instance.setVariableFloat("x", coord_boundary_x_neg)
+                instance.setVariableFloat("y", coord_boundary_y_pos)
+                instance.setVariableFloat("z", coord_boundary_z_pos)
+            elif i == 3:
+                # -x,-y,+z
+                instance.setVariableFloat("x", coord_boundary_x_neg)
+                instance.setVariableFloat("y", coord_boundary_y_neg)
+                instance.setVariableFloat("z", coord_boundary_z_pos)
+            elif i == 4:
+                # +x,-y,+z
+                instance.setVariableFloat("x", coord_boundary_x_pos)
+                instance.setVariableFloat("y", coord_boundary_y_neg)
+                instance.setVariableFloat("z", coord_boundary_z_pos)
+            elif i == 5:
+                # +x,+y,-z
+                instance.setVariableFloat("x", coord_boundary_x_pos)
+                instance.setVariableFloat("y", coord_boundary_y_pos)
+                instance.setVariableFloat("z", coord_boundary_z_neg)
+            elif i == 6:
+                # -x,+y,-z
+                instance.setVariableFloat("x", coord_boundary_x_neg)
+                instance.setVariableFloat("y", coord_boundary_y_pos)
+                instance.setVariableFloat("z", coord_boundary_z_neg)
+            elif i == 7:
+                # -x,-y,-z
+                instance.setVariableFloat("x", coord_boundary_x_neg)
+                instance.setVariableFloat("y", coord_boundary_y_neg)
+                instance.setVariableFloat("z", coord_boundary_z_neg)
+            elif i == 8:
+                # +x,-y,-z
+                instance.setVariableFloat("x", coord_boundary_x_pos)
+                instance.setVariableFloat("y", coord_boundary_y_neg)
+                instance.setVariableFloat("z", coord_boundary_z_neg)
+            else:
+                sys.exit("Bad initialization of boundary corners!")
+
+        FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", 8)
+
+        # ECM
+        k_elast = FLAMEGPU.environment.getPropertyFloat("ECM_K_ELAST")
+        d_dumping = FLAMEGPU.environment.getPropertyFloat("ECM_D_DUMPING")
+        current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
+        current_id += 1
+        print("ECM:")
+        print("current_id:", current_id)
+        agents_per_dir = FLAMEGPU.environment.getPropertyArrayUInt("ECM_AGENTS_PER_DIR")
+        print("agents per dir", agents_per_dir)
+        offset = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # +X,-X,+Y,-Y,+Z,-Z
+        coords_x = np.linspace(coord_boundary[1] + offset[1], coord_boundary[0] - offset[0], agents_per_dir[0])
+        coords_y = np.linspace(coord_boundary[3] + offset[3], coord_boundary[2] - offset[2], agents_per_dir[1])
+        coords_z = np.linspace(coord_boundary[5] + offset[5], coord_boundary[4] - offset[4], agents_per_dir[2])
+
+        count = -1 # this is the general counter for all agents created
+        grid_lin_count = -1  # this is the linear counter for grid positions
+        i = -1
+        j = -1
+        k = -1
+
+        for x in coords_x:
+            i += 1
+            j = -1
+            for y in coords_y:
+                j += 1
+                k = -1
+                for z in coords_z:
+                    k += 1
+                    count += 1
+                    grid_lin_count += 1
+                    instance = FLAMEGPU.agent("ECM").newAgent()
+                    instance.setVariableInt("id", current_id + count)
+                    instance.setVariableInt("grid_lin_id", grid_lin_count)
+                    instance.setVariableFloat("x", x)
+                    instance.setVariableFloat("y", y)
+                    instance.setVariableFloat("z", z)
+                    instance.setVariableFloat("vx", 0.0)
+                    instance.setVariableFloat("vy", 0.0)
+                    instance.setVariableFloat("vz", 0.0)
+                    instance.setVariableFloat("fx", 0.0)
+                    instance.setVariableFloat("fy", 0.0)
+                    instance.setVariableFloat("fz", 0.0)
+                    instance.setVariableFloat("k_elast", k_elast)
+                    instance.setVariableFloat("d_dumping", d_dumping)
+                    instance.setVariableArrayFloat("C_sp", INIT_ECM_CONCENTRATION_VALS)
+                    instance.setVariableUInt8("clamped_bx_pos", 0)
+                    instance.setVariableUInt8("clamped_bx_neg", 0)
+                    instance.setVariableUInt8("clamped_by_pos", 0)
+                    instance.setVariableUInt8("clamped_by_neg", 0)
+                    instance.setVariableUInt8("clamped_bz_pos", 0)
+                    instance.setVariableUInt8("clamped_bz_neg", 0)
+                    instance.setVariableUInt8("grid_i", i)
+                    instance.setVariableUInt8("grid_j", j)
+                    instance.setVariableUInt8("grid_k", k)
+
+        FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
+
+
+
         
         return
 
