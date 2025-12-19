@@ -50,7 +50,7 @@ STEPS = 5000
 # +--------------------------------------------------------------------+
 ECM_K_ELAST = 2.0  # [N/units/kg]
 ECM_D_DUMPING = 0.4  # [N*s/units/kg]
-ECM_MASS = 1.0  # [dimensionless to make K and D mass dependent]
+ECM_ETA = 1.0  # [1/time]
 
 #BOUNDARY_COORDS = [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]  # +X,-X,+Y,-Y,+Z,-Z
 BOUNDARY_COORDS = [1000.0, -1000.0, 650.0, -650.0, 150.0, -150.0] # microdevice dimensions in um
@@ -258,7 +258,6 @@ AGENT Files
   ECM
 """
 ecm_output_grid_location_data_file = "ecm_output_grid_location_data.cpp"
-ecm_boundary_interaction_file = "ecm_boundary_interaction.cpp"
 ecm_ecm_interaction_file = "ecm_ecm_interaction.cpp"
 ecm_boundary_concentration_conditions_file = "ecm_boundary_concentration_conditions.cpp"
 ecm_move_file = "ecm_move.cpp"
@@ -354,7 +353,7 @@ env.newPropertyFloat("ECM_ECM_EQUILIBRIUM_DISTANCE", ECM_ECM_EQUILIBRIUM_DISTANC
 # Mechanical parameters
 env.newPropertyFloat("ECM_K_ELAST", ECM_K_ELAST)  # initial K_ELAST for agents
 env.newPropertyFloat("ECM_D_DUMPING", ECM_D_DUMPING)
-env.newPropertyFloat("ECM_MASS", ECM_MASS)
+env.newPropertyFloat("ECM_ETA", ECM_ETA)
 env.newPropertyUInt("INCLUDE_FIBER_ALIGNMENT", INCLUDE_FIBER_ALIGNMENT)
 env.newPropertyFloat("BUCKLING_COEFF_D0", BUCKLING_COEFF_D0)
 env.newPropertyFloat("STRAIN_STIFFENING_COEFF_DS", STRAIN_STIFFENING_COEFF_DS)
@@ -383,6 +382,16 @@ ECM_grid_location_message.newVariableFloat("d_dumping")
 ECM_grid_location_message.newVariableFloat("vx")
 ECM_grid_location_message.newVariableFloat("vy")
 ECM_grid_location_message.newVariableFloat("vz")
+ECM_grid_location_message.newVariableFloat("fx")
+ECM_grid_location_message.newVariableFloat("fy")
+ECM_grid_location_message.newVariableFloat("fz")
+ECM_grid_location_message.newVariableUInt8("clamped_bx_pos")
+ECM_grid_location_message.newVariableUInt8("clamped_bx_neg")
+ECM_grid_location_message.newVariableUInt8("clamped_by_pos")
+ECM_grid_location_message.newVariableUInt8("clamped_by_neg")
+ECM_grid_location_message.newVariableUInt8("clamped_bz_pos")
+ECM_grid_location_message.newVariableUInt8("clamped_bz_neg")
+
 # TODO: add or remove variables manually to leave only those that need to be reported. If message type is MessageSpatial3D, variables x, y, z are included internally.
 
 CELL_spatial_location_message = model.newMessageSpatial3D("CELL_spatial_location_message")
@@ -423,16 +432,22 @@ ECM_agent.newVariableUInt8("grid_i", 0)
 ECM_agent.newVariableUInt8("grid_j", 0)
 ECM_agent.newVariableUInt8("grid_k", 0)
 ECM_agent.newVariableArrayFloat("C_sp", N_SPECIES) 
-# TODO: default array values must be explicitly defined when initializing agent populations
 ECM_agent.newVariableFloat("k_elast")
 ECM_agent.newVariableFloat("d_dumping")
 ECM_agent.newVariableFloat("vx")
 ECM_agent.newVariableFloat("vy")
 ECM_agent.newVariableFloat("vz")
-ECM_agent.newRTCFunctionFile("ecm_output_grid_location_data", ecm_output_grid_location_data_file).setMessageOutput("ECM_grid_location_message ")
-ECM_agent.newRTCFunctionFile("ecm_boundary_interaction", ecm_boundary_interaction_file)
-# TODO: connect message input for ECM::ecm_ecm_interaction
-ECM_agent.newRTCFunctionFile("ecm_ecm_interaction", ecm_ecm_interaction_file).setMessageInput("ECM_grid_location_message ")
+ECM_agent.newVariableFloat("fx")
+ECM_agent.newVariableFloat("fy")
+ECM_agent.newVariableFloat("fz")
+ECM_agent.newVariableUInt8("clamped_bx_pos")
+ECM_agent.newVariableUInt8("clamped_bx_neg")
+ECM_agent.newVariableUInt8("clamped_by_pos")
+ECM_agent.newVariableUInt8("clamped_by_neg")
+ECM_agent.newVariableUInt8("clamped_bz_pos")
+ECM_agent.newVariableUInt8("clamped_bz_neg")
+ECM_agent.newRTCFunctionFile("ecm_output_grid_location_data", ecm_output_grid_location_data_file).setMessageOutput("ECM_grid_location_message")
+ECM_agent.newRTCFunctionFile("ecm_ecm_interaction", ecm_ecm_interaction_file).setMessageInput("ECM_grid_location_message")
 ECM_agent.newRTCFunctionFile("ecm_boundary_concentration_conditions", ecm_boundary_concentration_conditions_file)
 ECM_agent.newRTCFunctionFile("ecm_move", ecm_move_file)
 ECM_agent.newRTCFunctionFile("ecm_Csp_update", ecm_Csp_update_file)
@@ -1183,7 +1198,6 @@ model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_output_spatial_lo
 # L2_Boundary_Interactions
 layer_count += 1
 model.newLayer("L2_Boundary_Interactions").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
-model.Layer("L2_Boundary_Interactions").addAgentFunction("ECM", "ecm_boundary_interaction")
 # L3_Metabolism
 layer_count += 1
 model.newLayer("L3_Metabolism").addAgentFunction("CELL", "cell_ecm_interaction_metabolism")

@@ -7,22 +7,20 @@ FLAMEGPU_AGENT_FUNCTION(cell_ecm_interaction_metabolism, flamegpu::MessageArray3
   float agent_z = FLAMEGPU->getVariable<float>("z");
 
   // Agent array variables
-  const uint8_t k_consumption_ARRAY_SIZE = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
-  float k_consumption[k_consumption_ARRAY_SIZE] = {};
-  for (int i = 0; i < k_consumption_ARRAY_SIZE; i++) {
-    k_consumption[i] = FLAMEGPU->getVariable<float, k_consumption_ARRAY_SIZE>("k_consumption", i);
+  const uint8_t N_SPECIES = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  float k_consumption[N_SPECIES] = {};
+  for (int i = 0; i < N_SPECIES; i++) {
+    k_consumption[i] = FLAMEGPU->getVariable<float, N_SPECIES>("k_consumption", i);
   }
   // Agent array variables
-  const uint8_t k_production_ARRAY_SIZE = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
-  float k_production[k_production_ARRAY_SIZE] = {};
-  for (int i = 0; i < k_production_ARRAY_SIZE; i++) {
-    k_production[i] = FLAMEGPU->getVariable<float, k_production_ARRAY_SIZE>("k_production", i);
+  float k_production[N_SPECIES] = {};
+  for (int i = 0; i < N_SPECIES; i++) {
+    k_production[i] = FLAMEGPU->getVariable<float, N_SPECIES>("k_production", i);
   }
   // Agent array variables
-  const uint8_t C_sp_ARRAY_SIZE = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
-  float C_sp[C_sp_ARRAY_SIZE] = {};
-  for (int i = 0; i < C_sp_ARRAY_SIZE; i++) {
-    C_sp[i] = FLAMEGPU->getVariable<float, C_sp_ARRAY_SIZE>("C_sp", i);
+  float C_sp[N_SPECIES] = {};
+  for (int i = 0; i < N_SPECIES; i++) {
+    C_sp[i] = FLAMEGPU->getVariable<float, N_SPECIES>("C_sp", i);
   }
 
     // Get number of agents per direction
@@ -74,16 +72,16 @@ FLAMEGPU_AGENT_FUNCTION(cell_ecm_interaction_metabolism, flamegpu::MessageArray3
   FLAMEGPU->setVariable<float>("y", agent_y);
   FLAMEGPU->setVariable<float>("z", agent_z);
 
-  for (int i = 0; i < k_consumption_ARRAY_SIZE; i++) {
-    FLAMEGPU->setVariable<float, k_consumption_ARRAY_SIZE>("k_consumption", i, k_consumption[i]);
+  for (int i = 0; i < N_SPECIES; i++) {
+    FLAMEGPU->setVariable<float, N_SPECIES>("k_consumption", i, k_consumption[i]);
   }
 
-  for (int i = 0; i < k_production_ARRAY_SIZE; i++) {
-    FLAMEGPU->setVariable<float, k_production_ARRAY_SIZE>("k_production", i, k_production[i]);
+  for (int i = 0; i < N_SPECIES; i++) {
+    FLAMEGPU->setVariable<float, N_SPECIES>("k_production", i, k_production[i]);
   }
 
-  for (int i = 0; i < C_sp_ARRAY_SIZE; i++) {
-    FLAMEGPU->setVariable<float, C_sp_ARRAY_SIZE>("C_sp", i, C_sp[i]);
+  for (int i = 0; i < N_SPECIES; i++) {
+    FLAMEGPU->setVariable<float, N_SPECIES>("C_sp", i, C_sp[i]);
   }
 
 
