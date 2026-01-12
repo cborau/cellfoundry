@@ -83,5 +83,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_boundary_concentration_conditions, flamegpu::Message
     } 
   }
 
+  //printf("agent id: %d, touching_boundary -> %d, C_sp[0] -> %2.6f, C_sp[1] -> %2.6f \n", agent_id, touching_boundary, C_sp[0], C_sp[1]);
+
   return flamegpu::ALIVE;
 }

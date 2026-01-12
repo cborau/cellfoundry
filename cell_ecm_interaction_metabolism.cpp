@@ -10,7 +10,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_ecm_interaction_metabolism, flamegpu::MessageArray3
   
   // Agent array variables
   const uint8_t N_SPECIES = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
-  const uint8_t ECM_POPULATION_SIZE = 27; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  const uint32_t ECM_POPULATION_SIZE = 1000; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
   auto C_SP_MACRO = FLAMEGPU->environment.getMacroProperty<float, N_SPECIES, ECM_POPULATION_SIZE>("C_SP_MACRO");
   
   float k_consumption[N_SPECIES] = {};

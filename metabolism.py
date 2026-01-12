@@ -23,12 +23,12 @@ start_time = time.time()
 ENSEMBLE = False
 ENSEMBLE_RUNS = 0
 VISUALISATION = True  # Change to false if pyflamegpu has not been built with visualisation support
-DEBUG_PRINTING = True
+DEBUG_PRINTING = False
 PAUSE_EVERY_STEP = False  # If True, the visualization stops every step until P is pressed
 SAVE_PICKLE = True  # If True, dumps agent and boudary force data into a pickle file for post-processing
 SHOW_PLOTS = False  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
-SAVE_EVERY_N_STEPS = 5  # Affects both the .vtk files and the Dataframes storing boundary data
+SAVE_EVERY_N_STEPS = 10  # Affects both the .vtk files and the Dataframes storing boundary data
 
 CURR_PATH = pathlib.Path().absolute()
 RES_PATH = CURR_PATH / 'result_files'
@@ -39,12 +39,12 @@ print("Executing in ", CURR_PATH)
 # Minimum number of agents per direction (x,y,z). 
 # If domain is not cubical, N is asigned to the shorter dimension and more agents are added to the longer ones
 # +--------------------------------------------------------------------+
-N = 3
+N = 10
 
 # Time simulation parameters
 # +--------------------------------------------------------------------+
 TIME_STEP = 0.025  # time. WARNING: diffusion and cell migration events might need different scales
-STEPS = 2
+STEPS = 300
 
 # Boundary interactions and mechanical parameters
 # +--------------------------------------------------------------------+
@@ -69,6 +69,12 @@ BOUNDARY_DUMPING = [BOUNDARY_DUMPING_VALUE * x for x in RELATIVE_BOUNDARY_STIFFN
 CLAMP_AGENT_TOUCHING_BOUNDARY = [1, 1, 1, 1, 1, 1]  # +X,-X,+Y,-Y,+Z,-Z [bool]
 ALLOW_AGENT_SLIDING = [0, 0, 0, 0, 0, 0]  # +X,-X,+Y,-Y,+Z,-Z [bool]
 
+
+
+if any(rate != 0.0 for rate in BOUNDARY_DISP_RATES_PARALLEL) or any(rate != 0.0 for rate in BOUNDARY_DISP_RATES):
+    MOVING_BOUNDARIES = True
+else:   
+    MOVING_BOUNDARIES = False
 # Adjusting number of agents if domain is not cubical
 # +--------------------------------------------------------------------+
 # Calculate the differences between opposite pairs along each axis
@@ -104,7 +110,6 @@ print("ECM_ECM_EQUILIBRIUM_DISTANCE [units]: ", ECM_ECM_EQUILIBRIUM_DISTANCE)
 ECM_BOUNDARY_INTERACTION_RADIUS = 0.05
 ECM_BOUNDARY_EQUILIBRIUM_DISTANCE = 0.0
 
-INCLUDE_FIBER_ALIGNMENT = True
 
 MAX_SEARCH_RADIUS_VASCULARIZATION = ECM_ECM_EQUILIBRIUM_DISTANCE  # this strongly affects the number of bins and therefore the memory allocated for simulations (more bins -> more memory -> faster (in theory))
 MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION = ECM_ECM_EQUILIBRIUM_DISTANCE # this radius is used to find ECM agents
@@ -135,7 +140,7 @@ if OSCILLATORY_SHEAR_ASSAY:
 # +--------------------------------------------------------------------+
 INCLUDE_DIFFUSION = True
 N_SPECIES = 2  # number of diffusing species.WARNING: make sure that the value coincides with the one declared in TODO
-DIFFUSION_COEFF_MULTI = [0.02, 0.02]  # diffusion coefficient in [units^2/s] per specie
+DIFFUSION_COEFF_MULTI = [0.05, 0.05]  # diffusion coefficient in [units^2/s] per specie
 BOUNDARY_CONC_INIT_MULTI = [[1.0, -1.0, -1.0, -1.0, -1.0, -1.0],
                             # initial concentration at each surface (+X,-X,+Y,-Y,+Z,-Z) [units^2/s]. -1.0 means no condition assigned. All agents are assigned 0 by default.
                             [-1.0, -1.0, -1.0, -1.0, -1.0, -1.0]]  # add as many lines as different species
@@ -361,7 +366,6 @@ env.newPropertyFloat("ECM_ECM_EQUILIBRIUM_DISTANCE", ECM_ECM_EQUILIBRIUM_DISTANC
 env.newPropertyFloat("ECM_K_ELAST", ECM_K_ELAST)  # initial K_ELAST for agents
 env.newPropertyFloat("ECM_D_DUMPING", ECM_D_DUMPING)
 env.newPropertyFloat("ECM_ETA", ECM_ETA)
-env.newPropertyUInt("INCLUDE_FIBER_ALIGNMENT", INCLUDE_FIBER_ALIGNMENT)
 env.newPropertyFloat("BUCKLING_COEFF_D0", BUCKLING_COEFF_D0)
 env.newPropertyFloat("STRAIN_STIFFENING_COEFF_DS", STRAIN_STIFFENING_COEFF_DS)
 env.newPropertyFloat("CRITICAL_STRAIN", CRITICAL_STRAIN)
@@ -369,7 +373,9 @@ env.newPropertyFloat("CRITICAL_STRAIN", CRITICAL_STRAIN)
 # Other globals
 env.newPropertyFloat("PI", 3.1415)
 env.newPropertyUInt("DEBUG_PRINTING", DEBUG_PRINTING)
+env.newPropertyUInt("DEBUG_DIFFUSION", False)
 env.newPropertyFloat("EPSILON", EPSILON)
+env.newPropertyUInt("MOVING_BOUNDARIES", MOVING_BOUNDARIES)
 
 """
   LOCATION MESSAGES
@@ -465,8 +471,9 @@ ECM_agent.newVariableUInt8("clamped_bz_neg")
 ECM_agent.newRTCFunctionFile("ecm_output_grid_location_data", ecm_output_grid_location_data_file).setMessageOutput("ECM_grid_location_message")
 ECM_agent.newRTCFunctionFile("ecm_ecm_interaction", ecm_ecm_interaction_file).setMessageInput("ECM_grid_location_message")
 ECM_agent.newRTCFunctionFile("ecm_boundary_concentration_conditions", ecm_boundary_concentration_conditions_file)
-ECM_agent.newRTCFunctionFile("ecm_move", ecm_move_file)
 ECM_agent.newRTCFunctionFile("ecm_Csp_update", ecm_Csp_update_file)
+if MOVING_BOUNDARIES:
+    ECM_agent.newRTCFunctionFile("ecm_move", ecm_move_file)
 
 """
   CELL agent
@@ -1228,7 +1235,9 @@ model.newLayer("L6_Diffusion_Boundary").addAgentFunction("ECM", "ecm_boundary_co
 # L7_Agent_Movement
 layer_count += 1
 model.newLayer("L7_Agent_Movement").addAgentFunction("CELL", "cell_move")
-model.Layer("L7_Agent_Movement").addAgentFunction("ECM", "ecm_move")
+# If boundaries are not moving, the ECM grid does not need to be updated
+if MOVING_BOUNDARIES:
+    model.Layer("L7_Agent_Movement").addAgentFunction("ECM", "ecm_move")
 
 
 """

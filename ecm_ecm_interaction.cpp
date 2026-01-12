@@ -35,8 +35,15 @@ FLAMEGPU_DEVICE_FUNCTION float getAngleBetweenVec(const float x1, const float y1
 }
 
 FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu::MessageNone) {
+  
+  // Agent array variables
+  const uint8_t N_SPECIES = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  const uint32_t ECM_POPULATION_SIZE = 1000; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  auto C_SP_MACRO = FLAMEGPU->environment.getMacroProperty<float, N_SPECIES, ECM_POPULATION_SIZE>("C_SP_MACRO");
+    
   // Agent properties in local register
   int id = FLAMEGPU->getVariable<int>("id");
+  int grid_lin_id = FLAMEGPU->getVariable<int>("grid_lin_id");
 
   // Agent position
   float agent_x = FLAMEGPU->getVariable<float>("x");
@@ -52,7 +59,6 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
   float agent_vz = FLAMEGPU->getVariable<float>("vz");
   // Agent concentration of species
   int INCLUDE_DIFFUSION = FLAMEGPU->environment.getProperty<int>("INCLUDE_DIFFUSION");
-  const uint8_t N_SPECIES = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function. TODO: declare it somehow at compile time
   float C_sp[N_SPECIES] = {}; 
   for (int i = 0; i < N_SPECIES; i++) {
     C_sp[i] = FLAMEGPU->getVariable<float, N_SPECIES>("C_sp", i);
@@ -111,6 +117,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
   int k_diff = 0;
   int ct = 0;
   int DEBUG_PRINTING = FLAMEGPU->environment.getProperty<int>("DEBUG_PRINTING");
+  int DEBUG_DIFFUSION = FLAMEGPU->environment.getProperty<int>("DEBUG_DIFFUSION");
   
   // Distance data of Neuman neighbourhood. Needed to solve diffusion equation
   float n_up_dist = 0.0; 
@@ -129,7 +136,6 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
   float n_back_C_sp[N_SPECIES] = {};  
   
   const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
-  printf("Interaction agent %d [%d %d %d]\n", id, agent_grid_i, agent_grid_j, agent_grid_k);
   int message_count = 0;
   // Iterate location messages, accumulating relevant data and counts.
   for (const auto &message : FLAMEGPU->message_in(agent_grid_i, agent_grid_j, agent_grid_k)) {
@@ -156,8 +162,16 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
     */
     // If conn < 2 only the Neuman neighbourhood is checked. conn < 4 checks the 26 surrounding agents
     // BEWARE!!: grid domain wraps itself, meaning that agents at the grid boundaries, read messages from opposite boundaries. A grid distance condition must be added to avoid that. 
-    printf("agent id %d, agent grid [%d %d %d], message count %d -> (message %d): message grid [%d %d %d], message C_sp1 %d, message C_sp2 %d, conn = %d \n", id, agent_grid_i, agent_grid_j, agent_grid_k, message_count, message_id, message_grid_i, message_grid_j, message_grid_k, message_C_sp[0], message_C_sp[1], conn);
-
+    /*
+    printf("agent id %d, agent grid [%u %u %u], message count %d -> (message %d): message grid [%u %u %u], message C_sp1 %.6f, message C_sp2 %.6f, conn = %d\n",
+      id,
+      (unsigned)agent_grid_i, (unsigned)agent_grid_j, (unsigned)agent_grid_k,
+      message_count,
+      message_id,
+      (unsigned)message_grid_i, (unsigned)message_grid_j, (unsigned)message_grid_k,
+      message_C_sp[0], message_C_sp[1],
+      conn);
+    */
     if ((id != message_id) && (conn < 4) && (i_diff < 2) && (j_diff < 2) && (k_diff < 2)){
       if (conn < 2) {
         grid_equilibrium_distance = ECM_ECM_EQUILIBRIUM_DISTANCE; //Neuman neighbourhood
@@ -247,8 +261,6 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
   FLAMEGPU->setVariable<float>("fz", agent_fz);
   //Apply diffusion equation
   if (INCLUDE_DIFFUSION == 1){
-    printf("DENTRO DIFFUSION agent id %d, agent grid [%d %d %d] -> (message %d): message grid [%d %d %d], conn = %d \n", id, agent_grid_i, agent_grid_j, agent_grid_k, message_id, message_grid_i, message_grid_j, message_grid_k, conn);
-
     float R = 0.0; // reactive term. Unused here, as cell agents consume species in a different function
     //Calculate distances to neighbours
     float dx = ((n_left_dist > 0.0) & (n_right_dist > 0.0)) ? (n_left_dist + n_right_dist) / 2.0 : fmaxf(n_left_dist,n_right_dist);
@@ -263,12 +275,16 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
       float Fy = DIFFUSION_COEFF * TIME_STEP / powf(dy, 2.0);
       float Fz = DIFFUSION_COEFF * TIME_STEP / powf(dz, 2.0);
       agent_C_sp_prev[i] = C_sp[i];
-      printf("agent id: %d, agent_C_sp_prev: %d, species: %d \n", id, agent_C_sp_prev[i], i+1);
+      //printf("agent id: %d, agent_C_sp_prev: %.6f, species: %d \n", id, agent_C_sp_prev[i], i+1);
       C_sp[i] = agent_C_sp_prev[i] + Fx * (n_left_C_sp[i] - (2 * agent_C_sp_prev[i]) + n_right_C_sp[i]) + Fy * (n_front_C_sp[i] - (2 * agent_C_sp_prev[i]) + n_back_C_sp[i]) + Fz * (n_up_C_sp[i] - (2 * agent_C_sp_prev[i]) + n_down_C_sp[i]) + R * TIME_STEP;
       FLAMEGPU->setVariable<float, N_SPECIES>("C_sp", i, C_sp[i]);
-      printf("agent id: %d, agent_C_sp AFTER: %d, species %d \n", id, C_sp[i], i+1);
-      if (DEBUG_PRINTING == 1){  
-        printf("DIFFUSION for agent %d, species %d, [dx,dy,dz] = [%2.6f , %2.6f, %2.6f], [Fx,Fy,Fz] = [%2.6f , %2.6f, %2.6f] \n", id, i+1, dx, dy, dz, Fx, Fy, Fz);
+
+      //Update macro property
+      C_SP_MACRO[i][grid_lin_id].exchange(C_sp[i]);
+
+      //printf("agent id: %d, agent_C_sp AFTER: %.6f, species %d \n", id, C_sp[i], i+1);
+      if (DEBUG_DIFFUSION == 1 && i == 0) {  
+        //printf("DIFFUSION for agent %d, species %d, [dx,dy,dz] = [%2.6f , %2.6f, %2.6f], [Fx,Fy,Fz] = [%2.6f , %2.6f, %2.6f] \n", id, i+1, dx, dy, dz, Fx, Fy, Fz);
         printf("agent %d: MULTI left conc = %2.6f, right conc = %2.6f \n", id, n_left_C_sp[i], n_right_C_sp[i]);
         printf("agent %d: MULTI front conc = %2.6f, back conc = %2.6f \n", id, n_front_C_sp[i], n_back_C_sp[i]);
         printf("agent %d: MULTI up conc = %2.6f, down conc = %2.6f \n", id, n_up_C_sp[i], n_down_C_sp[i]);
