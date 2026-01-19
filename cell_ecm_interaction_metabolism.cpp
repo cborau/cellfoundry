@@ -13,7 +13,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_ecm_interaction_metabolism, flamegpu::MessageArray3
   
   // Agent array variables
   const uint8_t N_SPECIES = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
-  const uint32_t ECM_POPULATION_SIZE = 1000; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  const uint32_t ECM_POPULATION_SIZE = 1331; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
   auto C_SP_MACRO = FLAMEGPU->environment.getMacroProperty<float, N_SPECIES, ECM_POPULATION_SIZE>("C_SP_MACRO");
   
   float k_consumption[N_SPECIES] = {};
@@ -145,8 +145,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_ecm_interaction_metabolism, flamegpu::MessageArray3
       deltaM_voxel = secretion_clamped;
     }
 
-    // printf("  Species %d: C_ecm_old=%2.6f, C_ecm_prop=%2.6f, C_sp_sat=%2.6f, M_voxel_old=%2.6f, M_cell_old=%2.6f, deltaM_voxel_prop=%2.6f \n", i, C_ecm_old, C_ecm_prop, C_sp_sat[i], M_voxel_old, M_cell_old, deltaM_voxel_prop);
-
+    //printf("  Species %d: alpha=%2.6f, C_ecm_old=%2.6f, C_ecm_prop=%2.6f, C_sp_sat=%2.6f, M_voxel_old=%2.6f, M_cell_old=%2.6f, deltaM_voxel_prop=%2.6f, deltaM_voxel=%2.6f \n", i, alpha, C_ecm_old, C_ecm_prop, C_sp_sat[i], M_voxel_old, M_cell_old, deltaM_voxel_prop, deltaM_voxel);
 
     // Apply clamped mass transfer (conservative)
     const float M_voxel_new = M_voxel_old + deltaM_voxel;
@@ -162,17 +161,18 @@ FLAMEGPU_AGENT_FUNCTION(cell_ecm_interaction_metabolism, flamegpu::MessageArray3
     // Store cell amount + concentration mirror
     M_sp[i] = M_cell_new;
     C_sp[i] = C_cell_new;
-    // printf("    -> deltaM_voxel=%2.6f, C_ecm_new=%2.6f, M_cell_new=%2.6f, C_cell_new=%2.6f \n", deltaM_voxel, C_ecm_new, M_cell_new, C_cell_new);
-
-    FLAMEGPU->setVariable<float, N_SPECIES>("M_sp", i, M_sp[i]);
-    FLAMEGPU->setVariable<float, N_SPECIES>("C_sp", i, C_sp[i]);
+    //printf("    After clamp: C_ecm_new=%2.6f, C_cell_new=%2.6f, M_voxel_new=%2.6f, M_cell_new=%2.6f \n", C_ecm_new, C_cell_new, M_voxel_new, M_cell_new);
+    //FLAMEGPU->setVariable<float, N_SPECIES>("M_sp", i, M_sp[i]);
+    //FLAMEGPU->setVariable<float, N_SPECIES>("C_sp", i, C_sp[i]);
   }
-
+  //printf(" Before metabolic reaction: C_sp[0]=%2.6f, M_sp[0]=%2.6f, k_reaction[0]=%2.6f \n", C_sp[0], C_sp[0] * agent_volume, k_reaction[0]);
+  //printf(" Before metabolic reaction: C_sp[1]=%2.6f, M_sp[1]=%2.6f, k_reaction[1]=%2.6f \n", C_sp[1], C_sp[1] * agent_volume, k_reaction[1]);
   // Compute metabolic reaction within the cell
   C_sp[0] -= TIME_STEP * k_reaction[0] * C_sp[0]; // species 0 is consumed
   C_sp[1] += TIME_STEP * k_reaction[1] * C_sp[0]; // species 1 is produced accordingly
 
   for (int i = 0; i < N_SPECIES; i++) {
+    //printf("After metabolic reaction: C_cell[%d]=%2.6f, M_cell=%2.6f \n", i, C_sp[i], C_sp[i] * agent_volume);
     FLAMEGPU->setVariable<float, N_SPECIES>("C_sp", i, C_sp[i]);
     FLAMEGPU->setVariable<float, N_SPECIES>("M_sp", i, C_sp[i] * agent_volume);
   }

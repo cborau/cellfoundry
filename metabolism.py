@@ -22,9 +22,9 @@ start_time = time.time()
 # Set whether to run single model or ensemble, agent population size, and simulation steps 
 ENSEMBLE = False
 ENSEMBLE_RUNS = 0
-VISUALISATION = False  # Change to false if pyflamegpu has not been built with visualisation support
+VISUALISATION = True  # Change to false if pyflamegpu has not been built with visualisation support
 DEBUG_PRINTING = False
-PAUSE_EVERY_STEP = False  # If True, the visualization stops every step until P is pressed
+PAUSE_EVERY_STEP = True  # If True, the visualization stops every step until P is pressed
 SAVE_PICKLE = True  # If True, dumps agent and boudary force data into a pickle file for post-processing
 SHOW_PLOTS = False  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
@@ -39,7 +39,7 @@ print("Executing in ", CURR_PATH)
 # Minimum number of agents per direction (x,y,z). 
 # If domain is not cubical, N is asigned to the shorter dimension and more agents are added to the longer ones
 # +--------------------------------------------------------------------+
-N = 10
+N = 11
 
 # Time simulation parameters
 # +--------------------------------------------------------------------+
@@ -96,24 +96,24 @@ else:
     diff_z = dist_agents * (ECM_AGENTS_PER_DIR[2] - 1)
     BOUNDARY_COORDS = [round(diff_x / 2, 2), -round(diff_x / 2, 2), round(diff_y / 2, 2), -round(diff_y / 2, 2), round(diff_z / 2, 2), -round(diff_z / 2, 2)] 
     
-print('DOMAIN SIZE: {0},{1},{2}'.format(
-    abs(BOUNDARY_COORDS[0] - BOUNDARY_COORDS[1]),
-    abs(BOUNDARY_COORDS[3] - BOUNDARY_COORDS[2]),
-    abs(BOUNDARY_COORDS[5] - BOUNDARY_COORDS[4])
-))
+L0_x = abs(BOUNDARY_COORDS[0] - BOUNDARY_COORDS[1])
+L0_y = abs(BOUNDARY_COORDS[2] - BOUNDARY_COORDS[3])
+L0_z = abs(BOUNDARY_COORDS[4] - BOUNDARY_COORDS[5])
+
+print('DOMAIN SIZE: {0},{1},{2}'.format(L0_x,L0_y,L0_z))
 print('ECM_AGENTS_PER_DIR: {0},{1},{2}'.format(ECM_AGENTS_PER_DIR[0], ECM_AGENTS_PER_DIR[1], ECM_AGENTS_PER_DIR[2]))
 ECM_POPULATION_SIZE = ECM_AGENTS_PER_DIR[0] * ECM_AGENTS_PER_DIR[1] * ECM_AGENTS_PER_DIR[2]
 print('Total number of agents: {0}'.format(ECM_POPULATION_SIZE))
-ECM_ECM_EQUILIBRIUM_DISTANCE = (BOUNDARY_COORDS[0] - BOUNDARY_COORDS[1]) / (ECM_AGENTS_PER_DIR[0] - 1) 
+ECM_ECM_EQUILIBRIUM_DISTANCE = L0_x / (ECM_AGENTS_PER_DIR[0] - 1) # in units, all agents are evenly spaced
 print("ECM_ECM_EQUILIBRIUM_DISTANCE [units]: ", ECM_ECM_EQUILIBRIUM_DISTANCE)
 ECM_BOUNDARY_INTERACTION_RADIUS = 0.05
 ECM_BOUNDARY_EQUILIBRIUM_DISTANCE = 0.0
-ECM_VOXEL_VOLUME = (1.0 / (ECM_AGENTS_PER_DIR[0] - 1)) * (1.0 / (ECM_AGENTS_PER_DIR[1] - 1)) * (1.0 / (ECM_AGENTS_PER_DIR[2] - 1))
+ECM_VOXEL_VOLUME = (L0_x / (ECM_AGENTS_PER_DIR[0] - 1)) * (L0_y / (ECM_AGENTS_PER_DIR[1] - 1)) * (L0_z / (ECM_AGENTS_PER_DIR[2] - 1))
 print("ECM_VOXEL_VOLUME [units^3]: ", ECM_VOXEL_VOLUME)
 MAX_SEARCH_RADIUS_VASCULARIZATION = ECM_ECM_EQUILIBRIUM_DISTANCE  # this strongly affects the number of bins and therefore the memory allocated for simulations (more bins -> more memory -> faster (in theory))
 MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION = ECM_ECM_EQUILIBRIUM_DISTANCE # this radius is used to find ECM agents
 print("MAX_SEARCH_RADIUS for CELLS [units]: ", MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION)
-MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION = ECM_ECM_EQUILIBRIUM_DISTANCE # this radius is used to check if cells interact with each other
+MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION = 2 * ECM_ECM_EQUILIBRIUM_DISTANCE # this radius is used to check if cells interact with each other
 
 OSCILLATORY_SHEAR_ASSAY = False  # if true, BOUNDARY_DISP_RATES_PARALLEL options are overrun but used to make the boundaries oscillate in their corresponding planes following a sin() function
 OSCILLATORY_AMPLITUDE = 0.25  # range [0-1]
@@ -213,36 +213,38 @@ for i in range(6):
         print(msg_incompatible_conditions.format(i))
         critical_error = True
 
+UNSTABLE_DIFFUSION = False
+# Check diffusion parameters
 if INCLUDE_DIFFUSION:
     if (len(DIFFUSION_COEFF_MULTI) != N_SPECIES) or (len(BOUNDARY_CONC_INIT_MULTI) != N_SPECIES) or (
             len(BOUNDARY_CONC_FIXED_MULTI) != N_SPECIES):
         print('ERROR: you must define a diffusion coefficient and the boundary conditions for each species simulated')
         critical_error = True
     # Check diffusion values for numerical stability
-    dx = 1.0 / (ECM_AGENTS_PER_DIR[0] - 1)
+    dx = L0_x / (ECM_AGENTS_PER_DIR[0] - 1)
     for i in range(N_SPECIES):
         Fi_x = 3 * (DIFFUSION_COEFF_MULTI[i] * TIME_STEP / (dx * dx))  # this value should be < 0.5
         print('Fi_x value: {0} for species {1}'.format(Fi_x, i + 1))
         if Fi_x > 0.5:
             print(
-                'ERROR: diffusion problem is ill conditioned (Fi_x should be < 0.5), check parameters and consider decreasing time step')
-            critical_error = True
-    dy = 1.0 / (ECM_AGENTS_PER_DIR[1] - 1)
+                'WARNING: diffusion problem is ill conditioned (Fi_x should be < 0.5), check parameters and consider decreasing time step\nSemi-implicit diffusion will be used instead')
+            UNSTABLE_DIFFUSION = True
+    dy = L0_y / (ECM_AGENTS_PER_DIR[1] - 1)
     for i in range(N_SPECIES):
         Fi_y = 3 * (DIFFUSION_COEFF_MULTI[i] * TIME_STEP / (dy * dy))  # this value should be < 0.5
         print('Fi_y value: {0} for species {1}'.format(Fi_y, i + 1))
         if Fi_y > 0.5:
             print(
-                'ERROR: diffusion problem is ill conditioned (Fi_y should be < 0.5), check parameters and consider decreasing time step')
-            critical_error = True
-    dz = 1.0 / (ECM_AGENTS_PER_DIR[2] - 1)
+                'WARNING: diffusion problem is ill conditioned (Fi_y should be < 0.5), check parameters and consider decreasing time step\nSemi-implicit diffusion will be used instead')
+            UNSTABLE_DIFFUSION = True
+    dz = L0_z / (ECM_AGENTS_PER_DIR[2] - 1)
     for i in range(N_SPECIES):
         Fi_z = 3 * (DIFFUSION_COEFF_MULTI[i] * TIME_STEP / (dz * dz))  # this value should be < 0.5
         print('Fi_z value: {0} for species {1}'.format(Fi_z, i + 1))
         if Fi_z > 0.5:
             print(
-                'ERROR: diffusion problem is ill conditioned (Fi_z should be < 0.5), check parameters and consider decreasing time step')
-            critical_error = True
+                'WARNING: diffusion problem is ill conditioned (Fi_z should be < 0.5), check parameters and consider decreasing time step\nSemi-implicit diffusion will be used instead')
+            UNSTABLE_DIFFUSION = True
     critical_error = False # TODO: to bypass diffusion checks for testing purposes. Create variable to do full explicit vs relaxed forward-euler depending on stability
 
 if INCLUDE_CELLS:
@@ -303,6 +305,7 @@ env.newPropertyFloat("TIME_STEP", TIME_STEP)
 env.newPropertyArrayUInt("ECM_AGENTS_PER_DIR", ECM_AGENTS_PER_DIR)
 # Diffusion coefficient
 env.newPropertyUInt("INCLUDE_DIFFUSION", INCLUDE_DIFFUSION)
+env.newPropertyUInt("UNSTABLE_DIFFUSION", UNSTABLE_DIFFUSION)
 env.newPropertyArrayFloat("DIFFUSION_COEFF_MULTI", DIFFUSION_COEFF_MULTI)
 env.newPropertyFloat("ECM_VOXEL_VOLUME", ECM_VOXEL_VOLUME)
 
@@ -1525,6 +1528,7 @@ else:
 if pyflamegpu.VISUALISATION and VISUALISATION and not ENSEMBLE:
     vis.join() # join the visualisation thread and stops the visualisation closing after the simulation finishes
 
+print("--- EXECUTION TIME: %s seconds ---" % (time.time() - start_time))
 
 
 def manageLogs(steps, is_ensemble, idx):

@@ -38,7 +38,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
   
   // Agent array variables
   const uint8_t N_SPECIES = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
-  const uint32_t ECM_POPULATION_SIZE = 1000; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  const uint32_t ECM_POPULATION_SIZE = 1331; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
   auto C_SP_MACRO = FLAMEGPU->environment.getMacroProperty<float, N_SPECIES, ECM_POPULATION_SIZE>("C_SP_MACRO");
     
   // Agent properties in local register
@@ -59,6 +59,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
   float agent_vz = FLAMEGPU->getVariable<float>("vz");
   // Agent concentration of species
   int INCLUDE_DIFFUSION = FLAMEGPU->environment.getProperty<int>("INCLUDE_DIFFUSION");
+  int UNSTABLE_DIFFUSION = FLAMEGPU->environment.getProperty<int>("UNSTABLE_DIFFUSION");
   float C_sp[N_SPECIES] = {}; 
   for (int i = 0; i < N_SPECIES; i++) {
     C_sp[i] = FLAMEGPU->getVariable<float, N_SPECIES>("C_sp", i);
@@ -161,7 +162,6 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
     }
     */
     // If conn < 2 only the Neuman neighbourhood is checked. conn < 4 checks the 26 surrounding agents
-    // BEWARE!!: grid domain wraps itself, meaning that agents at the grid boundaries, read messages from opposite boundaries. A grid distance condition must be added to avoid that. 
     /*
     printf("agent id %d, agent grid [%u %u %u], message count %d -> (message %d): message grid [%u %u %u], message C_sp1 %.6f, message C_sp2 %.6f, conn = %d\n",
       id,
@@ -172,6 +172,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
       message_C_sp[0], message_C_sp[1],
       conn);
     */
+    // BEWARE!!: grid domain wraps itself, meaning that agents at the grid boundaries, read messages from opposite boundaries. A grid distance condition must be added to avoid that. 
     if ((id != message_id) && (conn < 4) && (i_diff < 2) && (j_diff < 2) && (k_diff < 2)){
       if (conn < 2) {
         grid_equilibrium_distance = ECM_ECM_EQUILIBRIUM_DISTANCE; //Neuman neighbourhood
@@ -259,10 +260,6 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
   FLAMEGPU->setVariable<float>("fx", agent_fx);
   FLAMEGPU->setVariable<float>("fy", agent_fy);
   FLAMEGPU->setVariable<float>("fz", agent_fz);
-  /*if (id == 554) {
-    printf("ECM agent %d at grid_lin_id %d computed forces: fx %2.6f, fy %2.6f, fz %2.6f \n", id, grid_lin_id, agent_fx, agent_fy, agent_fz);
-  }
-    */
 
   //Apply diffusion equation
   if (INCLUDE_DIFFUSION == 1){
@@ -280,20 +277,49 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
       float Fy = DIFFUSION_COEFF * TIME_STEP / powf(dy, 2.0);
       float Fz = DIFFUSION_COEFF * TIME_STEP / powf(dz, 2.0);
       agent_C_sp_prev[i] = C_sp[i];
-      //printf("agent id: %d, agent_C_sp_prev: %.6f, species: %d \n", id, agent_C_sp_prev[i], i+1);
-      // True explicit diffusion equation
-      //C_sp[i] = agent_C_sp_prev[i] + Fx * (n_left_C_sp[i] - (2 * agent_C_sp_prev[i]) + n_right_C_sp[i]) + Fy * (n_front_C_sp[i] - (2 * agent_C_sp_prev[i]) + n_back_C_sp[i]) + Fz * (n_up_C_sp[i] - (2 * agent_C_sp_prev[i]) + n_down_C_sp[i]) + R * TIME_STEP;
-      const float S = Fx + Fy + Fz;  // >= 0
-      const float numer =
-          agent_C_sp_prev[i]
-        + Fx * (n_left_C_sp[i] + n_right_C_sp[i])
-        + Fy * (n_front_C_sp[i] + n_back_C_sp[i])
-        + Fz * (n_up_C_sp[i] + n_down_C_sp[i])
+
+      if (UNSTABLE_DIFFUSION) {
+
+        // Stability fix for diffusion when Forward Euler in 3D becomes unstable (too large dt, too small dx/dy/dz, or large D).
+        // Instead of:
+        //   C^{n+1} = C^n + Fx*(C_L - 2C^n + C_R) + Fy*(C_F - 2C^n + C_B) + Fz*(C_U - 2C^n + C_D) + R*dt
+        //
+        // use a "center-implicit" / semi-implicit (damped) update that keeps neighbour values at time n
+        // but treats the central -2C term implicitly:
+        //
+        //   (1 + 2(Fx+Fy+Fz)) * C^{n+1}
+        //     = C^n + Fx*(C_L + C_R) + Fy*(C_F + C_B) + Fz*(C_U + C_D) + R*dt
+        //
+        //   => C^{n+1} = [ C^n + Fx*(C_L + C_R) + Fy*(C_F + C_B) + Fz*(C_U + C_D) + R*dt ]
+        //               / [ 1 + 2(Fx+Fy+Fz) ]
+        //
+        // where Fx = D*dt/dx^2, Fy = D*dt/dy^2, Fz = D*dt/dz^2 (dx,dy,dz may vary per voxel).
+        //
+        // This behaves like one Jacobi iteration of the fully implicit diffusion solve:
+        //   (I - dt*D*Laplace) C^{n+1} = C^n
+        // It is unconditionally stable (no blow-up), but more "damped" for large Fx,Fy,Fz (approaches local averaging).
+        const float S = Fx + Fy + Fz;  // >= 0
+        const float numer =
+            agent_C_sp_prev[i]
+          + Fx * (n_left_C_sp[i] + n_right_C_sp[i])
+          + Fy * (n_front_C_sp[i] + n_back_C_sp[i])
+          + Fz * (n_up_C_sp[i] + n_down_C_sp[i])
+          + R * TIME_STEP;
+
+        C_sp[i] = numer / (1.0f + 2.0f * S);
+      } 
+      else {
+        // Standard explicit Forward Euler diffusion update (conditionally stable):
+        //   C^{n+1} = C^n + Fx*(C_L - 2C^n + C_R) + Fy*(C_F - 2C^n + C_B) + Fz*(C_U - 2C^n + C_D) + R*dt
+        // Requires dt small enough to satisfy the 3D diffusion stability limit.
+        C_sp[i] = agent_C_sp_prev[i] 
+        + Fx * (n_left_C_sp[i] - (2 * agent_C_sp_prev[i]) + n_right_C_sp[i]) 
+        + Fy * (n_front_C_sp[i] - (2 * agent_C_sp_prev[i]) + n_back_C_sp[i]) 
+        + Fz * (n_up_C_sp[i] - (2 * agent_C_sp_prev[i]) + n_down_C_sp[i]) 
         + R * TIME_STEP;
+      }
 
-      C_sp[i] = numer / (1.0f + 2.0f * S);
-
-      // Prevent negative concentrations (numerical safety)
+      // Prevent negative concentrations 
       if (C_sp[i] < 0.0f) C_sp[i] = 0.0f;
 
       FLAMEGPU->setVariable<float, N_SPECIES>("C_sp", i, C_sp[i]);
