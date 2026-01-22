@@ -227,6 +227,7 @@ def plot_vars_over_time(
     nearest_mode="fixed_id",
     use_time_col="t",
     title=None,
+    subplot_mode="by_dataset",
 ):
     """
     Plot multiple scalar variables over time.
@@ -239,6 +240,9 @@ def plot_vars_over_time(
     - nearest_mode: "per_time" or "fixed_id" (used only if nearest_xyz is provided)
     - use_time_col: "t" or "time" if you added physical time
     - title: optional figure title
+    - subplot_mode: "by_dataset" (default) or "by_species"
+        * "by_dataset": one subplot per dataset (e.g., cells/ecm), with X lines (vars)
+        * "by_species": one subplot per variable, with lines per dataset (e.g., cells/ecm)
     """
     import matplotlib.pyplot as plt
     if isinstance(dfs, dict):
@@ -249,29 +253,50 @@ def plot_vars_over_time(
     if (point_id is None) == (nearest_xyz is None):
         raise ValueError("Provide exactly one of point_id or nearest_xyz.")
 
-    n = len(df_items)
-    fig, axes = plt.subplots(nrows=n, ncols=1, sharex=True, figsize=(8, 3.5 * n))
-    if n == 1:
-        axes = [axes]
+    if subplot_mode not in ("by_dataset", "by_species"):
+        raise ValueError("subplot_mode must be 'by_dataset' or 'by_species'")
 
-    for ax, (name, df) in zip(axes, df_items):
-        for v in vars:
-            if point_id is not None:
-                s = ts_by_point_id(df, var=v, point_id=int(point_id), use_time_col=use_time_col)
-            else:
-                x, y, z = nearest_xyz
-                s = ts_nearest_point(
-                    df, var=v, x=float(x), y=float(y), z=float(z),
-                    mode=nearest_mode, use_time_col=use_time_col
-                )
+    def _get_series(df, v):
+        if point_id is not None:
+            return ts_by_point_id(df, var=v, point_id=int(point_id), use_time_col=use_time_col)
+        x, y, z = nearest_xyz
+        return ts_nearest_point(
+            df, var=v, x=float(x), y=float(y), z=float(z),
+            mode=nearest_mode, use_time_col=use_time_col
+        )
 
-            ax.plot(s.index, s.values, label=v)
+    if subplot_mode == "by_dataset":
+        n = len(df_items)
+        fig, axes = plt.subplots(nrows=n, ncols=1, sharex=True, figsize=(8, 3.5 * n))
+        if n == 1:
+            axes = [axes]
 
-        ax.set_ylabel(name)
-        ax.grid(True, alpha=0.3)
-        ax.legend()
+        for ax, (name, df) in zip(axes, df_items):
+            for v in vars:
+                s = _get_series(df, v)
+                ax.plot(s.index, s.values, label=v)
 
-    axes[-1].set_xlabel(use_time_col)
+            ax.set_ylabel(name)
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+
+        axes[-1].set_xlabel(use_time_col)
+    else:
+        n = len(vars)
+        fig, axes = plt.subplots(nrows=n, ncols=1, sharex=True, figsize=(8, 3.5 * n))
+        if n == 1:
+            axes = [axes]
+
+        for ax, v in zip(axes, vars):
+            for name, df in df_items:
+                s = _get_series(df, v)
+                ax.plot(s.index, s.values, label=name)
+
+            ax.set_ylabel(v)
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+
+        axes[-1].set_xlabel(use_time_col)
     if title:
         fig.suptitle(title)
         fig.tight_layout()

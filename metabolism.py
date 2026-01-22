@@ -28,7 +28,7 @@ PAUSE_EVERY_STEP = True  # If True, the visualization stops every step until P i
 SAVE_PICKLE = True  # If True, dumps agent and boudary force data into a pickle file for post-processing
 SHOW_PLOTS = False  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
-SAVE_EVERY_N_STEPS = 100  # Affects both the .vtk files and the Dataframes storing boundary data
+SAVE_EVERY_N_STEPS = 50  # Affects both the .vtk files and the Dataframes storing boundary data
 
 CURR_PATH = pathlib.Path().absolute()
 RES_PATH = CURR_PATH / 'result_files'
@@ -39,7 +39,7 @@ print("Executing in ", CURR_PATH)
 # Minimum number of agents per direction (x,y,z). 
 # If domain is not cubical, N is asigned to the shorter dimension and more agents are added to the longer ones
 # +--------------------------------------------------------------------+
-N = 11
+N = 21
 
 # Time simulation parameters
 # +--------------------------------------------------------------------+
@@ -139,12 +139,12 @@ if OSCILLATORY_SHEAR_ASSAY:
 # +--------------------------------------------------------------------+
 INCLUDE_DIFFUSION = True
 N_SPECIES = 2  # number of diffusing species.WARNING: make sure that the value coincides with the one declared in TODO
-DIFFUSION_COEFF_MULTI = [100.0, 300.0]  # diffusion coefficient in [units^2/s] per specie
-BOUNDARY_CONC_INIT_MULTI = [[38.0, 38.0, 38.0, 38.0, 38.0, 38.0],
+DIFFUSION_COEFF_MULTI = [300.0, 300.0]  # diffusion coefficient in [units^2/s] per specie
+BOUNDARY_CONC_INIT_MULTI = [[50.0,50.0, 50.0, 50.0, 50.0, 50.0],
                             # initial concentration at each surface (+X,-X,+Y,-Y,+Z,-Z) [units^2/s]. -1.0 means no condition assigned. All agents are assigned 0 by default.
                             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
 
-BOUNDARY_CONC_FIXED_MULTI = [[38.0, 38.0, 38.0, 38.0, 38.0, 38.0],
+BOUNDARY_CONC_FIXED_MULTI = [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                              # concentration boundary conditions at each surface. WARNING: -1.0 means initial condition prevails. Don't use 0.0 as initial condition if that value is not fixed. Use -1.0 instead
                              [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
 # Cell agent related paramenters
@@ -169,13 +169,13 @@ CYCLE_PHASE_S_START = CYCLE_PHASE_G1_DURATION
 CYCLE_PHASE_G2_START = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION
 CYCLE_PHASE_M_START = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION + CYCLE_PHASE_G2_DURATION
 CELL_CYCLE_DURATION = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION + CYCLE_PHASE_G2_DURATION + CYCLE_PHASE_M_DURATION # typically 24h [h]
-INIT_ECM_CONCENTRATION_VALS = [38.0, 50.0]  # initial concentration of each species on the ECM agents
-INIT_CELL_CONCENTRATION_VALS = [38.0, 50.0]  # initial concentration of each species on the CELL agents
+INIT_ECM_CONCENTRATION_VALS = [50.0, 0.0]  # initial concentration of each species on the ECM agents
+INIT_CELL_CONCENTRATION_VALS = [15.0, 0.0]  # initial concentration of each species on the CELL agents
 INIT_CELL_CONC_MASS_VALS = [x * (4/3 * 3.1415926 * CELL_RADIUS**3) for x in INIT_CELL_CONCENTRATION_VALS]  # initial mass of each species on the CELL agents
-INIT_ECM_SAT_CONCENTRATION_VALS = [100.0, 100.0]  # initial saturation concentration of each species on the ECM agents
-INIT_CELL_CONSUMPTION_RATES = [0.005, 0.0]  # consumption rate of each species by the CELL agents 
+INIT_ECM_SAT_CONCENTRATION_VALS = [0.0, 10.0]  # initial saturation concentration of each species on the ECM agents
+INIT_CELL_CONSUMPTION_RATES = [0.001, 0.0]  # consumption rate of each species by the CELL agents 
 INIT_CELL_PRODUCTION_RATES = [0.0, 10.0]  # production rate of each species by the CELL agents 
-INIT_CELL_REACTION_RATES = [0.1, 0.05]  # metabolic reaction rates of each species by the CELL agents 
+INIT_CELL_REACTION_RATES = [0.00018, 0.00018]  # metabolic reaction rates of each species by the CELL agents 
 
 
 
@@ -528,7 +528,8 @@ bcorner_agent.newVariableFloat("y")
 bcorner_agent.newVariableFloat("z")
 
 bcorner_agent.newRTCFunctionFile("bcorner_output_location_data", bcorner_output_location_data_file).setMessageOutput("bcorner_location_message")
-bcorner_agent.newRTCFunctionFile("bcorner_move", bcorner_move_file)
+if MOVING_BOUNDARIES:
+    bcorner_agent.newRTCFunctionFile("bcorner_move", bcorner_move_file)
 
 
 def getRandomCoords3D(n, minx, maxx, miny, maxy, minz, maxz):
@@ -1356,29 +1357,37 @@ model.addStepFunction(sdf)
 layer_count = 0
 # L1_Agent_Locations
 layer_count += 1
-model.newLayer("L1_Agent_Locations").addAgentFunction("CELL", "cell_output_location_data")
-model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_output_grid_location_data")
-# L2_Boundary_Interactions
-layer_count += 1
-model.newLayer("L2_Boundary_Interactions").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
-# L3_Metabolism
-layer_count += 1
-model.newLayer("L3_Metabolism").addAgentFunction("CELL", "cell_ecm_interaction_metabolism")
-# L4_ECM_Csp_Update
-layer_count += 1
-model.newLayer("L4_ECM_Csp_Update").addAgentFunction("ECM", "ecm_Csp_update")
-# L5_Diffusion
-layer_count += 1
-model.newLayer("L5_Diffusion").addAgentFunction("ECM", "ecm_ecm_interaction")
-# L6_Diffusion_Boundary
-layer_count += 1
-model.newLayer("L6_Diffusion_Boundary").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
-# L7_Agent_Movement
-layer_count += 1
-model.newLayer("L7_Agent_Movement").addAgentFunction("CELL", "cell_move")
+if INCLUDE_CELLS:
+    model.newLayer("L1_Agent_Locations").addAgentFunction("CELL", "cell_output_location_data")
+    model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_output_grid_location_data")
+else:
+    model.newLayer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_output_grid_location_data")
+if INCLUDE_DIFFUSION:
+    # L2_Boundary_Interactions
+    layer_count += 1
+    model.newLayer("L2_Boundary_Interactions").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
+if INCLUDE_CELLS and INCLUDE_DIFFUSION:
+    # L3_Metabolism
+    layer_count += 1
+    model.newLayer("L3_Metabolism").addAgentFunction("CELL", "cell_ecm_interaction_metabolism")
+if INCLUDE_DIFFUSION:
+    # L4_ECM_Csp_Update
+    layer_count += 1
+    model.newLayer("L4_ECM_Csp_Update").addAgentFunction("ECM", "ecm_Csp_update")
+    # L5_Diffusion
+    layer_count += 1
+    model.newLayer("L5_Diffusion").addAgentFunction("ECM", "ecm_ecm_interaction")
+    # L6_Diffusion_Boundary (called twice to ensure concentration at boundaries is properly shown visually)
+    layer_count += 1
+    model.newLayer("L6_Diffusion_Boundary").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
+if INCLUDE_CELLS:
+    # L7_Agent_Movement
+    layer_count += 1
+    model.newLayer("L7_Agent_Movement").addAgentFunction("CELL", "cell_move")
 # If boundaries are not moving, the ECM grid does not need to be updated
 if MOVING_BOUNDARIES:
     model.Layer("L7_Agent_Movement").addAgentFunction("ECM", "ecm_move")
+    model.Layer("L7_Agent_Movement").addAgentFunction("BCORNER", "bcorner_move")
 
 
 """
