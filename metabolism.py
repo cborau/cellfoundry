@@ -24,7 +24,7 @@ ENSEMBLE = False
 ENSEMBLE_RUNS = 0
 VISUALISATION = True  # Change to false if pyflamegpu has not been built with visualisation support
 DEBUG_PRINTING = False
-PAUSE_EVERY_STEP = True  # If True, the visualization stops every step until P is pressed
+PAUSE_EVERY_STEP = False  # If True, the visualization stops every step until P is pressed
 SAVE_PICKLE = True  # If True, dumps agent and boudary force data into a pickle file for post-processing
 SHOW_PLOTS = False  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
@@ -55,12 +55,12 @@ ECM_ETA = 1  # [1/time]
 #BOUNDARY_COORDS = [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]  # +X,-X,+Y,-Y,+Z,-Z
 BOUNDARY_COORDS = [100.0, -100.0, 100.0, -100.0, 100.0, -100.0] # microdevice dimensions in um
 #BOUNDARY_COORDS = [coord / 1000.0 for coord in BOUNDARY_COORDS] # in mm
-BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [units/time]
+BOUNDARY_DISP_RATES = [-1.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [units/time]
 BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[units/time]
 
 POISSON_DIRS = [0, 1]  # 0: xdir, 1:ydir, 2:zdir. poisson_ratio ~= -incL(dir1)/incL(dir2) dir2 is the direction in which the load is applied
 ALLOW_BOUNDARY_ELASTIC_MOVEMENT = [0, 0, 0, 0, 0, 0]  # [bool]
-RELATIVE_BOUNDARY_STIFFNESS = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+RELATIVE_BOUNDARY_STIFFNESS = [0.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 BOUNDARY_STIFFNESS_VALUE = 10.0  # N/units
 BOUNDARY_DUMPING_VALUE = 5.0
 BOUNDARY_STIFFNESS = [BOUNDARY_STIFFNESS_VALUE * x for x in RELATIVE_BOUNDARY_STIFFNESS]
@@ -177,14 +177,82 @@ INIT_CELL_CONSUMPTION_RATES = [0.001, 0.0]  # consumption rate of each species b
 INIT_CELL_PRODUCTION_RATES = [0.0, 10.0]  # production rate of each species by the CELL agents 
 INIT_CELL_REACTION_RATES = [0.00018, 0.00018]  # metabolic reaction rates of each species by the CELL agents 
 
+# +--------------------------------------------------------------------+
+def compute_expected_boundary_pos_from_corners(
+    BOUNDARY_COORDS,
+    BOUNDARY_DISP_RATES,
+    BOUNDARY_DISP_RATES_PARALLEL,
+    STEPS,
+    TIME_STEP,
+):
+    """
+    Compute MIN_EXPECTED_BOUNDARY_POS and MAX_EXPECTED_BOUNDARY_POS as the global min/max
+    across (x,y,z) of the 8 corners after applying boundary motion.
+    """
+    x_max0, x_min0, y_max0, y_min0, z_max0, z_min0 = BOUNDARY_COORDS
+    R = BOUNDARY_DISP_RATES
+    P = BOUNDARY_DISP_RATES_PARALLEL
+    T = STEPS * TIME_STEP
+
+    # Face displacement vectors (vx, vy, vz)
+    # +X: normal -> x, parallel -> y,z
+    v_plusX  = (R[0],  P[0],  P[1])
+    v_minusX = (R[1],  P[2],  P[3])
+
+    # +Y: normal -> y, parallel -> x,z
+    v_plusY  = (P[4],  R[2],  P[5])
+    v_minusY = (P[6],  R[3],  P[7])
+
+    # +Z: normal -> z, parallel -> x,y
+    v_plusZ  = (P[8],  P[9],  R[4])
+    v_minusZ = (P[10], P[11], R[5])
+
+    # Helper: sum three face vectors
+    def add3(a, b, c):
+        return (a[0] + b[0] + c[0],
+                a[1] + b[1] + c[1],
+                a[2] + b[2] + c[2])
+
+    # 8 corners: (x choice, y choice, z choice) and their 3 contributing faces
+    corners = [
+        # x_max, y_max, z_max affected by +X, +Y, +Z
+        ((x_max0, y_max0, z_max0), add3(v_plusX,  v_plusY,  v_plusZ)),
+        ((x_max0, y_max0, z_min0), add3(v_plusX,  v_plusY,  v_minusZ)),
+        ((x_max0, y_min0, z_max0), add3(v_plusX,  v_minusY, v_plusZ)),
+        ((x_max0, y_min0, z_min0), add3(v_plusX,  v_minusY, v_minusZ)),
+
+        ((x_min0, y_max0, z_max0), add3(v_minusX, v_plusY,  v_plusZ)),
+        ((x_min0, y_max0, z_min0), add3(v_minusX, v_plusY,  v_minusZ)),
+        ((x_min0, y_min0, z_max0), add3(v_minusX, v_minusY, v_plusZ)),
+        ((x_min0, y_min0, z_min0), add3(v_minusX, v_minusY, v_minusZ)),
+    ]
+
+    moved_corners = []
+    for (x0, y0, z0), (vx, vy, vz) in corners:
+        moved_corners.append((x0 + vx * T, y0 + vy * T, z0 + vz * T))
+
+    # global min/max across all coordinates of all moved corners
+    flat = [c for pt in moved_corners for c in pt]
+    min_expected_pos = min(flat)
+    max_expected_pos = max(flat)
+
+    return min_expected_pos, max_expected_pos, moved_corners
+
 
 
 # Other simulation parameters: TODO: INCLUDE PARALLEL DISP RATES
 # +--------------------------------------------------------------------+
-MAX_EXPECTED_BOUNDARY_POS = max(BOUNDARY_DISP_RATES) * STEPS * TIME_STEP + max(diff_x, diff_y, diff_z) / 2
-MIN_EXPECTED_BOUNDARY_POS = min(BOUNDARY_DISP_RATES) * STEPS * TIME_STEP - max(diff_x, diff_y, diff_z) / 2
+MIN_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS, moved_corners = compute_expected_boundary_pos_from_corners(
+    BOUNDARY_COORDS,
+    BOUNDARY_DISP_RATES,
+    BOUNDARY_DISP_RATES_PARALLEL,
+    STEPS,
+    TIME_STEP,
+)
+print("Moved corners: ", moved_corners)
 print("Max expected boundary position: ", MAX_EXPECTED_BOUNDARY_POS)
 print("Min expected boundary position: ", MIN_EXPECTED_BOUNDARY_POS)
+
 
 # Dataframe initialization data storage
 # +--------------------------------------------------------------------+
