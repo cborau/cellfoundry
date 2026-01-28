@@ -163,7 +163,7 @@ MAX_CONNECTIVITY = 8 # must match hard-coded C++ values
 FIBRE_SEGMENT_K_ELAST = 4.0  # [N/units/kg]
 FIBRE_SEGMENT_D_DUMPING = 2.0  # [N*s/units/kg]
 FIBRE_SEGMENT_MASS = 1.0  # [dimensionless to make K and D mass dependent]
-FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE = 0.1
+FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE = 5 # WARNING: must match the value used in network generation
 FIBRE_NODE_BOUNDARY_INTERACTION_RADIUS = 0.05
 FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE = 0.0
 MAX_SEARCH_RADIUS_FNODES = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / 10.0 # must me smaller than FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
@@ -968,8 +968,9 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 y = NODE_COORDS[fn, 1]
                 z = NODE_COORDS[fn, 2]
                 linked_nodes = np.array(INITIAL_NETWORK_CONNECTIVITY.get(fn, []))   
-                # Add the offset to all values above 0
-                linked_nodes = np.where(linked_nodes > 0, linked_nodes + offset, linked_nodes) 
+                # Add the offset to all values above -1
+                linked_nodes = np.where(linked_nodes > -1, linked_nodes + offset, linked_nodes) 
+
                 count += 1
                 instance = FLAMEGPU.agent("FNODE").newAgent()
                 instance.setVariableInt("id", current_id + count)
@@ -1455,9 +1456,19 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                         for line in self.fibrenodedata:
                             file.write(line + '\n')
                             
-                        file.write("POINTS {} float \n".format(N_NODES))
+                        file.write("POINTS {} float \n".format(8 + N_NODES))
                         for coords_ai in coords:
                             file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
+
+                        # Write boundary positions at the end so that corner points don't cover the points underneath
+                        file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[2], coord_boundary[4]))
+                        file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[2], coord_boundary[4]))
+                        file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[3], coord_boundary[4]))
+                        file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[3], coord_boundary[4]))
+                        file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[2], coord_boundary[5]))
+                        file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[2], coord_boundary[5]))
+                        file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[3], coord_boundary[5]))
+                        file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[3], coord_boundary[5]))
                             
                         # Write the cell connectivity
                         file.write(f"CELLS {num_cells + 6} {num_cells * 3 + 6 * 5}\n") # each of the 6 boundaries is a cell of type POLYGON with 4 nodes
@@ -1525,21 +1536,35 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                         file.write(str(sum_bz_neg_y) + '\n')
 
 
-                        file.write("POINT_DATA {} \n".format(N_NODES))  # number of FNODE agents
+                        file.write("POINT_DATA {} \n".format(8 + N_NODES))  # 8 corners + number of FNODE agents
+
+                        file.write("SCALARS is_corner int 1" + '\n')  # create this variable to remove them from representations
+                        file.write("LOOKUP_TABLE default" + '\n')
+
+                        for ee_ai in elastic_energy:
+                            file.write("{0} \n".format(0))
+                        for _ in range(8):
+                            file.write("1 \n")  # boundary corners
+
 
                         file.write("SCALARS elastic_energy float 1" + '\n')
                         file.write("LOOKUP_TABLE default" + '\n')
                         for ee_ai in elastic_energy:
                             file.write("{:.4f} \n".format(ee_ai))
+                        for _ in range(8):
+                            file.write("0.0 \n")  # boundary corners
 
                         file.write("VECTORS velocity float" + '\n')
                         for v_ai in velocity:
                             file.write("{:.4f} {:.4f} {:.4f} \n".format(v_ai[0], v_ai[1], v_ai[2]))
+                        for _ in range(8):
+                            file.write("0.0 0.0 0.0 \n")  # boundary corners
 
                         file.write("VECTORS force float" + '\n')
                         for f_ai in force:
                             file.write("{:.4f} {:.4f} {:.4f} \n".format(f_ai[0], f_ai[1], f_ai[2]))
-
+                        for _ in range(8):
+                            file.write("0.0 0.0 0.0 \n")  # boundary corners
 
                 if INCLUDE_CELLS:
                     cell_coords = list()

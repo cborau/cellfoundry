@@ -49,7 +49,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_spatial_interaction, flamegpu::MessageSpatia
   float agent_fz = 0.0;
  
   const float MAX_SEARCH_RADIUS_FNODES = FLAMEGPU->environment.getProperty<float>("MAX_SEARCH_RADIUS_FNODES");
-  const float DELTA_TIME = FLAMEGPU->environment.getProperty<float>("DELTA_TIME");
+  const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
   float EPSILON = FLAMEGPU->environment.getProperty<float>("EPSILON");
    
   int message_id = 0;

@@ -155,7 +155,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
   // a(t) = f(t) / m;
   // v(t) = v(t-1) + a(t) * dt; 
   // x(t) = x(t-1) + v(t) * dt
-  const float DELTA_TIME = FLAMEGPU->environment.getProperty<float>("DELTA_TIME");
+  const float  TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
   //Bound the position within the environment   
   const float COORD_BOUNDARY_X_POS = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES",0);
   const float COORD_BOUNDARY_X_NEG = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES",1);
@@ -201,18 +201,18 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
   float prev_agent_z = agent_z;
    
   if ((clamped_bx_pos == 0) && (clamped_bx_neg == 0)) {
-    agent_vx += (agent_fx / mass) * DELTA_TIME;
-    agent_x += agent_vx * DELTA_TIME;
+    agent_vx += (agent_fx / mass) * TIME_STEP;
+    agent_x += agent_vx * TIME_STEP;
   }
 
   if ((clamped_by_pos == 0) && (clamped_by_neg == 0)) {
-    agent_vy += (agent_fy / mass) * DELTA_TIME;
-    agent_y += agent_vy * DELTA_TIME;
+    agent_vy += (agent_fy / mass) * TIME_STEP;
+    agent_y += agent_vy * TIME_STEP;
   }
   
   if ((clamped_bz_pos == 0) && (clamped_bz_neg == 0)) {
-    agent_vz += (agent_fz / mass) * DELTA_TIME;
-    agent_z += agent_vz * DELTA_TIME;
+    agent_vz += (agent_fz / mass) * TIME_STEP;
+    agent_z += agent_vz * TIME_STEP;
   }
   
   //if (id == 9 || id == 10 || id == 13 || id == 14 || id == 25 || id == 26 || id == 29 || id == 30) {
@@ -232,7 +232,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
         agent_y = prev_agent_y;
         if (fabsf(DISP_RATE_BOUNDARY_PARALLEL_X_POS_Y) > 0.0) {
           agent_vy = DISP_RATE_BOUNDARY_PARALLEL_X_POS_Y;
-          agent_y += agent_vy * DELTA_TIME;                
+          agent_y += agent_vy * TIME_STEP;                
         } else {
           agent_vy = 0.0;
         }
@@ -241,7 +241,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
         agent_z = prev_agent_z;
          if (fabsf(DISP_RATE_BOUNDARY_PARALLEL_X_POS_Z) > 0.0) {
            agent_vz = DISP_RATE_BOUNDARY_PARALLEL_X_POS_Z;
-           agent_z += agent_vz * DELTA_TIME;
+           agent_z += agent_vz * TIME_STEP;
          } else {
            agent_vz = 0.0;
          }
@@ -259,7 +259,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
         agent_y = prev_agent_y;
         if (fabsf(DISP_RATE_BOUNDARY_PARALLEL_X_NEG_Y) > 0.0) {
           agent_vy = DISP_RATE_BOUNDARY_PARALLEL_X_NEG_Y;
-          agent_y += agent_vy * DELTA_TIME;
+          agent_y += agent_vy * TIME_STEP;
         }
         else {
           agent_vy = 0.0;
@@ -269,7 +269,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
         agent_z = prev_agent_z;
         if (fabsf(DISP_RATE_BOUNDARY_PARALLEL_X_NEG_Z) > 0.0) {
           agent_vz = DISP_RATE_BOUNDARY_PARALLEL_X_NEG_Z;
-          agent_z += agent_vz * DELTA_TIME;
+          agent_z += agent_vz * TIME_STEP;
         }
         else {
           agent_vz = 0.0;
@@ -288,7 +288,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
           agent_x = prev_agent_x;
           if (fabsf(DISP_RATE_BOUNDARY_PARALLEL_Y_POS_X) > 0.0) {
             agent_vx = DISP_RATE_BOUNDARY_PARALLEL_Y_POS_X;
-            agent_x += agent_vx * DELTA_TIME;
+            agent_x += agent_vx * TIME_STEP;
           }
           else {
             agent_vx = 0.0;
@@ -298,7 +298,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
           agent_z = prev_agent_z;
           if (fabsf(DISP_RATE_BOUNDARY_PARALLEL_Y_POS_Z) > 0.0) {
             agent_vz = DISP_RATE_BOUNDARY_PARALLEL_Y_POS_Z;
-            agent_z += agent_vz * DELTA_TIME;
+            agent_z += agent_vz * TIME_STEP;
           }
           else {
             agent_vz = 0.0;
@@ -317,7 +317,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
         agent_x = prev_agent_x;
         if (fabsf(DISP_RATE_BOUNDARY_PARALLEL_Y_NEG_X) > 0.0) {
           agent_vx = DISP_RATE_BOUNDARY_PARALLEL_Y_NEG_X;
-          agent_x += agent_vx * DELTA_TIME;
+          agent_x += agent_vx * TIME_STEP;
         }
         else {
           agent_vx = 0.0;
@@ -327,7 +327,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
         agent_z = prev_agent_z;
         if (fabsf(DISP_RATE_BOUNDARY_PARALLEL_Y_NEG_Z) > 0.0) {
           agent_vz = DISP_RATE_BOUNDARY_PARALLEL_Y_NEG_Z;
-          agent_z += agent_vz * DELTA_TIME;
+          agent_z += agent_vz * TIME_STEP;
         }
         else {
            agent_vz = 0.0;
@@ -346,7 +346,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
         agent_x = prev_agent_x;
         if (fabsf(DISP_RATE_BOUNDARY_PARALLEL_Z_POS_X) > 0.0) {
           agent_vx = DISP_RATE_BOUNDARY_PARALLEL_Z_POS_X;
-          agent_x += agent_vx * DELTA_TIME;
+          agent_x += agent_vx * TIME_STEP;
         }
         else {
           agent_vx = 0.0;
@@ -356,7 +356,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
         agent_y = prev_agent_y;
         if (fabsf(DISP_RATE_BOUNDARY_PARALLEL_Z_POS_Y) > 0.0) {
           agent_vy = DISP_RATE_BOUNDARY_PARALLEL_Z_POS_Y;
-          agent_y += agent_vy * DELTA_TIME;
+          agent_y += agent_vy * TIME_STEP;
         }
         else {
           agent_vy = 0.0;
@@ -375,7 +375,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
         agent_x = prev_agent_x;
         if (fabsf(DISP_RATE_BOUNDARY_PARALLEL_Z_NEG_X) > 0.0) {
           agent_vx = DISP_RATE_BOUNDARY_PARALLEL_Z_NEG_X;
-          agent_x += agent_vx * DELTA_TIME;
+          agent_x += agent_vx * TIME_STEP;
         }
         else {
          agent_vx = 0.0;
@@ -385,7 +385,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
         agent_y = prev_agent_y;
         if (fabsf(DISP_RATE_BOUNDARY_PARALLEL_Z_NEG_Y) > 0.0) {
           agent_vy = DISP_RATE_BOUNDARY_PARALLEL_Z_NEG_Y;
-          agent_y += agent_vy * DELTA_TIME;
+          agent_y += agent_vy * TIME_STEP;
         }
         else {
           agent_vy = 0.0;

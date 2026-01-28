@@ -119,7 +119,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket,
 
   int DEBUG_PRINTING = FLAMEGPU->environment.getProperty<int>("DEBUG_PRINTING");
   
-  const float DELTA_TIME = FLAMEGPU->environment.getProperty<float>("DELTA_TIME");
+  const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
   
   float linked_nodes[MAX_CONNECTIVITY] = {}; 
   for (int i = 0; i < MAX_CONNECTIVITY; i++) {
