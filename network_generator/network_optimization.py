@@ -1,6 +1,6 @@
 import numpy as np
 
-def network_optimization(fraction_to_try_swap, N, nodes, fibers, N_anneal, lx, ly, lz, l_fiber, fiberlengths, fiberenergy, N1, N2, N_boundary_nodes, stepsize, swap_skip_energy):
+def network_optimization(fraction_to_try_swap, N, nodes, fibers, N_anneal, lx, ly, lz, l_fiber, fiberlengths, fiberenergy, N1, N2, N_boundary_nodes, stepsize, swap_skip_energy, enforce_bounds=False, bounds=None, bound_mode="reject"):
     """
     network_optimization: use simulated annealing to iterate initial network
     """
@@ -32,6 +32,16 @@ def network_optimization(fraction_to_try_swap, N, nodes, fibers, N_anneal, lx, l
                 newx = nodes[j, 0] + stepsize * (2 * (-.5 + np.random.rand())) * (((N_anneal * N_int) - n_accepted) / (N_anneal * N_int))
                 newy = nodes[j, 1] + (ly / lx) * stepsize * (2 * (-.5 + np.random.rand())) * (((N_anneal * N_int) - n_accepted) / (N_anneal * N_int))
                 newz = nodes[j, 2] + (lz / lx) * stepsize * (2 * (-.5 + np.random.rand())) * (((N_anneal * N_int) - n_accepted) / (N_anneal * N_int))
+
+                if enforce_bounds and bounds is not None:
+                    (xmin, xmax), (ymin, ymax), (zmin, zmax) = bounds
+                    if bound_mode == "clip":
+                        newx = np.clip(newx, xmin, xmax)
+                        newy = np.clip(newy, ymin, ymax)
+                        newz = np.clip(newz, zmin, zmax)
+                    elif bound_mode == "reject":
+                        if newx < xmin or newx > xmax or newy < ymin or newy > ymax or newz < zmin or newz > zmax:
+                            continue
                 
                 # Find the fibers that this would affect
                 n1f = node_fiber_mat[j, ~np.isnan(node_fiber_mat[j, :])].astype(int)

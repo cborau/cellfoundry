@@ -82,15 +82,44 @@ def add_intermediate_nodes(nodes, connectivity, edge_length, MAX_CONNECTIVITY):
     return np.array(new_nodes), new_connectivity
 
 
-def snap_to_boundaries(nodes, percentage, boundaries):
+def snap_to_boundaries(nodes, percentage, boundaries, bounds=None, mode="percentage", distance=None):
+    """
+    Snap nodes to selected domain boundaries using either percentage or distance mode.
+
+        Modes:
+                - "distance": equivalent to percentage mode with ``percentage=100``.
+                - "percentage": snap ``percentage`` of nodes that are within ``distance``
+                    of each chosen boundary (closest first). If ``distance`` is None, it
+                    defaults to 10% of the corresponding axis length.
+
+    Parameters:
+        nodes (numpy.ndarray): Array of node coordinates (N x 3).
+        percentage (float): Percentage of candidate nodes to snap (percentage mode).
+        boundaries (list[str]): Boundaries to snap to (e.g. ['+x', '-y']).
+        bounds (tuple, optional): Axis-aligned bounds as
+            ((xmin, xmax), (ymin, ymax), (zmin, zmax)). If None, uses the
+            min/max of the current nodes for each axis.
+        mode (str): "percentage" or "distance".
+        distance (float, optional): Threshold distance from boundary for candidates.
+    """
+    if bounds is None:
+        min_vals = np.min(nodes, axis=0)
+        max_vals = np.max(nodes, axis=0)
+        bounds = ((min_vals[0], max_vals[0]), (min_vals[1], max_vals[1]), (min_vals[2], max_vals[2]))
+
+    (xmin, xmax), (ymin, ymax), (zmin, zmax) = bounds
+
+    if mode not in {"percentage", "distance"}:
+        raise ValueError("Invalid mode. Choose from 'percentage' or 'distance'.")
+
     # Define the boundary mappings
     boundary_mapping = {
-        '+x': (0, 0.5),
-        '-x': (0, -0.5),
-        '+y': (1, 0.5),
-        '-y': (1, -0.5),
-        '+z': (2, 0.5),
-        '-z': (2, -0.5)
+        '+x': (0, xmax),
+        '-x': (0, xmin),
+        '+y': (1, ymax),
+        '-y': (1, ymin),
+        '+z': (2, zmax),
+        '-z': (2, zmin)
     }
     
     # Validate boundaries
@@ -98,40 +127,53 @@ def snap_to_boundaries(nodes, percentage, boundaries):
         if boundary not in boundary_mapping:
             raise ValueError("Invalid boundary. Choose from '+x', '-x', '+y', '-y', '+z', '-z'.")
     
-    # Calculate the number of nodes to snap
-    num_nodes = nodes.shape[0]
-    total_num_to_snap = int(num_nodes * percentage / 100)
-    num_boundaries = len(boundaries)
-    num_to_snap_per_boundary = total_num_to_snap // num_boundaries
-    
     # Initialize the snapped nodes array
     snapped_nodes = nodes.copy()
-    
-    # Keep track of which nodes have been snapped
-    snapped_indices = np.array([], dtype=int)
     
     for boundary in boundaries:
         axis, bound_value = boundary_mapping[boundary]
         
         # Calculate distances to the boundary for the specified axis
         distances = np.abs(snapped_nodes[:, axis] - bound_value)
-        
-        # Sort indices based on the distances
-        sorted_indices = np.argsort(distances)
-        
-        # Snap the closest nodes to the specified boundary
-        for idx in sorted_indices:
-            if len(snapped_indices) < total_num_to_snap and idx not in snapped_indices:
-                snapped_nodes[idx, axis] = bound_value
-                snapped_indices = np.append(snapped_indices, idx)
-                if len(snapped_indices) % num_to_snap_per_boundary == 0:
-                    break
+
+        # Determine candidate indices within distance threshold
+        if distance is None:
+            axis_length = bounds[axis][1] - bounds[axis][0]
+            threshold = 0.1 * axis_length
+            print(
+                f"Warning: distance is None for {boundary}; using default threshold of 10% "
+                f"of axis length ({threshold})."
+            )
+        else:
+            threshold = distance
+
+        if threshold <= 0:
+            print(f"Warning: distance <= 0 for {boundary}; no nodes will be snapped.")
+
+        candidate_indices = np.where(distances <= threshold)[0]
+        if candidate_indices.size == 0:
+            print(f"Warning: no candidates found within distance {threshold} for {boundary}.")
+        else:
+            effective_percentage = 100 if mode == "distance" else percentage
+            num_to_snap = int(np.ceil(candidate_indices.size * effective_percentage / 100))
+
+            if num_to_snap <= 0:
+                print(f"Warning: num_to_snap <= 0 for {boundary}; no nodes will be snapped.")
+            else:
+                sorted_candidate_indices = candidate_indices[np.argsort(distances[candidate_indices])]
+                indices_to_snap = sorted_candidate_indices[:num_to_snap]
+                snapped_nodes[indices_to_snap, axis] = bound_value
     
     return snapped_nodes
 
-def remove_boundary_connectivity(nodes, connectivity):
-    # Define the boundaries
-    boundaries = [0.5, -0.5]
+def remove_boundary_connectivity(nodes, connectivity, bounds=None):
+    if bounds is None:
+        min_vals = np.min(nodes, axis=0)
+        max_vals = np.max(nodes, axis=0)
+        bounds = ((min_vals[0], max_vals[0]), (min_vals[1], max_vals[1]), (min_vals[2], max_vals[2]))
+
+    (xmin, xmax), (ymin, ymax), (zmin, zmax) = bounds
+    boundaries_per_axis = [(xmin, xmax), (ymin, ymax), (zmin, zmax)]
     
     # Initialize the updated connectivity dictionary
     updated_connectivity = {}
@@ -156,7 +198,9 @@ def remove_boundary_connectivity(nodes, connectivity):
             # Check if both nodes are on the same boundary for any dimension
             same_boundary = False
             for dim in range(nodes.shape[1]):
-                if node_coords[dim] in boundaries and connected_node_coords[dim] == node_coords[dim]:
+                on_boundary = np.isclose(node_coords[dim], boundaries_per_axis[dim][0]) or np.isclose(node_coords[dim], boundaries_per_axis[dim][1])
+                same_plane = np.isclose(connected_node_coords[dim], node_coords[dim])
+                if on_boundary and same_plane:
                     same_boundary = True
                     break
             

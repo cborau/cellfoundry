@@ -7,15 +7,7 @@ from helper_functions import plot_network_3d, add_intermediate_nodes, compute_no
 import matplotlib.pyplot as plt
 import pickle
 
-def generate_network():
-
-    l_fiber = 0.1
-    lx = 4
-    ly = 4
-    lz = 1
-    rho_base = 0.6
-    rho_scale = 1000
-    rho = rho_base * rho_scale # nodes per unit of volume
+def generate_network(lx, ly, lz, l_fiber,rho, enforce_bounds=False, bound_mode="reject"):
 
     # Initial Network Generation
     nodes, fibers, fiberenergy, total_energy, N1, N2, N_boundary_nodes, fiberlengths, valencycheck = initial_network_generation(rho, lx, ly, lz, l_fiber, 100)
@@ -31,12 +23,15 @@ def generate_network():
     stepsize = np.linspace(1, 0.1, N_optimize)
     fraction_to_try_swap = np.linspace(0.3, 0.02, N_optimize)
 
+    bounds = [(-lx / 2, lx / 2), (-ly / 2, ly / 2), (-lz / 2, lz / 2)]
+
     for j in range(N_optimize):
         swap_skip_energy = 3 * (np.median(fiberlengths) - l_fiber) ** 2
         print(f'Swap skip energy threshold = {swap_skip_energy}')
         nodes, fibers, fiberenergy, fiberlengths, total_energy, N1, N2, N_interior = network_optimization(
             fraction_to_try_swap[j], N, nodes, fibers, N_anneal, lx, ly, lz, l_fiber,
-            fiberlengths, fiberenergy, N1, N2, N_boundary_nodes, stepsize[j], swap_skip_energy
+            fiberlengths, fiberenergy, N1, N2, N_boundary_nodes, stepsize[j], swap_skip_energy,
+            enforce_bounds=enforce_bounds, bounds=bounds, bound_mode=bound_mode
         )
         percent_done = 100 * (j + 1) / N_optimize
         print(f'Percent optimized = {percent_done}')
@@ -51,20 +46,43 @@ def generate_network():
     # Branching Optimization
     N_branching_optimize = 4
     nodes, fibers, nodal_branching_energy, total_branching_energy_init, total_branching_energy_final = branch_optimization(
-        N_branching_optimize, nodes, fibers, N
+        N_branching_optimize, nodes, fibers, N, enforce_bounds=enforce_bounds, bounds=bounds, bound_mode=bound_mode
     )
 
-    return nodes, fibers
+    return nodes, fibers, bounds
   
 
 if __name__ == "__main__":
 
     MAX_CONNECTIVITY = 8
-    EDGE_LENGTH = 0.1
+    # Units: choose any consistent spatial unit (e.g., microns).
+    # All lengths below (LX, LY, LZ, L_FIBER, EDGE_LENGTH, SNAP_DISTANCE) use that unit.
+    LX = 50
+    LY = 20
+    LZ = 10
+    L_FIBER = 1.0
+    RHO = 1.0 # number of nodes per unit volume
+
+    # EDGE_LENGTH controls the target segment length when splitting long fibers.
+    # Units must match l_fiber and lx/ly/lz.
+    EDGE_LENGTH = 0.5
     file_name = 'network_3d.pkl'
     file_path = os.path.abspath(file_name)
 
-    # Check if the file exists
+    # ENFORCE_BOUNDS keeps optimization moves inside the initial box.
+    # BOUND_MODE="reject" skips out-of-bounds moves; "clip" clamps them to the box.
+    ENFORCE_BOUNDS = True
+    BOUND_MODE = "reject"  # "reject" or "clip"
+
+    # SNAP_* controls optional snapping of nodes to selected boundaries.
+    # SNAP_MODE: "percentage" snaps a fraction of candidates near each boundary.
+    #            "distance" snaps all candidates within SNAP_DISTANCE.
+    # SNAP_DISTANCE is in the same units as lx/ly/lz.
+    SNAP_BOUNDARIES = ['+x', '-x', '+y', '-y', '+z', '-z']
+    SNAP_MODE = "distance"  # "percentage" or "distance"
+    SNAP_PERCENTAGE = 10
+    SNAP_DISTANCE = 1.0
+
     if os.path.exists(file_name):
         print(f'Loading network from {file_path}')
         # Load from the pickle file
@@ -73,9 +91,17 @@ if __name__ == "__main__":
             nodes = data['node_coords']
             connectivity = data['connectivity']
     else: 
-        nodes, fibers = generate_network()
+        nodes, fibers, bounds = generate_network(LX, LY, LZ, L_FIBER, RHO, enforce_bounds=ENFORCE_BOUNDS, bound_mode=BOUND_MODE)
         #nodes = scale_to_unit_cube(nodes)
-        #nodes = snap_to_boundaries(nodes, 10, boundaries = ['+y', '-y'])
+        nodes = snap_to_boundaries(
+            nodes,
+            percentage=SNAP_PERCENTAGE,
+            boundaries=SNAP_BOUNDARIES,
+            bounds=bounds,
+            mode=SNAP_MODE,
+            distance=SNAP_DISTANCE
+        )
+        
         #
         # Plot the network
         
@@ -83,7 +109,7 @@ if __name__ == "__main__":
         node_connectivity = compute_node_connectivity(fibers, num_nodes, MAX_CONNECTIVITY)
         plot_network_3d(nodes, node_connectivity, title ='before fix')
 
-        nodes, node_connectivity = remove_boundary_connectivity(nodes, node_connectivity)
+        nodes, node_connectivity = remove_boundary_connectivity(nodes, node_connectivity, bounds=bounds)
         fig, ax = plot_network_3d(nodes, node_connectivity, title ='after fix')
 
         new_nodes, new_connectivity = add_intermediate_nodes(nodes, node_connectivity, EDGE_LENGTH, MAX_CONNECTIVITY)
@@ -98,10 +124,10 @@ if __name__ == "__main__":
         nodes = new_nodes.copy()
 
     
-    get_valency_and_pore_size(nodes, connectivity, MAX_CONNECTIVITY)
+    # get_valency_and_pore_size(nodes, connectivity, MAX_CONNECTIVITY)
     scalar_vars, vector_vars = generate_random_vars(nodes)
     save_network_to_vtk('network_3d.vtk', nodes, connectivity, scalar_vars=scalar_vars, vector_vars=vector_vars)
-    median_edge_length = get_node_median_distance(nodes, connectivity, plot_histogram=True)
-    print(f'Median edge length: {median_edge_length}')
-    plot_network_3d(nodes, connectivity, title ='before fix')
-    plt.show()
+    # median_edge_length = get_node_median_distance(nodes, connectivity, plot_histogram=True)
+    # print(f'Median edge length: {median_edge_length}')
+    # plot_network_3d(nodes, connectivity, title ='before fix')
+    # plt.show()

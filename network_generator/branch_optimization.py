@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.special import comb
 
-def branch_optimization(N_branching_optimize, nodes, fibers, N):
+def branch_optimization(N_branching_optimize, nodes, fibers, N, enforce_bounds=False, bounds=None, bound_mode="reject"):
     """
     branch_optimization: Align fibers connected at a node such that 
     the two straightest fibers are straightened, and all other fibers 
@@ -134,6 +134,25 @@ def branch_optimization(N_branching_optimize, nodes, fibers, N):
                 other_spatial_steps[k] = stepsize * endpt + (stepsize / 50) * (-0.5 + np.random.rand(3))
             
             other_new_coords = other_old_coords + other_spatial_steps
+
+            if enforce_bounds and bounds is not None:
+                (xmin, xmax), (ymin, ymax), (zmin, zmax) = bounds
+                if bound_mode == "clip":
+                    newx = np.clip(newx, xmin, xmax)
+                    newy = np.clip(newy, ymin, ymax)
+                    newz = np.clip(newz, zmin, zmax)
+                    other_new_coords[:, 0] = np.clip(other_new_coords[:, 0], xmin, xmax)
+                    other_new_coords[:, 1] = np.clip(other_new_coords[:, 1], ymin, ymax)
+                    other_new_coords[:, 2] = np.clip(other_new_coords[:, 2], zmin, zmax)
+                elif bound_mode == "reject":
+                    out_main = (newx < xmin or newx > xmax or newy < ymin or newy > ymax or newz < zmin or newz > zmax)
+                    out_others = np.any(
+                        (other_new_coords[:, 0] < xmin) | (other_new_coords[:, 0] > xmax) |
+                        (other_new_coords[:, 1] < ymin) | (other_new_coords[:, 1] > ymax) |
+                        (other_new_coords[:, 2] < zmin) | (other_new_coords[:, 2] > zmax)
+                    )
+                    if out_main or out_others:
+                        continue
             
             new_nodal_branching_energies = np.zeros(1 + len(othernodes_jth))
             
