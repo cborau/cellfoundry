@@ -140,22 +140,25 @@ if OSCILLATORY_SHEAR_ASSAY:
 
 # Network parameters
 # +--------------------------------------------------------------------+
+INCLUDE_FIBRE_NETWORK = True
 
-file_name = 'network_3d.pkl'
-# Check if the file exists
-if os.path.exists(file_name):
-    print(f'Loading network from {file_name}')
-    # Load from the pickle file
-    with open(file_name, 'rb') as f:
-        data = pickle.load(f)
-        nodes = data['node_coords']
-        connectivity = data['connectivity']
-else:
-    print(f"ERROR: file {file_name} containing network nodes and connectivity was not found")
-N_NODES = nodes.shape[0]
-NODE_COORDS = nodes
-INITIAL_NETWORK_CONNECTIVITY = connectivity
-MAX_CONNECTIVITY = 8
+if INCLUDE_FIBRE_NETWORK:
+    file_name = 'network_3d.pkl'
+    # Check if the file exists
+    if os.path.exists(file_name):
+        print(f'Loading network from {file_name}')
+        # Load from the pickle file
+        with open(file_name, 'rb') as f:
+            data = pickle.load(f)
+            nodes = data['node_coords']
+            connectivity = data['connectivity']
+    else:
+        print(f"ERROR: file {file_name} containing network nodes and connectivity was not found")
+    N_NODES = nodes.shape[0]
+    NODE_COORDS = nodes
+    INITIAL_NETWORK_CONNECTIVITY = connectivity
+
+MAX_CONNECTIVITY = 8 # must match hard-coded C++ values
 FIBRE_SEGMENT_K_ELAST = 4.0  # [N/units/kg]
 FIBRE_SEGMENT_D_DUMPING = 2.0  # [N*s/units/kg]
 FIBRE_SEGMENT_MASS = 1.0  # [dimensionless to make K and D mass dependent]
@@ -170,7 +173,6 @@ MAX_SEARCH_RADIUS_FNODES = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / 10.0 # must me s
 # +--------------------------------------------------------------------+
 INCLUDE_DIFFUSION = True
 N_SPECIES = 2  # number of diffusing species.WARNING: make sure that the value coincides with the one declared in TODO
-MAX_CONNECTIVITY = 8  # must match hard-coded C++ values
 DIFFUSION_COEFF_MULTI = [300.0, 300.0]  # diffusion coefficient in [units^2/s] per specie
 BOUNDARY_CONC_INIT_MULTI = [[50.0,50.0, 50.0, 50.0, 50.0, 50.0],
                             # initial concentration at each surface (+X,-X,+Y,-Y,+Z,-Z) [units^2/s]. -1.0 means no condition assigned. All agents are assigned 0 by default.
@@ -455,10 +457,12 @@ env.newMacroPropertyFloat("BOUNDARY_CONC_FIXED_MULTI", N_SPECIES,
 env.newPropertyUInt("ECM_POPULATION_SIZE", ECM_POPULATION_SIZE)
 
 # Fibre network parameters
+env.newPropertyUInt("INCLUDE_FIBRE_NETWORK", INCLUDE_FIBRE_NETWORK)
 env.newPropertyFloat("MAX_SEARCH_RADIUS_FNODES",MAX_SEARCH_RADIUS_FNODES)
 env.newPropertyFloat("FIBRE_SEGMENT_K_ELAST",FIBRE_SEGMENT_K_ELAST)
 env.newPropertyFloat("FIBRE_SEGMENT_D_DUMPING",FIBRE_SEGMENT_D_DUMPING)
 env.newPropertyFloat("FIBRE_SEGMENT_MASS",FIBRE_SEGMENT_MASS)
+
 # Cell properties
 env.newPropertyUInt("INCLUDE_CELL_ORIENTATION", INCLUDE_CELL_ORIENTATION)
 env.newPropertyUInt("INCLUDE_CELL_CELL_INTERACTION", INCLUDE_CELL_CELL_INTERACTION)
@@ -519,6 +523,23 @@ fnode_spatial_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BO
 fnode_spatial_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS,MAX_EXPECTED_BOUNDARY_POS)
 fnode_spatial_location_message.newVariableInt("id") # as an edge can have multiple inner agents, this stores the position within the edge
 
+fnode_bucket_location_message = model.newMessageBucket("fnode_bucket_location_message")
+# Set the range and bounds.
+# setBounds(min, max) where min and max are the min and max ids of the message buckets. This is independent of the number of agents (there can be more agents than buckets and vice versa).
+# Here, we assign one bucket per fibre node so that each fibre node can be found in its own bucket when searching for neighbours.
+fnode_bucket_location_message.setBounds(8,N_NODES + 8) # +8 because domain corners have idx from 1 to 8. WARNING: make sure to initialize fibre nodes starting from index 9
+
+fnode_bucket_location_message.newVariableInt("id")
+fnode_bucket_location_message.newVariableFloat("x")
+fnode_bucket_location_message.newVariableFloat("y")
+fnode_bucket_location_message.newVariableFloat("z")
+fnode_bucket_location_message.newVariableFloat("vx")
+fnode_bucket_location_message.newVariableFloat("vy")
+fnode_bucket_location_message.newVariableFloat("vz")
+fnode_bucket_location_message.newVariableFloat("k_elast")
+fnode_bucket_location_message.newVariableFloat("d_dumping")
+fnode_bucket_location_message.newVariableArrayUInt("linked_nodes", MAX_CONNECTIVITY) # store the index of the linked nodes, which is a proxy for the bucket id
+
 
 ECM_grid_location_message = model.newMessageArray3D("ECM_grid_location_message")
 ECM_grid_location_message.setDimensions(ECM_AGENTS_PER_DIR[0], ECM_AGENTS_PER_DIR[1], ECM_AGENTS_PER_DIR[2])
@@ -547,8 +568,7 @@ ECM_grid_location_message.newVariableUInt8("clamped_by_neg")
 ECM_grid_location_message.newVariableUInt8("clamped_bz_pos")
 ECM_grid_location_message.newVariableUInt8("clamped_bz_neg")
 
-# TODO: add or remove variables manually to leave only those that need to be reported. If message type is MessageSpatial3D, variables x, y, z are included internally.
-
+# If message type is MessageSpatial3D, variables x, y, z are included internally.
 CELL_spatial_location_message = model.newMessageSpatial3D("CELL_spatial_location_message")
 CELL_spatial_location_message.setRadius(MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION)
 CELL_spatial_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS)
@@ -570,12 +590,83 @@ CELL_spatial_location_message.newVariableFloat("radius")
 CELL_spatial_location_message.newVariableFloat("cycle_phase")
 CELL_spatial_location_message.newVariableFloat("clock")
 CELL_spatial_location_message.newVariableInt("completed_cycles")
-# TODO: add or remove variables manually to leave only those that need to be reported. If message type is MessageSpatial3D, variables x, y, z are included internally.
 
 
 """
   AGENTS
 """
+
+"""
+  BCORNER agent
+"""
+bcorner_agent = model.newAgent("BCORNER") # boundary corner agent to track boundary positions
+bcorner_agent.newVariableInt("id")
+bcorner_agent.newVariableFloat("x")
+bcorner_agent.newVariableFloat("y")
+bcorner_agent.newVariableFloat("z")
+
+bcorner_agent.newRTCFunctionFile("bcorner_output_location_data", bcorner_output_location_data_file).setMessageOutput("bcorner_location_message")
+if MOVING_BOUNDARIES:
+    bcorner_agent.newRTCFunctionFile("bcorner_move", bcorner_move_file)
+
+"""
+  FIBRE NODE agent
+"""
+if INCLUDE_FIBRE_NETWORK:
+    fnode_agent = model.newAgent("FNODE")
+    fnode_agent.newVariableInt("id")
+    fnode_agent.newVariableFloat("x")
+    fnode_agent.newVariableFloat("y")
+    fnode_agent.newVariableFloat("z")
+    fnode_agent.newVariableFloat("vx", 0.0)
+    fnode_agent.newVariableFloat("vy", 0.0)
+    fnode_agent.newVariableFloat("vz", 0.0)
+    fnode_agent.newVariableFloat("fx", 0.0)
+    fnode_agent.newVariableFloat("fy", 0.0)
+    fnode_agent.newVariableFloat("fz", 0.0)
+    fnode_agent.newVariableFloat("k_elast")
+    fnode_agent.newVariableFloat("d_dumping")
+    fnode_agent.newVariableFloat("mass")
+    fnode_agent.newVariableFloat("boundary_fx")  # boundary_f[A]: normal force coming from boundary [A] when elastic boundaries option is selected.
+    fnode_agent.newVariableFloat("boundary_fy")
+    fnode_agent.newVariableFloat("boundary_fz")
+    fnode_agent.newVariableFloat("f_bx_pos")  # f_b[A]_[B]: normal force transmitted to the boundary [A]_[B] when agent is clamped
+    fnode_agent.newVariableFloat("f_bx_neg")
+    fnode_agent.newVariableFloat("f_by_pos")
+    fnode_agent.newVariableFloat("f_by_neg")
+    fnode_agent.newVariableFloat("f_bz_pos")
+    fnode_agent.newVariableFloat("f_bz_neg")
+    fnode_agent.newVariableFloat("f_bx_pos_y")  # f_b[A]_[B]_[C]: shear force transmitted to the boundary [A]_[B] in the direction [C] when agent is clamped
+    fnode_agent.newVariableFloat("f_bx_pos_z")
+    fnode_agent.newVariableFloat("f_bx_neg_y")
+    fnode_agent.newVariableFloat("f_bx_neg_z")
+    fnode_agent.newVariableFloat("f_by_pos_x")
+    fnode_agent.newVariableFloat("f_by_pos_z")
+    fnode_agent.newVariableFloat("f_by_neg_x")
+    fnode_agent.newVariableFloat("f_by_neg_z")
+    fnode_agent.newVariableFloat("f_bz_pos_x")
+    fnode_agent.newVariableFloat("f_bz_pos_y")
+    fnode_agent.newVariableFloat("f_bz_neg_x")
+    fnode_agent.newVariableFloat("f_bz_neg_y")
+    fnode_agent.newVariableFloat("f_extension")
+    fnode_agent.newVariableFloat("f_compression")
+    fnode_agent.newVariableFloat("elastic_energy")
+    fnode_agent.newVariableArrayFloat("linked_nodes", MAX_CONNECTIVITY)
+    fnode_agent.newVariableUInt8("clamped_bx_pos")
+    fnode_agent.newVariableUInt8("clamped_bx_neg")
+    fnode_agent.newVariableUInt8("clamped_by_pos")
+    fnode_agent.newVariableUInt8("clamped_by_neg")
+    fnode_agent.newVariableUInt8("clamped_bz_pos")
+    fnode_agent.newVariableUInt8("clamped_bz_neg")
+
+    fnode_agent.newRTCFunctionFile("fnode_spatial_location_data", fnode_spatial_location_data_file).setMessageOutput("fnode_spatial_location_message")
+    fnode_agent.newRTCFunctionFile("fnode_bucket_location_data", fnode_bucket_location_data_file).setMessageOutput("fnode_bucket_location_message")
+    fnode_agent.newRTCFunctionFile("fnode_boundary_interaction", fnode_boundary_interaction_file)
+    fnode_agent.newRTCFunctionFile("fnode_fnode_spatial_interaction", fnode_fnode_spatial_interaction_file).setMessageInput("fnode_spatial_location_message")
+    fnode_agent.newRTCFunctionFile("fnode_fnode_bucket_interaction", fnode_fnode_bucket_interaction_file).setMessageInput("fnode_bucket_location_message")
+    fnode_agent.newRTCFunctionFile("fnode_move", fnode_move_file)
+
+
 """
   ECM agent
 """
@@ -643,20 +734,10 @@ if INCLUDE_CELLS:
     CELL_agent.newRTCFunctionFile("cell_move", cell_move_file)
 
 
-"""
-  BCORNER agent
-"""
-bcorner_agent = model.newAgent("BCORNER") # boundary corner agent to track boundary positions
-bcorner_agent.newVariableInt("id")
-bcorner_agent.newVariableFloat("x")
-bcorner_agent.newVariableFloat("y")
-bcorner_agent.newVariableFloat("z")
-
-bcorner_agent.newRTCFunctionFile("bcorner_output_location_data", bcorner_output_location_data_file).setMessageOutput("bcorner_location_message")
-if MOVING_BOUNDARIES:
-    bcorner_agent.newRTCFunctionFile("bcorner_move", bcorner_move_file)
 
 
+#Helper functions for agent initialization
+# +--------------------------------------------------------------------+
 def getRandomCoords3D(n, minx, maxx, miny, maxy, minz, maxz):
     """
     Generates an array (nx3 matrix) of random numbers with specific ranges for each column.
@@ -772,11 +853,13 @@ def getRandomCoordsAroundPoint(n, px, py, pz, radius):
   Population initialisation functions
 """
 
-
+# Agent population initialization 
+# +--------------------------------------------------------------------+    
 # This class is used to ensure that corner agents are assigned the first 8 ids
 class initAgentPopulations(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
-        global INIT_ECM_CONCENTRATION_VALS, INIT_CELL_CONCENTRATION_VALS,INIT_CELL_CONC_MASS_VALS, INIT_ECM_SAT_CONCENTRATION_VALS, INIT_CELL_CONSUMPTION_RATES, INIT_CELL_PRODUCTION_RATES,INIT_CELL_REACTION_RATES, N_SPECIES, INCLUDE_DIFFUSION, INCLUDE_CELLS, N_CELLS
+        # TODO: clean this line of globals
+        global INIT_ECM_CONCENTRATION_VALS, INIT_CELL_CONCENTRATION_VALS,INIT_CELL_CONC_MASS_VALS, INIT_ECM_SAT_CONCENTRATION_VALS, INIT_CELL_CONSUMPTION_RATES, INIT_CELL_PRODUCTION_RATES,INIT_CELL_REACTION_RATES, N_SPECIES, INCLUDE_DIFFUSION,INCLUDE_FIBRE_NETWORK, INCLUDE_CELLS, N_CELLS
         # BOUNDARY CORNERS
         current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
         coord_boundary = FLAMEGPU.environment.getPropertyArrayFloat("COORDS_BOUNDARIES")
@@ -837,6 +920,75 @@ class initAgentPopulations(pyflamegpu.HostFunction):
 
         FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", 8)
 
+        # FIBRE NODES
+        if INCLUDE_FIBRE_NETWORK:
+            k_elast = FLAMEGPU.environment.getPropertyFloat("FIBRE_SEGMENT_K_ELAST")
+            d_dumping = FLAMEGPU.environment.getPropertyFloat("FIBRE_SEGMENT_D_DUMPING")
+            mass = FLAMEGPU.environment.getPropertyFloat("FIBRE_SEGMENT_MASS")
+            current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
+            current_id += 1
+            print("FIBRE NODES:")
+            print("current_id:", current_id)    
+            count = -1
+            offset = current_id
+            for fn in range(N_NODES):
+                x = NODE_COORDS[fn, 0]
+                y = NODE_COORDS[fn, 1]
+                z = NODE_COORDS[fn, 2]
+                linked_nodes = np.array(INITIAL_NETWORK_CONNECTIVITY.get(fn, []))   
+                # Add the offset to all values above 0
+                linked_nodes = np.where(linked_nodes > 0, linked_nodes + offset, linked_nodes) 
+                count += 1
+                instance = FLAMEGPU.agent("FNODE").newAgent()
+                instance.setVariableInt("id", current_id + count)
+                instance.setVariableFloat("x", x)
+                instance.setVariableFloat("y", y)
+                instance.setVariableFloat("z", z)            
+                instance.setVariableFloat("vy", 0.0)
+                instance.setVariableFloat("vz", 0.0)
+                instance.setVariableFloat("vx", 0.0)
+                instance.setVariableFloat("fx", 0.0)
+                instance.setVariableFloat("fy", 0.0)
+                instance.setVariableFloat("fz", 0.0)
+                instance.setVariableFloat("k_elast", k_elast)
+                instance.setVariableFloat("d_dumping", d_dumping)
+                instance.setVariableFloat("mass", mass) # TODO: REMOVE
+                instance.setVariableFloat("boundary_fx", 0.0)
+                instance.setVariableFloat("boundary_fy", 0.0)
+                instance.setVariableFloat("boundary_fz", 0.0)
+                instance.setVariableFloat("f_bx_pos", 0.0)
+                instance.setVariableFloat("f_bx_neg", 0.0)
+                instance.setVariableFloat("f_by_pos", 0.0)
+                instance.setVariableFloat("f_by_neg", 0.0)
+                instance.setVariableFloat("f_bz_pos", 0.0)
+                instance.setVariableFloat("f_bz_neg", 0.0)
+                instance.setVariableFloat("f_bx_pos_y", 0.0)
+                instance.setVariableFloat("f_bx_pos_z", 0.0)
+                instance.setVariableFloat("f_bx_neg_y", 0.0)
+                instance.setVariableFloat("f_bx_neg_z", 0.0)
+                instance.setVariableFloat("f_by_pos_x", 0.0)
+                instance.setVariableFloat("f_by_pos_z", 0.0)
+                instance.setVariableFloat("f_by_neg_x", 0.0)
+                instance.setVariableFloat("f_by_neg_z", 0.0)
+                instance.setVariableFloat("f_bz_pos_x", 0.0)
+                instance.setVariableFloat("f_bz_pos_y", 0.0)
+                instance.setVariableFloat("f_bz_neg_x", 0.0)
+                instance.setVariableFloat("f_bz_neg_y", 0.0)
+                instance.setVariableFloat("f_extension", 0.0)
+                instance.setVariableFloat("f_compression", 0.0)
+                instance.setVariableFloat("elastic_energy", 0.0)
+                instance.setVariableUInt8("clamped_bx_pos", 0)
+                instance.setVariableUInt8("clamped_bx_neg", 0)
+                instance.setVariableUInt8("clamped_by_pos", 0)
+                instance.setVariableUInt8("clamped_by_neg", 0)
+                instance.setVariableUInt8("clamped_bz_pos", 0)
+                instance.setVariableUInt8("clamped_bz_neg", 0)
+                instance.setVariableArrayFloat("linked_nodes", linked_nodes.tolist())            
+
+
+            FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
+
+        # TODO: make this dependent on INCLUDE_DIFFUSION
         # ECM
         k_elast = FLAMEGPU.environment.getPropertyFloat("ECM_K_ELAST")
         d_dumping = FLAMEGPU.environment.getPropertyFloat("ECM_D_DUMPING")
@@ -1111,7 +1263,7 @@ class MoveBoundaries(pyflamegpu.HostFunction):
 
 class SaveDataToFile(pyflamegpu.HostFunction):
     def __init__(self):
-        global ECM_AGENTS_PER_DIR
+        global ECM_AGENTS_PER_DIR, INCLUDE_FIBRE_NETWORK, N_NODES
         super().__init__()
         self.header = list()
         self.header.append("# vtk DataFile Version 3.0")
@@ -1119,10 +1271,14 @@ class SaveDataToFile(pyflamegpu.HostFunction):
         self.header.append("ASCII")
         self.header.append("DATASET POLYDATA")
         self.header.append("POINTS {} float".format(8 + ECM_AGENTS_PER_DIR[0] * ECM_AGENTS_PER_DIR[1] * ECM_AGENTS_PER_DIR[2]))  # number of ECM agents + 8 corners
-        # self.header.append("POINTS {} float".format(8))
+        # Domain data for boundary visualization in ECM files
         self.domaindata = list()
-        self.domaindata.append("POLYGONS 6 30")
-        cube_conn = [[4, 0, 3, 7, 4], [4, 1, 2, 6, 5], [4, 1, 0, 4, 5], [4, 2, 3, 7, 6], [4, 0, 1, 2, 3],
+        self.domaindata.append("POLYGONS 6 30")        
+        cube_conn = [[4, 0, 3, 7, 4], 
+                     [4, 1, 2, 6, 5], 
+                     [4, 1, 0, 4, 5], 
+                     [4, 2, 3, 7, 6], 
+                     [4, 0, 1, 2, 3],
                      [4, 4, 5, 6, 7]]
         for i in range(len(cube_conn)):
             for j in range(len(cube_conn[i])):
@@ -1130,12 +1286,21 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                     cube_conn[i][j] = cube_conn[i][j] + ECM_AGENTS_PER_DIR[0] * ECM_AGENTS_PER_DIR[1] * ECM_AGENTS_PER_DIR[2]
             self.domaindata.append(' '.join(str(x) for x in cube_conn[i]))
 
-        # self.domaindata.append("4 0 3 7 4")
-        # self.domaindata.append("4 1 2 6 5")
-        # self.domaindata.append("4 1 0 4 5")
-        # self.domaindata.append("4 2 3 7 6")
-        # self.domaindata.append("4 0 1 2 3")
-        # self.domaindata.append("4 4 5 6 7")
+        if INCLUDE_FIBRE_NETWORK:
+            # Domain data for boundary visualization in FIBRE network files (contains different data)
+            self.domaindata_network = list()
+            cube_conn_network = [[4, 0, 3, 7, 4],
+                     [4, 1, 2, 6, 5], 
+                     [4, 1, 0, 4, 5], 
+                     [4, 2, 3, 7, 6], 
+                     [4, 0, 1, 2, 3],
+                     [4, 4, 5, 6, 7]]
+            for i in range(len(cube_conn_network)):
+                for j in range(len(cube_conn_network[i])):
+                    if j > 0:
+                        cube_conn_network[i][j] = cube_conn_network[i][j] + N_NODES
+                self.domaindata_network.append(' '.join(str(x) for x in cube_conn_network[i]))
+
         self.domaindata.append("CELL_DATA 6")
         self.domaindata.append("SCALARS boundary_index int 1")
         self.domaindata.append("LOOKUP_TABLE default")
@@ -1152,12 +1317,18 @@ class SaveDataToFile(pyflamegpu.HostFunction):
         self.domaindata.append("0 -1 0")
         self.domaindata.append("0 0 1")
         self.domaindata.append("0 0 -1")
-        # VASCULARIZATION
+        # VASCULARIZATION (TODO: UNUSED FOR NOW)
         self.vascularizationdata = list()  # a different file is created to show the position of the vascularization points
         self.vascularizationdata.append("# vtk DataFile Version 3.0")
         self.vascularizationdata.append("Vascularization points")
         self.vascularizationdata.append("ASCII")
         self.vascularizationdata.append("DATASET UNSTRUCTURED_GRID")
+        # FIBRE NODES 
+        self.fibrenodedata = list()  # a different file is created to show fibre node agent data
+        self.fibrenodedata.append("# vtk DataFile Version 3.0") 
+        self.fibrenodedata.append("Fibre node agents")
+        self.fibrenodedata.append("ASCII")
+        self.fibrenodedata.append("DATASET UNSTRUCTURED_GRID")
         # CELLS
         self.celldata = list()  # a different file is created to show cell agent data
         self.celldata.append("# vtk DataFile Version 3.0")
@@ -1168,7 +1339,7 @@ class SaveDataToFile(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
         global SAVE_DATA_TO_FILE, SAVE_EVERY_N_STEPS, N_SPECIES
         global RES_PATH, ENSEMBLE
-        global INCLUDE_CELLS, ECM_POPULATION_SIZE
+        global INCLUDE_FIBRE_NETWORK, INITIAL_NETWORK_CONNECTIVITY,N_NODES, INCLUDE_CELLS, ECM_POPULATION_SIZE
         BUCKLING_COEFF_D0 = FLAMEGPU.environment.getPropertyFloat("BUCKLING_COEFF_D0")
         STRAIN_STIFFENING_COEFF_DS = FLAMEGPU.environment.getPropertyFloat("STRAIN_STIFFENING_COEFF_DS")
         CRITICAL_STRAIN = FLAMEGPU.environment.getPropertyFloat("CRITICAL_STRAIN")
@@ -1178,6 +1349,166 @@ class SaveDataToFile(pyflamegpu.HostFunction):
 
         if SAVE_DATA_TO_FILE:
             if stepCounter % SAVE_EVERY_N_STEPS == 0 or stepCounter == 1:
+
+                if INCLUDE_FIBRE_NETWORK:
+                    file_name = 'fibre_network_data_t{:04d}.vtk'.format(stepCounter)
+                    file_path = RES_PATH / file_name
+
+                    agent = FLAMEGPU.agent("FNODE")
+                    # reaction forces, thus, opposite to agent-applied forces
+                    sum_bx_pos = -agent.sumFloat("f_bx_pos")
+                    sum_bx_neg = -agent.sumFloat("f_bx_neg")
+                    sum_by_pos = -agent.sumFloat("f_by_pos")
+                    sum_by_neg = -agent.sumFloat("f_by_neg")
+                    sum_bz_pos = -agent.sumFloat("f_bz_pos")
+                    sum_bz_neg = -agent.sumFloat("f_bz_neg")
+                    sum_bx_pos_y = -agent.sumFloat("f_bx_pos_y")
+                    sum_bx_pos_z = -agent.sumFloat("f_bx_pos_z")
+                    sum_bx_neg_y = -agent.sumFloat("f_bx_neg_y")
+                    sum_bx_neg_z = -agent.sumFloat("f_bx_neg_z")
+                    sum_by_pos_x = -agent.sumFloat("f_by_pos_x")
+                    sum_by_pos_z = -agent.sumFloat("f_by_pos_z")
+                    sum_by_neg_x = -agent.sumFloat("f_by_neg_x")
+                    sum_by_neg_z = -agent.sumFloat("f_by_neg_z")
+                    sum_bz_pos_x = -agent.sumFloat("f_bz_pos_x")
+                    sum_bz_pos_y = -agent.sumFloat("f_bz_pos_y")
+                    sum_bz_neg_x = -agent.sumFloat("f_bz_neg_x")
+                    sum_bz_neg_y = -agent.sumFloat("f_bz_neg_y")
+
+                    ids = list()
+                    coords = list()
+                    velocity = list()
+                    force = list()
+                    elastic_energy = list()
+
+                    av = agent.getPopulationData()  # this returns a DeviceAgentVector
+                    for ai in av:
+                        id_ai = ai.getVariableInt("id") - 9 # for vtk visualization, FNODE agents start at 0
+                        coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
+                        velocity_ai = (ai.getVariableFloat("vx"), ai.getVariableFloat("vy"), ai.getVariableFloat("vz"))
+                        force_ai = (ai.getVariableFloat("fx"), ai.getVariableFloat("fy"), ai.getVariableFloat("fz"))
+                        ids.append(id_ai)
+                        coords.append(coords_ai)
+                        velocity.append(velocity_ai)
+                        force.append(force_ai)
+                        elastic_energy.append(ai.getVariableFloat("elastic_energy"))
+                        
+                    # Get sorting indices based on ids
+                    sorted_indices = np.argsort(ids)
+
+                    # Rearrange lists according to the sorted indices
+                    ids = [ids[i] for i in sorted_indices]
+                    coords = [coords[i] for i in sorted_indices]
+                    velocity = [velocity[i] for i in sorted_indices]
+                    force = [force[i] for i in sorted_indices]
+                    elastic_energy = [elastic_energy[i] for i in sorted_indices]
+                    # Extract lines from INITIAL_NETWORK_CONNECTIVITY
+                    # To avoid duplicating cells, use a set to keep track of added lines
+                    added_lines = set()
+                    cell_connectivity = []
+                    
+                    for node_index, connections in INITIAL_NETWORK_CONNECTIVITY.items():
+                        for connected_node_index in connections:
+                            if connected_node_index != -1:
+                                # Create a tuple with sorted indices to ensure uniqueness
+                                line = tuple(sorted((node_index, connected_node_index)))
+                                if line not in added_lines:
+                                    added_lines.add(line)
+                                    cell_connectivity.append(line)
+                    
+                    num_cells = len(cell_connectivity)
+                    
+                    
+                    with open(str(file_path), 'w') as file:
+                        for line in self.fibrenodedata:
+                            file.write(line + '\n')
+                            
+                        file.write("POINTS {} float \n".format(N_NODES))
+                        for coords_ai in coords:
+                            file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
+                            
+                        # Write the cell connectivity
+                        file.write(f"CELLS {num_cells + 6} {num_cells * 3 + 6 * 5}\n") # each of the 6 boundaries is a cell of type POLYGON with 4 nodes
+                        for conn in cell_connectivity:
+                            file.write(f"2 {conn[0]} {conn[1]}\n") 
+                        for line in self.domaindata_network:
+                            file.write(line + '\n')
+                        
+                        # Write the cell types (3 for VTK_LINE)
+                        file.write(f"CELL_TYPES {num_cells + 6}\n")
+                        for _ in range(num_cells):
+                            file.write("3\n")  # VTK_LINE  
+                        for _ in range(6):
+                            file.write("7\n")  # VTK_POLYGON 
+                            
+                        file.write(f"CELL_DATA {num_cells + 6}\n")
+                        file.write("SCALARS boundary_idx int 1" + '\n')
+                        file.write("LOOKUP_TABLE default" + '\n')                    
+                        for _ in range(num_cells):
+                            file.write("0\n")    
+                        for bidx in range(6):
+                            file.write(f"{bidx + 1}\n") 
+
+                        file.write("SCALARS boundary_normal_forces float 1" + '\n')
+                        file.write("LOOKUP_TABLE default" + '\n')                    
+                        for _ in range(num_cells):
+                            file.write("0.0\n")    
+                        file.write(str(sum_bx_pos) + '\n')
+                        file.write(str(sum_bx_neg) + '\n')
+                        file.write(str(sum_by_pos) + '\n')
+                        file.write(str(sum_by_neg) + '\n')
+                        file.write(str(sum_bz_pos) + '\n')
+                        file.write(str(sum_bz_neg) + '\n')
+                        
+                        file.write("SCALARS boundary_normal_force_scaling float 1" + '\n')
+                        file.write("LOOKUP_TABLE default" + '\n')
+                        for _ in range(num_cells):
+                            file.write("0.0\n")    
+                        file.write(str(abs(sum_bx_pos)) + '\n')
+                        file.write(str(abs(sum_bx_neg)) + '\n')
+                        file.write(str(abs(sum_by_pos)) + '\n')
+                        file.write(str(abs(sum_by_neg)) + '\n')
+                        file.write(str(abs(sum_bz_pos)) + '\n')
+                        file.write(str(abs(sum_bz_neg)) + '\n')
+                        # must be divided in blocks of 6 (one value per face of the cube)
+                        file.write("SCALARS boundary_shear_forces_pos float 1" + '\n')
+                        file.write("LOOKUP_TABLE default" + '\n')
+                        for _ in range(num_cells):
+                            file.write("0.0\n")    
+                        file.write(str(sum_bx_pos_y) + '\n')
+                        file.write(str(sum_bx_pos_z) + '\n')
+                        file.write(str(sum_by_pos_x) + '\n')
+                        file.write(str(sum_by_pos_z) + '\n')
+                        file.write(str(sum_bz_pos_x) + '\n')
+                        file.write(str(sum_bz_pos_y) + '\n')
+                        file.write("SCALARS boundary_shear_forces_neg float 1" + '\n')
+                        file.write("LOOKUP_TABLE default" + '\n')
+                        for _ in range(num_cells):
+                            file.write("0.0\n")    
+                        file.write(str(sum_bx_neg_y) + '\n')
+                        file.write(str(sum_bx_neg_z) + '\n')
+                        file.write(str(sum_by_neg_x) + '\n')
+                        file.write(str(sum_by_neg_z) + '\n')
+                        file.write(str(sum_bz_neg_x) + '\n')
+                        file.write(str(sum_bz_neg_y) + '\n')
+
+
+                        file.write("POINT_DATA {} \n".format(N_NODES))  # number of FNODE agents
+
+                        file.write("SCALARS elastic_energy float 1" + '\n')
+                        file.write("LOOKUP_TABLE default" + '\n')
+                        for ee_ai in elastic_energy:
+                            file.write("{:.4f} \n".format(ee_ai))
+
+                        file.write("VECTORS velocity float" + '\n')
+                        for v_ai in velocity:
+                            file.write("{:.4f} {:.4f} {:.4f} \n".format(v_ai[0], v_ai[1], v_ai[2]))
+
+                        file.write("VECTORS force float" + '\n')
+                        for f_ai in force:
+                            file.write("{:.4f} {:.4f} {:.4f} \n".format(f_ai[0], f_ai[1], f_ai[2]))
+
+
                 if INCLUDE_CELLS:
                     cell_coords = list()
                     cell_velocity = list()
@@ -1479,41 +1810,48 @@ model.addStepFunction(sdf)
 """
   Control flow
 """
-layer_count = 0
-# L1_Agent_Locations
-layer_count += 1
-if INCLUDE_CELLS:
-    model.newLayer("L1_Agent_Locations").addAgentFunction("CELL", "cell_output_location_data")
-    model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_output_grid_location_data")
-else:
-    model.newLayer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_output_grid_location_data")
+
+# L1: Agent_Locations
+model.newLayer("L1_Agent_Locations").addAgentFunction("BCORNER", "bcorner_output_location_data")
 if INCLUDE_DIFFUSION:
-    # L2_Boundary_Interactions
-    layer_count += 1
-    model.newLayer("L2_Boundary_Interactions").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
+    model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_output_grid_location_data")
+if INCLUDE_CELLS:
+    model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_output_location_data")
+if INCLUDE_FIBRE_NETWORK:
+    model.Layer("L1_Agent_Locations").addAgentFunction("FNODE", "fnode_output_location_data")
+    model.Layer("L1_Agent_Locations").addAgentFunction("FNODE", "fnode_bucket_location_data")
+
+# L2: Boundary_Interactions  
+if INCLUDE_DIFFUSION:
+    model.newLayer("L2_ECM_Boundary_Interactions").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
+if INCLUDE_FIBRE_NETWORK:
+    model.newLayer("L2_FNODE_Boundary_Interactions").addAgentFunction("FNODE", "fnode_boundary_interaction")
+
 if INCLUDE_CELLS and INCLUDE_DIFFUSION:
     # L3_Metabolism
-    layer_count += 1
     model.newLayer("L3_Metabolism").addAgentFunction("CELL", "cell_ecm_interaction_metabolism")
 if INCLUDE_DIFFUSION:
     # L4_ECM_Csp_Update
-    layer_count += 1
     model.newLayer("L4_ECM_Csp_Update").addAgentFunction("ECM", "ecm_Csp_update")
     # L5_Diffusion
-    layer_count += 1
     model.newLayer("L5_Diffusion").addAgentFunction("ECM", "ecm_ecm_interaction")
     # L6_Diffusion_Boundary (called twice to ensure concentration at boundaries is properly shown visually)
-    layer_count += 1
     model.newLayer("L6_Diffusion_Boundary").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
+if INCLUDE_FIBRE_NETWORK:
+    # L7_Fibre_Network Mechanical interactions
+    model.newLayer("L7_FNODE_Repulsion").addAgentFunction("FNODE", "fnode_fnode_spatial_interaction")
+    model.newLayer("L7_FNODE_Network_Mechanics").addAgentFunction("FNODE", "fnode_fnode_bucket_interaction")
+
+# L8_Agent_Movement
 if INCLUDE_CELLS:
-    # L7_Agent_Movement
-    layer_count += 1
-    model.newLayer("L7_Agent_Movement").addAgentFunction("CELL", "cell_move")
+    model.newLayer("L8_CELL_Movement").addAgentFunction("CELL", "cell_move")
+if INCLUDE_FIBRE_NETWORK:
+    model.newLayer("L8_FNODE_Movement").addAgentFunction("FNODE", "fnode_move")
 # If boundaries are not moving, the ECM grid does not need to be updated
 if MOVING_BOUNDARIES:
-    model.Layer("L7_Agent_Movement").addAgentFunction("ECM", "ecm_move")
-    model.Layer("L7_Agent_Movement").addAgentFunction("BCORNER", "bcorner_move")
-
+    model.newLayer("L8_BCORNER_Movement").addAgentFunction("BCORNER", "bcorner_move")
+    model.newLayer("L8_ECM_Movement").addAgentFunction("ECM", "ecm_move")
+    
 
 """
   Logging
