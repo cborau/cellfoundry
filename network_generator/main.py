@@ -3,7 +3,7 @@ import numpy as np
 from initial_network_generation import initial_network_generation
 from network_optimization import network_optimization
 from branch_optimization import branch_optimization
-from helper_functions import plot_network_3d, add_intermediate_nodes, compute_node_connectivity, scale_to_unit_cube, snap_to_boundaries, remove_boundary_connectivity, add_intermediate_nodes_to_plot, get_valency_and_pore_size, save_network_to_vtk, generate_random_vars, get_node_median_distance
+from helper_functions_network_gen import plot_network_3d, add_intermediate_nodes, compute_node_connectivity, scale_to_unit_cube, snap_to_boundaries, remove_boundary_connectivity, add_intermediate_nodes_to_plot, get_valency_and_pore_size, save_network_to_vtk, generate_random_vars, get_node_median_distance
 import matplotlib.pyplot as plt
 import pickle
 

@@ -1,6 +1,6 @@
 # +====================================================================+
 # | Model: metabolism                                    |
-# | Last update: 15/12/2025 - 13:28:03                                    |
+# | Last update: 02/02/2026 - 13:28:03                                    |
 # +====================================================================+
 
 
@@ -15,6 +15,7 @@ import numpy as np
 import random
 import os
 import pickle
+from helper_functions_main import compute_expected_boundary_pos_from_corners, getRandomVectors3D
 
 start_time = time.time()
 
@@ -58,7 +59,7 @@ ECM_ETA = 1  # [1/time]
 BOUNDARY_COORDS = [100.0, -100.0, 100.0, -100.0, 100.0, -100.0] # microdevice dimensions in um
 #BOUNDARY_COORDS = [coord / 1000.0 for coord in BOUNDARY_COORDS] # in mm
 BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [units/time]
-BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[units/time]
+BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[units/time]
 
 POISSON_DIRS = [0, 1]  # 0: xdir, 1:ydir, 2:zdir. poisson_ratio ~= -incL(dir1)/incL(dir2) dir2 is the direction in which the load is applied
 ALLOW_BOUNDARY_ELASTIC_MOVEMENT = [0, 0, 0, 0, 0, 0]  # [bool]
@@ -67,7 +68,7 @@ BOUNDARY_STIFFNESS_VALUE = 10.0  # N/units
 BOUNDARY_DUMPING_VALUE = 5.0
 BOUNDARY_STIFFNESS = [BOUNDARY_STIFFNESS_VALUE * x for x in RELATIVE_BOUNDARY_STIFFNESS]
 BOUNDARY_DUMPING = [BOUNDARY_DUMPING_VALUE * x for x in RELATIVE_BOUNDARY_STIFFNESS]
-CLAMP_AGENT_TOUCHING_BOUNDARY = [0, 0, 1, 1, 0, 0]  # +X,-X,+Y,-Y,+Z,-Z [bool] - shear assay
+CLAMP_AGENT_TOUCHING_BOUNDARY = [1, 1, 1, 1, 1, 1]  # +X,-X,+Y,-Y,+Z,-Z [bool] - shear assay
 #CLAMP_AGENT_TOUCHING_BOUNDARY = [1, 1, 1, 1, 1, 1]  # +X,-X,+Y,-Y,+Z,-Z [bool]
 ALLOW_AGENT_SLIDING = [0, 0, 0, 0, 0, 0]  # +X,-X,+Y,-Y,+Z,-Z [bool]
 
@@ -117,7 +118,7 @@ MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION = ECM_ECM_EQUILIBRIUM_DISTANCE # this rad
 print("MAX_SEARCH_RADIUS for CELLS [units]: ", MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION)
 MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION = 2 * ECM_ECM_EQUILIBRIUM_DISTANCE # this radius is used to check if cells interact with each other
 
-OSCILLATORY_SHEAR_ASSAY = True  # if True, BOUNDARY_DISP_RATES_PARALLEL options are overrun but used to make the boundaries oscillate in their corresponding planes following a sin() function
+OSCILLATORY_SHEAR_ASSAY = False  # if True, BOUNDARY_DISP_RATES_PARALLEL options are overrun but used to make the boundaries oscillate in their corresponding planes following a sin() function
 OSCILLATORY_AMPLITUDE = 0.25 * (BOUNDARY_COORDS[2] - BOUNDARY_COORDS[3])  # range [0-1] * domain size in the direction of oscillation
 OSCILLATORY_FREQ = 0.05  # strain oscillation frequency [time^-1]
 OSCILLATORY_W = 2 * math.pi * OSCILLATORY_FREQ * TIME_STEP
@@ -171,7 +172,6 @@ FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE = 0.0
 MAX_SEARCH_RADIUS_FNODES = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / 10.0 # must me smaller than FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
 
 
-
 # Diffusion related paramenters
 # +--------------------------------------------------------------------+
 INCLUDE_DIFFUSION = True
@@ -215,68 +215,6 @@ INIT_CELL_PRODUCTION_RATES = [0.0, 10.0]  # production rate of each species by t
 INIT_CELL_REACTION_RATES = [0.00018, 0.00018]  # metabolic reaction rates of each species by the CELL agents 
 
 # +--------------------------------------------------------------------+
-def compute_expected_boundary_pos_from_corners(
-    BOUNDARY_COORDS,
-    BOUNDARY_DISP_RATES,
-    BOUNDARY_DISP_RATES_PARALLEL,
-    STEPS,
-    TIME_STEP,
-):
-    """
-    Compute MIN_EXPECTED_BOUNDARY_POS and MAX_EXPECTED_BOUNDARY_POS as the global min/max
-    across (x,y,z) of the 8 corners after applying boundary motion.
-    """
-    x_max0, x_min0, y_max0, y_min0, z_max0, z_min0 = BOUNDARY_COORDS
-    R = BOUNDARY_DISP_RATES
-    P = BOUNDARY_DISP_RATES_PARALLEL
-    T = STEPS * TIME_STEP
-
-    # Face displacement vectors (vx, vy, vz)
-    # +X: normal -> x, parallel -> y,z
-    v_plusX  = (R[0],  P[0],  P[1])
-    v_minusX = (R[1],  P[2],  P[3])
-
-    # +Y: normal -> y, parallel -> x,z
-    v_plusY  = (P[4],  R[2],  P[5])
-    v_minusY = (P[6],  R[3],  P[7])
-
-    # +Z: normal -> z, parallel -> x,y
-    v_plusZ  = (P[8],  P[9],  R[4])
-    v_minusZ = (P[10], P[11], R[5])
-
-    # Helper: sum three face vectors
-    def add3(a, b, c):
-        return (a[0] + b[0] + c[0],
-                a[1] + b[1] + c[1],
-                a[2] + b[2] + c[2])
-
-    # 8 corners: (x choice, y choice, z choice) and their 3 contributing faces
-    corners = [
-        # x_max, y_max, z_max affected by +X, +Y, +Z
-        ((x_max0, y_max0, z_max0), add3(v_plusX,  v_plusY,  v_plusZ)),
-        ((x_max0, y_max0, z_min0), add3(v_plusX,  v_plusY,  v_minusZ)),
-        ((x_max0, y_min0, z_max0), add3(v_plusX,  v_minusY, v_plusZ)),
-        ((x_max0, y_min0, z_min0), add3(v_plusX,  v_minusY, v_minusZ)),
-
-        ((x_min0, y_max0, z_max0), add3(v_minusX, v_plusY,  v_plusZ)),
-        ((x_min0, y_max0, z_min0), add3(v_minusX, v_plusY,  v_minusZ)),
-        ((x_min0, y_min0, z_max0), add3(v_minusX, v_minusY, v_plusZ)),
-        ((x_min0, y_min0, z_min0), add3(v_minusX, v_minusY, v_minusZ)),
-    ]
-
-    moved_corners = []
-    for (x0, y0, z0), (vx, vy, vz) in corners:
-        moved_corners.append((x0 + vx * T, y0 + vy * T, z0 + vz * T))
-
-    # global min/max across all coordinates of all moved corners
-    flat = [c for pt in moved_corners for c in pt]
-    min_expected_pos = min(flat)
-    max_expected_pos = max(flat)
-
-    return min_expected_pos, max_expected_pos, moved_corners
-
-
-
 # Other simulation parameters: TODO: INCLUDE PARALLEL DISP RATES
 # +--------------------------------------------------------------------+
 if not OSCILLATORY_SHEAR_ASSAY:
@@ -772,121 +710,6 @@ if INCLUDE_CELLS:
     CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ECM_grid_location_message")
     CELL_agent.newRTCFunctionFile("cell_move", cell_move_file)
 
-
-
-
-#Helper functions for agent initialization
-# +--------------------------------------------------------------------+
-def getRandomCoords3D(n, minx, maxx, miny, maxy, minz, maxz):
-    """
-    Generates an array (nx3 matrix) of random numbers with specific ranges for each column.
-
-    Args:
-        n (int): Number of rows in the array.
-        minx, maxx (float): Range for the values in the first column [minx, maxx].
-        miny, maxy (float): Range for the values in the second column [miny, maxy].
-        minz, maxz (float): Range for the values in the third column [minz, maxz].
-
-    Returns:
-        numpy.ndarray: Array of random numbers with shape (n, 3).
-    """
-    np.random.seed()
-    random_array = np.random.uniform(low=[minx, miny, minz], high=[maxx, maxy, maxz], size=(n, 3))
-    return random_array
-    
-
-def randomVector3D():
-    """
-    Generates a random 3D unit vector (direction) with a uniform spherical distribution
-
-    Returns
-    -------
-    (x,y,z) : tuple
-        Coordinates of the vector.
-    """
-    np.random.seed()
-    phi = np.random.uniform(0.0, np.pi * 2.0)
-    costheta = np.random.uniform(-1.0, 1.0)
-    theta = np.arccos(costheta)
-    x = np.sin(theta) * np.cos(phi)
-    y = np.sin(theta) * np.sin(phi)
-    z = np.cos(theta)
-    return (x, y, z)
-
-
-def getRandomVectors3D(n_vectors: int):
-    """
-    Generates an array of random 3D unit vectors (directions) with a uniform spherical distribution
-
-    Parameters
-    ----------
-    n_vectors : int
-        Number of vectors to be generated
-    Returns
-    -------
-    v_array : Numpy array
-        Coordinates of the vectors. Shape: [n_vectors, 3].
-    """
-    v_array = np.zeros((n_vectors, 3))
-    for i in range(n_vectors):
-        vi = randomVector3D()
-        v_array[i, :] = np.array(vi, dtype='float')
-
-    return v_array
-
-
-def getFixedVectors3D(n_vectors: int, v_dir: np.array):
-    """
-    Generates an array of 3D unit vectors (directions) in the specified direction
-
-    Parameters
-    ----------
-    n_vectors : int
-        Number of vectors to be generated
-    v_dir : Numpy array
-        Direction of the vectors
-    Returns
-    -------
-    v_array : Numpy array
-        Coordinates of the vectors. Shape: [n_vectors, 3].
-    """
-    v_array = np.tile(v_dir, (n_vectors, 1))
-
-    return v_array
-    
-    
-def getRandomCoordsAroundPoint(n, px, py, pz, radius):
-    """
-    Generates N random 3D coordinates within a sphere of a specific radius around a central point.
-
-    Parameters
-    ----------
-    n : int
-        The number of random coordinates to generate.
-    px : float
-        The x-coordinate of the central point.
-    py : float
-        The y-coordinate of the central point.
-    pz : float
-        The z-coordinate of the central point.
-    radius : float
-        The radius of the sphere.
-
-    Returns
-    -------
-    coords
-        A numpy array of randomly generated 3D coordinates with shape (n, 3).
-    """
-    central_point = np.array([px, py, pz])
-    rand_dirs = getRandomVectors3D(n)
-    coords = np.zeros((n, 3))
-    np.random.seed()
-    for i in range(n):
-        radius_i = np.random.uniform(0.0, 1.0) * radius        
-        coords[i, :] = central_point + np.array(rand_dirs[i, :] * radius_i, dtype='float')
-    
-
-    return coords
 
 """
   Population initialisation functions
