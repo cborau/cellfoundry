@@ -92,7 +92,7 @@ plot_vars_over_time(
     {"cells": df_cells, "ecm": df_ecm},
     [f"concentration_species_{i}" for i in range(2)],
     nearest_xyz=(0.0, 0.0, 0.0),
-    nearest_mode="per_time",   # or "per_time"
+    nearest_mode="per_time",   # fixed_id or "per_time"
     use_time_col="t",
     title="Nearest-point species traces",
     subplot_mode="by_species",

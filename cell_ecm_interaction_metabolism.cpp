@@ -155,9 +155,9 @@ FLAMEGPU_AGENT_FUNCTION(cell_ecm_interaction_metabolism, flamegpu::MessageArray3
     const float C_ecm_new = M_voxel_new / ECM_VOXEL_VOLUME;
     const float C_cell_new = M_cell_new / agent_volume;
 
-    // Write ECM (absolute set, atomic)
-    C_SP_MACRO[i][message_grid_lin_id].exchange(C_ecm_new);
-
+    // Write ECM (atomic addition -> multiple cells may write to same voxel in parallel. Concentration cannot be negative due to clamping above)
+    C_SP_MACRO[i][message_grid_lin_id].addAtomic(C_ecm_new - C_ecm_old);
+    //C_SP_MACRO[i][message_grid_lin_id].exchange(C_ecm_new);
     // Store cell amount + concentration mirror
     M_sp[i] = M_cell_new;
     C_sp[i] = C_cell_new;

@@ -1735,40 +1735,41 @@ if MOVING_BOUNDARIES:
 logging_config = pyflamegpu.LoggingConfig(model)
 
 logging_config.logEnvironment("COORDS_BOUNDARIES")
-fnode_agent_log = logging_config.agent("FNODE")
-fnode_agent_log.logCount()
-fnode_agent_log.logSumFloat("f_bx_pos")
-fnode_agent_log.logSumFloat("f_bx_neg")
-fnode_agent_log.logSumFloat("f_by_pos")
-fnode_agent_log.logSumFloat("f_by_neg")
-fnode_agent_log.logSumFloat("f_bz_pos")
-fnode_agent_log.logSumFloat("f_bz_neg")
+if INCLUDE_FIBRE_NETWORK:
+    fnode_agent_log = logging_config.agent("FNODE")
+    fnode_agent_log.logCount()
+    fnode_agent_log.logSumFloat("f_bx_pos")
+    fnode_agent_log.logSumFloat("f_bx_neg")
+    fnode_agent_log.logSumFloat("f_by_pos")
+    fnode_agent_log.logSumFloat("f_by_neg")
+    fnode_agent_log.logSumFloat("f_bz_pos")
+    fnode_agent_log.logSumFloat("f_bz_neg")
 
-fnode_agent_log.logSumFloat("f_bx_pos_y")
-fnode_agent_log.logSumFloat("f_bx_pos_z")
-fnode_agent_log.logSumFloat("f_bx_neg_y")
-fnode_agent_log.logSumFloat("f_bx_neg_z")
-fnode_agent_log.logSumFloat("f_by_pos_x")
-fnode_agent_log.logSumFloat("f_by_pos_z")
-fnode_agent_log.logSumFloat("f_by_neg_x")
-fnode_agent_log.logSumFloat("f_by_neg_z")
-fnode_agent_log.logSumFloat("f_bz_pos_x")
-fnode_agent_log.logSumFloat("f_bz_pos_y")
-fnode_agent_log.logSumFloat("f_bz_neg_x")
-fnode_agent_log.logSumFloat("f_bz_neg_y")
+    fnode_agent_log.logSumFloat("f_bx_pos_y")
+    fnode_agent_log.logSumFloat("f_bx_pos_z")
+    fnode_agent_log.logSumFloat("f_bx_neg_y")
+    fnode_agent_log.logSumFloat("f_bx_neg_z")
+    fnode_agent_log.logSumFloat("f_by_pos_x")
+    fnode_agent_log.logSumFloat("f_by_pos_z")
+    fnode_agent_log.logSumFloat("f_by_neg_x")
+    fnode_agent_log.logSumFloat("f_by_neg_z")
+    fnode_agent_log.logSumFloat("f_bz_pos_x")
+    fnode_agent_log.logSumFloat("f_bz_pos_y")
+    fnode_agent_log.logSumFloat("f_bz_neg_x")
+    fnode_agent_log.logSumFloat("f_bz_neg_y")
 
-fnode_agent_log.logMeanFloat("f_bx_pos")
-fnode_agent_log.logMeanFloat("f_bx_neg")
-fnode_agent_log.logMeanFloat("f_by_pos")
-fnode_agent_log.logMeanFloat("f_by_neg")
-fnode_agent_log.logMeanFloat("f_bz_pos")
-fnode_agent_log.logMeanFloat("f_bz_neg")
-fnode_agent_log.logStandardDevFloat("f_bx_pos")
-fnode_agent_log.logStandardDevFloat("f_bx_neg")
-fnode_agent_log.logStandardDevFloat("f_by_pos")
-fnode_agent_log.logStandardDevFloat("f_by_neg")
-fnode_agent_log.logStandardDevFloat("f_bz_pos")
-fnode_agent_log.logStandardDevFloat("f_bz_neg")
+    fnode_agent_log.logMeanFloat("f_bx_pos")
+    fnode_agent_log.logMeanFloat("f_bx_neg")
+    fnode_agent_log.logMeanFloat("f_by_pos")
+    fnode_agent_log.logMeanFloat("f_by_neg")
+    fnode_agent_log.logMeanFloat("f_bz_pos")
+    fnode_agent_log.logMeanFloat("f_bz_neg")
+    fnode_agent_log.logStandardDevFloat("f_bx_pos")
+    fnode_agent_log.logStandardDevFloat("f_bx_neg")
+    fnode_agent_log.logStandardDevFloat("f_by_pos")
+    fnode_agent_log.logStandardDevFloat("f_by_neg")
+    fnode_agent_log.logStandardDevFloat("f_bz_pos")
+    fnode_agent_log.logStandardDevFloat("f_bz_neg")
 
 step_log = pyflamegpu.StepLoggingConfig(logging_config)
 step_log.setFrequency(1) # if 1, data will be logged every step
@@ -1924,44 +1925,48 @@ def manageLogs(steps, is_ensemble, idx):
                                   [("fxpos_y", float), ("fxpos_z", float), ("fxneg_y", float), ("fxneg_z", float),
                                    ("fypos_x", float), ("fypos_z", float), ("fyneg_x", float), ("fyneg_z", float),
                                    ("fzpos_x", float), ("fzpos_y", float), ("fzneg_x", float), ("fzneg_y", float)])
-    for step in steps:
-        stepcount = step.getStepCount()
-        if stepcount % SAVE_EVERY_N_STEPS == 0 or stepcount == 1:
-            fnode_agents = step.getAgent("FNODE")
-            ecm_agent_counts[counter] = fnode_agents.getCount()
-            f_bx_pos = fnode_agents.getSumFloat("f_bx_pos")
-            f_bx_neg = fnode_agents.getSumFloat("f_bx_neg")
-            f_by_pos = fnode_agents.getSumFloat("f_by_pos")
-            f_by_neg = fnode_agents.getSumFloat("f_by_neg")
-            f_bz_pos = fnode_agents.getSumFloat("f_bz_pos")
-            f_bz_neg = fnode_agents.getSumFloat("f_bz_neg")
-            f_bx_pos_y = fnode_agents.getSumFloat("f_bx_pos_y")
-            f_bx_pos_z = fnode_agents.getSumFloat("f_bx_pos_z")
-            f_bx_neg_y = fnode_agents.getSumFloat("f_bx_neg_y")
-            f_bx_neg_z = fnode_agents.getSumFloat("f_bx_neg_z")
-            f_by_pos_x = fnode_agents.getSumFloat("f_by_pos_x")
-            f_by_pos_z = fnode_agents.getSumFloat("f_by_pos_z")
-            f_by_neg_x = fnode_agents.getSumFloat("f_by_neg_x")
-            f_by_neg_z = fnode_agents.getSumFloat("f_by_neg_z")
-            f_bz_pos_x = fnode_agents.getSumFloat("f_bz_pos_x")
-            f_bz_pos_y = fnode_agents.getSumFloat("f_bz_pos_y")
-            f_bz_neg_x = fnode_agents.getSumFloat("f_bz_neg_x")
-            f_bz_neg_y = fnode_agents.getSumFloat("f_bz_neg_y")
+    BFORCE_OVER_TIME = []
+    BFORCE_SHEAR_OVER_TIME = []
 
-            step_bforce = pd.DataFrame([BFORCE(f_bx_pos, f_bx_neg, f_by_pos, f_by_neg, f_bz_pos, f_bz_neg)])
-            step_bforce_shear = pd.DataFrame([BFORCE_SHEAR(f_bx_pos_y, f_bx_pos_z, f_bx_neg_y, f_bx_neg_z,
-                                                           f_by_pos_x, f_by_pos_z, f_by_neg_x, f_by_neg_z,
-                                                           f_bz_pos_x, f_bz_pos_y, f_bz_neg_x, f_bz_neg_y)])
-            if counter == 0:
-                BFORCE_OVER_TIME = pd.DataFrame([BFORCE(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)])
-                BFORCE_SHEAR_OVER_TIME = pd.DataFrame(
-                    [BFORCE_SHEAR(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)])
-            else:
-                # BFORCE_OVER_TIME = BFORCE_OVER_TIME.append(step_bforce, ignore_index=True) # deprecated
-                BFORCE_OVER_TIME = pd.concat([BFORCE_OVER_TIME, step_bforce], ignore_index=True)
-                # BFORCE_SHEAR_OVER_TIME = BFORCE_SHEAR_OVER_TIME.append(step_bforce_shear, ignore_index=True) # deprecated
-                BFORCE_SHEAR_OVER_TIME = pd.concat([BFORCE_SHEAR_OVER_TIME, step_bforce_shear], ignore_index=True)
-            counter += 1
+    if INCLUDE_FIBRE_NETWORK:
+        for step in steps:
+            stepcount = step.getStepCount()
+            if stepcount % SAVE_EVERY_N_STEPS == 0 or stepcount == 1:
+                fnode_agents = step.getAgent("FNODE")
+                ecm_agent_counts[counter] = fnode_agents.getCount()
+                f_bx_pos = fnode_agents.getSumFloat("f_bx_pos")
+                f_bx_neg = fnode_agents.getSumFloat("f_bx_neg")
+                f_by_pos = fnode_agents.getSumFloat("f_by_pos")
+                f_by_neg = fnode_agents.getSumFloat("f_by_neg")
+                f_bz_pos = fnode_agents.getSumFloat("f_bz_pos")
+                f_bz_neg = fnode_agents.getSumFloat("f_bz_neg")
+                f_bx_pos_y = fnode_agents.getSumFloat("f_bx_pos_y")
+                f_bx_pos_z = fnode_agents.getSumFloat("f_bx_pos_z")
+                f_bx_neg_y = fnode_agents.getSumFloat("f_bx_neg_y")
+                f_bx_neg_z = fnode_agents.getSumFloat("f_bx_neg_z")
+                f_by_pos_x = fnode_agents.getSumFloat("f_by_pos_x")
+                f_by_pos_z = fnode_agents.getSumFloat("f_by_pos_z")
+                f_by_neg_x = fnode_agents.getSumFloat("f_by_neg_x")
+                f_by_neg_z = fnode_agents.getSumFloat("f_by_neg_z")
+                f_bz_pos_x = fnode_agents.getSumFloat("f_bz_pos_x")
+                f_bz_pos_y = fnode_agents.getSumFloat("f_bz_pos_y")
+                f_bz_neg_x = fnode_agents.getSumFloat("f_bz_neg_x")
+                f_bz_neg_y = fnode_agents.getSumFloat("f_bz_neg_y")
+
+                step_bforce = pd.DataFrame([BFORCE(f_bx_pos, f_bx_neg, f_by_pos, f_by_neg, f_bz_pos, f_bz_neg)])
+                step_bforce_shear = pd.DataFrame([BFORCE_SHEAR(f_bx_pos_y, f_bx_pos_z, f_bx_neg_y, f_bx_neg_z,
+                                                            f_by_pos_x, f_by_pos_z, f_by_neg_x, f_by_neg_z,
+                                                            f_bz_pos_x, f_bz_pos_y, f_bz_neg_x, f_bz_neg_y)])
+                if counter == 0:
+                    BFORCE_OVER_TIME = pd.DataFrame([BFORCE(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)])
+                    BFORCE_SHEAR_OVER_TIME = pd.DataFrame(
+                        [BFORCE_SHEAR(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)])
+                else:
+                    # BFORCE_OVER_TIME = BFORCE_OVER_TIME.append(step_bforce, ignore_index=True) # deprecated
+                    BFORCE_OVER_TIME = pd.concat([BFORCE_OVER_TIME, step_bforce], ignore_index=True)
+                    # BFORCE_SHEAR_OVER_TIME = BFORCE_SHEAR_OVER_TIME.append(step_bforce_shear, ignore_index=True) # deprecated
+                    BFORCE_SHEAR_OVER_TIME = pd.concat([BFORCE_SHEAR_OVER_TIME, step_bforce_shear], ignore_index=True)
+                counter += 1
     if not is_ensemble:
         print()
         print("============================")
