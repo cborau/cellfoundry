@@ -1,6 +1,6 @@
 # +====================================================================+
-# | Model: metabolism                                    |
-# | Last update: 02/02/2026 - 13:28:03                                    |
+# | Model: metabolism                                                  |
+# | Last update: 02/02/2026 - 13:28:03                                 |
 # +====================================================================+
 
 
@@ -33,7 +33,7 @@ PAUSE_EVERY_STEP = False  # If True, the visualization stops every step until P 
 SAVE_PICKLE = True  # If True, dumps model configuration into a pickle file for post-processing
 SHOW_PLOTS = True  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
-SAVE_EVERY_N_STEPS = 50  # Affects both the .vtk files and the Dataframes storing boundary data
+SAVE_EVERY_N_STEPS = 50# Affects both the .vtk files and the Dataframes storing boundary data
 
 CURR_PATH = pathlib.Path().absolute()
 RES_PATH = CURR_PATH / 'result_files'
@@ -48,7 +48,7 @@ N = 21
 
 # Time simulation parameters
 # +--------------------------------------------------------------------+
-TIME_STEP = 0.01  # time. WARNING: diffusion and cell migration events might need different scales
+TIME_STEP = 0.01# time. WARNING: diffusion and cell migration events might need different scales
 STEPS = 5000
 
 # Boundary interactions and mechanical parameters
@@ -58,10 +58,10 @@ ECM_D_DUMPING = 0.04  # [N*s/units/kg]
 ECM_ETA = 1  # [1/time]
 
 #BOUNDARY_COORDS = [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]  # +X,-X,+Y,-Y,+Z,-Z
-BOUNDARY_COORDS = [100.0, -100.0, 100.0, -100.0, 100.0, -100.0] # microdevice dimensions in um
+BOUNDARY_COORDS = [100.0, -100.0, 100.0, -100.0, 100.0, -100.0]# microdevice dimensions in um
 #BOUNDARY_COORDS = [coord / 1000.0 for coord in BOUNDARY_COORDS] # in mm
-BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [units/time]
-BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[units/time]
+BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [units/time]
+BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[units/time]
 
 POISSON_DIRS = [0, 1]  # 0: xdir, 1:ydir, 2:zdir. poisson_ratio ~= -incL(dir1)/incL(dir2) dir2 is the direction in which the load is applied
 ALLOW_BOUNDARY_ELASTIC_MOVEMENT = [0, 0, 0, 0, 0, 0]  # [bool]
@@ -70,9 +70,9 @@ BOUNDARY_STIFFNESS_VALUE = 10.0  # N/units
 BOUNDARY_DUMPING_VALUE = 5.0
 BOUNDARY_STIFFNESS = [BOUNDARY_STIFFNESS_VALUE * x for x in RELATIVE_BOUNDARY_STIFFNESS]
 BOUNDARY_DUMPING = [BOUNDARY_DUMPING_VALUE * x for x in RELATIVE_BOUNDARY_STIFFNESS]
-CLAMP_AGENT_TOUCHING_BOUNDARY = [0, 0, 1, 1, 0, 0]  # +X,-X,+Y,-Y,+Z,-Z [bool] - shear assay
+CLAMP_AGENT_TOUCHING_BOUNDARY = [0, 0, 1, 1, 0, 1]# +X,-X,+Y,-Y,+Z,-Z [bool] - shear assay
 #CLAMP_AGENT_TOUCHING_BOUNDARY = [1, 1, 1, 1, 1, 1]  # +X,-X,+Y,-Y,+Z,-Z [bool]
-ALLOW_AGENT_SLIDING = [0, 0, 0, 0, 0, 0]  # +X,-X,+Y,-Y,+Z,-Z [bool]
+ALLOW_AGENT_SLIDING = [0, 0, 0, 0, 0, 0]# +X,-X,+Y,-Y,+Z,-Z [bool]
 
 
 if any(rate != 0.0 for rate in BOUNDARY_DISP_RATES_PARALLEL) or any(rate != 0.0 for rate in BOUNDARY_DISP_RATES):
