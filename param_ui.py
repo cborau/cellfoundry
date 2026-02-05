@@ -10,7 +10,7 @@ from PySide6.QtGui import QColor, QFont, QTextCursor, QSyntaxHighlighter, QTextC
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFileDialog, QPlainTextEdit, QTextEdit,
     QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, QPushButton, QLineEdit,
-    QCheckBox, QLabel, QMessageBox, QSplitter
+    QCheckBox, QLabel, QMessageBox, QSplitter, QGridLayout
 )
 
 
@@ -40,6 +40,20 @@ class PythonHighlighter(QSyntaxHighlighter):
         self.f_class = fmt("#4EC9B0", bold=True)
         self.f_operator = fmt("#D4D4D4")
         self.f_bracket = fmt("#D4D4D4")
+        self.section_bg = QColor("#E09470")
+        self.f_section_bg = QTextCharFormat()
+        self.f_section_bg.setBackground(self.section_bg)
+        self.section_fg = QColor("#2B1D0F")
+        self.f_section_line = QTextCharFormat()
+        self.f_section_line.setBackground(self.section_bg)
+        self.f_section_line.setForeground(self.section_fg)
+        self.subsection_bg = QColor("#C7AA7F")
+        self.f_subsection_bg = QTextCharFormat()
+        self.f_subsection_bg.setBackground(self.subsection_bg)
+        self.subsection_fg = QColor("#3A2C14")
+        self.f_subsection_line = QTextCharFormat()
+        self.f_subsection_line.setBackground(self.subsection_bg)
+        self.f_subsection_line.setForeground(self.subsection_fg)
 
         self.re_comment = re.compile(r"#.*$")
         self.re_string = re.compile(r"(\"\"\".*?\"\"\"|'''.*?'''|\".*?\"|'.*?')")  # simple
@@ -62,44 +76,75 @@ class PythonHighlighter(QSyntaxHighlighter):
         self.re_bracket = re.compile(r"[\(\)\[\]\{\}]")
 
     def highlightBlock(self, text: str):
+        is_sub_border = re.match(r"^\s*# \+\+[=\-]+\+\+\s*$", text) is not None
+        is_sub_title = re.match(r"^\s*# \+\+\s*.+$", text) is not None
+        is_section_border = re.match(r"^\s*# \+[=\-]+\+\s*$", text) is not None
+        is_section_title = re.match(r"^\s*# \|.*\|\s*$", text) is not None
+
+        in_sub_line = is_sub_border or is_sub_title
+        in_section_line = (is_section_border or is_section_title) and not in_sub_line
+
+        if in_sub_line:
+            self.setFormat(0, len(text), self.f_subsection_line)
+            self.setCurrentBlockState(0)
+            return
+        elif in_section_line:
+            self.setFormat(0, len(text), self.f_section_line)
+            self.setCurrentBlockState(0)
+            return
+
+        def set_fmt(start: int, length: int, fmt: QTextCharFormat):
+            if in_sub_line:
+                f = QTextCharFormat(fmt)
+                f.setBackground(self.subsection_bg)
+                self.setFormat(start, length, f)
+            elif in_section_line:
+                f = QTextCharFormat(fmt)
+                f.setBackground(self.section_bg)
+                self.setFormat(start, length, f)
+            else:
+                self.setFormat(start, length, fmt)
+
         # Comments
         m = self.re_comment.search(text)
         if m:
             start, end = m.start(), m.end()
-            self.setFormat(start, end - start, self.f_comment)
+            set_fmt(start, end - start, self.f_comment)
             code_part = text[:start]
         else:
             code_part = text
 
         # Strings
         for m in self.re_string.finditer(code_part):
-            self.setFormat(m.start(), m.end() - m.start(), self.f_string)
+            set_fmt(m.start(), m.end() - m.start(), self.f_string)
 
         # Numbers
         for m in self.re_number.finditer(code_part):
-            self.setFormat(m.start(), m.end() - m.start(), self.f_number)
+            set_fmt(m.start(), m.end() - m.start(), self.f_number)
 
         # Keywords and builtins
         for m in self.re_keyword.finditer(code_part):
-            self.setFormat(m.start(), m.end() - m.start(), self.f_keyword)
+            set_fmt(m.start(), m.end() - m.start(), self.f_keyword)
         for m in self.re_builtin.finditer(code_part):
-            self.setFormat(m.start(), m.end() - m.start(), self.f_builtin)
+            set_fmt(m.start(), m.end() - m.start(), self.f_builtin)
 
         # ALL_CAPS variables
         for m in self.re_caps.finditer(code_part):
-            self.setFormat(m.start(), m.end() - m.start(), self.f_caps)
+            set_fmt(m.start(), m.end() - m.start(), self.f_caps)
 
         # Function and class names
         for m in self.re_function.finditer(code_part):
-            self.setFormat(m.start(1), m.end(1) - m.start(1), self.f_function)
+            set_fmt(m.start(1), m.end(1) - m.start(1), self.f_function)
         for m in self.re_class.finditer(code_part):
-            self.setFormat(m.start(1), m.end(1) - m.start(1), self.f_class)
+            set_fmt(m.start(1), m.end(1) - m.start(1), self.f_class)
 
         # Operators and brackets
         for m in self.re_operator.finditer(code_part):
-            self.setFormat(m.start(), m.end() - m.start(), self.f_operator)
+            set_fmt(m.start(), m.end() - m.start(), self.f_operator)
         for m in self.re_bracket.finditer(code_part):
-            self.setFormat(m.start(), m.end() - m.start(), self.f_bracket)
+            set_fmt(m.start(), m.end() - m.start(), self.f_bracket)
+
+        self.setCurrentBlockState(0)
 
 
 # ----------------------------
@@ -210,7 +255,7 @@ def replace_var_line(lines: List[str], locs: Dict[str, VarLoc], var: str, new_rh
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Simulation Parameter Editor")
+        self.setWindowTitle("Model Parameter Editor")
 
         icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon.png")
         if os.path.exists(icon_path):
@@ -255,6 +300,12 @@ class MainWindow(QMainWindow):
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         self.log.setFont(QFont("Consolas", 9))
+        log_palette = self.log.palette()
+        log_palette.setColor(QPalette.Base, QColor(self.bg_color))
+        log_palette.setColor(QPalette.Text, QColor(self.fg_color))
+        log_palette.setColor(QPalette.Highlight, QColor(self.selection_color))
+        log_palette.setColor(QPalette.HighlightedText, QColor("#FFFFFF"))
+        self.log.setPalette(log_palette)
 
         # Controls
         top = QHBoxLayout()
@@ -294,7 +345,7 @@ class MainWindow(QMainWindow):
         panel_layout.setContentsMargins(0, 0, 0, 0)
 
         # 1) GLOBAL PARAMETERS
-        gb_global = QGroupBox("1) GLOBAL PARAMETERS")
+        gb_global = QGroupBox("GLOBAL PARAMETERS")
         fl_global = QFormLayout(gb_global)
         self.ed_time_step = QLineEdit()
         self.ed_steps = QLineEdit()
@@ -309,7 +360,7 @@ class MainWindow(QMainWindow):
         fl_global.addRow("", goto_global_row)
 
         # 2) BOUNDARY BEHAVIOUR
-        gb_boundary = QGroupBox("2) BOUNDARY BEHAVIOUR")
+        gb_boundary = QGroupBox("BOUNDARY BEHAVIOUR")
         fl_boundary = QFormLayout(gb_boundary)
         self.ed_boundary_coords = [QLineEdit() for _ in range(6)]
         self.ed_boundary_disp = [QLineEdit() for _ in range(6)]
@@ -372,7 +423,7 @@ class MainWindow(QMainWindow):
         fl_boundary.addRow("", goto_boundary_row)
 
         # 3) FIBRE NETWORK
-        gb_fibre = QGroupBox("3) FIBRE NETWORK")
+        gb_fibre = QGroupBox("FIBRE NETWORK")
         vb_fibre = QVBoxLayout(gb_fibre)
         self.cb_fibre = QCheckBox("INCLUDE_FIBRE_NETWORK")
         self.btn_goto_fibre = QPushButton("Go to section")
@@ -383,7 +434,7 @@ class MainWindow(QMainWindow):
         vb_fibre.addLayout(row_fibre)
 
         # 4) SPECIES DIFFUSION
-        gb_diff = QGroupBox("4) SPECIES DIFFUSION")
+        gb_diff = QGroupBox("SPECIES DIFFUSION")
         vb_diff = QVBoxLayout(gb_diff)
         self.cb_diff = QCheckBox("INCLUDE_DIFFUSION")
         self.btn_goto_diff = QPushButton("Go to section")
@@ -394,7 +445,7 @@ class MainWindow(QMainWindow):
         vb_diff.addLayout(row_diff)
 
         # 5) CELLS
-        gb_cells = QGroupBox("5) CELLS")
+        gb_cells = QGroupBox("CELLS")
         vb_cells = QVBoxLayout(gb_cells)
         self.cb_cells = QCheckBox("INCLUDE_CELLS")
         self.btn_goto_cells = QPushButton("Go to section")
@@ -404,11 +455,56 @@ class MainWindow(QMainWindow):
         row_cells.addWidget(self.btn_goto_cells)
         vb_cells.addLayout(row_cells)
 
+        # 6) FLAMEGPU IMPLEMENTATION
+        gb_impl = QGroupBox("FLAMEGPU IMPLEMENTATION")
+        grid_impl = QGridLayout(gb_impl)
+
+        def mk_impl_item(label_text: str):
+            label = QLabel(label_text)
+            btn = QPushButton("Go to section")
+            row = QHBoxLayout()
+            row.addWidget(label)
+            row.addStretch(1)
+            row.addWidget(btn)
+            row_widget = QWidget()
+            row_widget.setLayout(row)
+            return btn, row_widget
+
+        self.btn_impl_files, w_files = mk_impl_item("Files")
+        self.btn_impl_globals, w_globals = mk_impl_item("Globals")
+        self.btn_impl_messages, w_messages = mk_impl_item("Messages")
+        self.btn_impl_agents, w_agents = mk_impl_item("Agents")
+        self.btn_impl_step_funcs, w_step_funcs = mk_impl_item("Step functions")
+        self.btn_impl_layers, w_layers = mk_impl_item("Layers")
+        self.btn_impl_logging, w_logging = mk_impl_item("Logging")
+        self.btn_impl_visualization, w_visualization = mk_impl_item("Visualization")
+        self.btn_impl_execution, w_execution = mk_impl_item("Execution")
+
+        grid_impl.addWidget(w_files, 0, 0)
+        grid_impl.addWidget(w_globals, 0, 1)
+        grid_impl.addWidget(w_messages, 0, 2)
+        grid_impl.addWidget(w_agents, 1, 0)
+        grid_impl.addWidget(w_step_funcs, 1, 1)
+        grid_impl.addWidget(w_layers, 1, 2)
+        grid_impl.addWidget(w_logging, 2, 0)
+        grid_impl.addWidget(w_visualization, 2, 1)
+        grid_impl.addWidget(w_execution, 2, 2)
+
+        gb_title_font = QFont()
+        gb_title_font.setBold(True)
+        gb_content_font = QFont()
+        gb_content_font.setBold(False)
+        for gb in [gb_global, gb_boundary, gb_fibre, gb_diff, gb_cells, gb_impl]:
+            gb.setFont(gb_title_font)
+            for child in gb.findChildren(QWidget):
+                child.setFont(gb_content_font)
+
         panel_layout.addWidget(gb_global)
         panel_layout.addWidget(gb_boundary)
         panel_layout.addWidget(gb_fibre)
         panel_layout.addWidget(gb_diff)
         panel_layout.addWidget(gb_cells)
+        panel_layout.addWidget(gb_impl)
         panel_layout.addStretch(1)
 
         # Split view: left parameters, right editor, bottom log
@@ -462,6 +558,15 @@ class MainWindow(QMainWindow):
         self.btn_goto_fibre.clicked.connect(lambda: self.goto_var("INCLUDE_FIBRE_NETWORK"))
         self.btn_goto_diff.clicked.connect(lambda: self.goto_var("INCLUDE_DIFFUSION"))
         self.btn_goto_cells.clicked.connect(lambda: self.goto_var("INCLUDE_CELLS"))
+        self.btn_impl_files.clicked.connect(lambda: self.goto_subsection("Files"))
+        self.btn_impl_globals.clicked.connect(lambda: self.goto_subsection("Globals"))
+        self.btn_impl_messages.clicked.connect(lambda: self.goto_subsection("Messages"))
+        self.btn_impl_agents.clicked.connect(lambda: self.goto_subsection("Agents"))
+        self.btn_impl_step_funcs.clicked.connect(lambda: self.goto_subsection("Step functions"))
+        self.btn_impl_layers.clicked.connect(lambda: self.goto_subsection("Layers"))
+        self.btn_impl_logging.clicked.connect(lambda: self.goto_subsection("Logging"))
+        self.btn_impl_visualization.clicked.connect(lambda: self.goto_subsection("Visualization"))
+        self.btn_impl_execution.clicked.connect(lambda: self.goto_subsection("Execution"))
 
         self.editor.textChanged.connect(self._on_editor_text_changed)
 
@@ -474,6 +579,9 @@ class MainWindow(QMainWindow):
             self.cb_fibre, self.cb_diff, self.cb_cells,
             self.btn_goto_global, self.btn_goto_boundary,
             self.btn_goto_fibre, self.btn_goto_diff, self.btn_goto_cells,
+            self.btn_impl_files, self.btn_impl_globals, self.btn_impl_messages,
+            self.btn_impl_agents, self.btn_impl_step_funcs, self.btn_impl_layers,
+            self.btn_impl_logging, self.btn_impl_visualization, self.btn_impl_execution,
             self.btn_save, self.btn_run
         ]:
             w.setEnabled(enabled)
@@ -744,6 +852,22 @@ class MainWindow(QMainWindow):
         self._prepare_for_goto()
         doc = self.editor.document()
         pattern = QRegularExpression(rf"^\s*{re.escape(var)}\s*=.*$")
+        pattern.setPatternOptions(QRegularExpression.MultilineOption)
+        cursor = doc.find(pattern, 0)
+        if cursor.isNull():
+            return
+        hbar = self.editor.horizontalScrollBar()
+        hpos = hbar.value()
+        vbar = self.editor.verticalScrollBar()
+        self.editor.setTextCursor(cursor)
+        vbar.setValue(cursor.blockNumber())
+        self.editor.ensureCursorVisible()
+        hbar.setValue(hpos if keep_hscroll else 0)
+
+    def goto_subsection(self, title: str, keep_hscroll: bool = True):
+        self._prepare_for_goto()
+        doc = self.editor.document()
+        pattern = QRegularExpression(rf"^\s*# \+\+\s*{re.escape(title)}\b.*$")
         pattern.setPatternOptions(QRegularExpression.MultilineOption)
         cursor = doc.find(pattern, 0)
         if cursor.isNull():
