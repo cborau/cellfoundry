@@ -264,6 +264,7 @@ class MainWindow(QMainWindow):
         btn_run = QPushButton("Run")
         btn_stop = QPushButton("Stop")
         btn_stop.setEnabled(False)
+        btn_toggle_log = QPushButton("Log only")
 
         top.addWidget(btn_open)
         top.addWidget(btn_save)
@@ -271,16 +272,21 @@ class MainWindow(QMainWindow):
         top.addStretch(1)
         top.addWidget(btn_run)
         top.addWidget(btn_stop)
+        top.addWidget(btn_toggle_log)
 
         btn_open.clicked.connect(self.on_open)
         btn_save.clicked.connect(self.on_save)
         btn_reload.clicked.connect(self.on_reload)
         btn_run.clicked.connect(self.on_run)
         btn_stop.clicked.connect(self.on_stop)
+        btn_toggle_log.clicked.connect(self.toggle_log_view)
 
         self.btn_save = btn_save
         self.btn_run = btn_run
         self.btn_stop = btn_stop
+        self.btn_toggle_log = btn_toggle_log
+        self._log_only = False
+        self._splitter_v_sizes = None
 
         # Parameter panels
         panel = QWidget()
@@ -419,6 +425,9 @@ class MainWindow(QMainWindow):
         splitter_v.setStretchFactor(0, 3)
         splitter_v.setStretchFactor(1, 1)
 
+        self.splitter_h = splitter_h
+        self.splitter_v = splitter_v
+
         layout = QVBoxLayout(root)
         layout.addLayout(top)
         layout.addWidget(splitter_v)
@@ -472,6 +481,20 @@ class MainWindow(QMainWindow):
     def _debounced_apply(self):
         # debounce to avoid rewriting the editor on every keystroke
         self._debounce.start(150)
+
+    def toggle_log_view(self):
+        if not self._log_only:
+            self._splitter_v_sizes = self.splitter_v.sizes()
+            self.splitter_v.setSizes([0, 1])
+            self.btn_toggle_log.setText("Show editor")
+            self._log_only = True
+        else:
+            if self._splitter_v_sizes:
+                self.splitter_v.setSizes(self._splitter_v_sizes)
+            else:
+                self.splitter_v.setSizes([1, 1])
+            self.btn_toggle_log.setText("Log only")
+            self._log_only = False
 
     def _highlight_current_line(self):
         if self.editor.isReadOnly():
@@ -802,15 +825,26 @@ class MainWindow(QMainWindow):
             return
 
         self.process = QProcess(self)
-        self.process.setProgram(sys.executable)
-        self.process.setArguments([self.path])
-        self.process.setWorkingDirectory(os.path.dirname(self.path))
+        workdir = os.path.dirname(self.path)
+        venv_bat = "venv.bat"
+        script_name = os.path.basename(self.path)
+        if os.path.exists(os.path.join(workdir, venv_bat)):
+            cmd = f'call {venv_bat} && python -u {script_name}'
+            self.process.setProgram("cmd.exe")
+            self.process.setArguments(["/c", cmd])
+        else:
+            self.process.setProgram(sys.executable)
+            self.process.setArguments([self.path])
+        self.process.setWorkingDirectory(workdir)
 
         self.process.readyReadStandardOutput.connect(self._read_stdout)
         self.process.readyReadStandardError.connect(self._read_stderr)
         self.process.finished.connect(self._proc_finished)
 
-        self.log.append(f"Running: {sys.executable} {shlex.quote(self.path)}")
+        if os.path.exists(os.path.join(workdir, venv_bat)):
+            self.log.append(f"Running: {venv_bat} -> python -u {script_name}")
+        else:
+            self.log.append(f"Running: {sys.executable} {shlex.quote(self.path)}")
         self.process.start()
 
         self.btn_run.setEnabled(False)
