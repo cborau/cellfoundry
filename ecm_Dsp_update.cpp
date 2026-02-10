@@ -74,9 +74,8 @@ FLAMEGPU_AGENT_FUNCTION(ecm_Dsp_update, flamegpu::MessageSpatial3D, flamegpu::Me
   // Apply to each species
   for (int i = 0; i < N_SPECIES; i++) {
     D_sp[i] *= m;
+    FLAMEGPU->setVariable<float, N_SPECIES>("D_sp", i, D_sp[i]);
   }
-  // TODO: UPDATE VTKS TO SHOW D_sp VARIATION IN SPACE
-
 
   return flamegpu::ALIVE;
 }

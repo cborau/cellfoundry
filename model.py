@@ -1209,7 +1209,7 @@ class SaveDataToFile(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
         global SAVE_DATA_TO_FILE, SAVE_EVERY_N_STEPS, N_SPECIES
         global RES_PATH, ENSEMBLE
-        global INCLUDE_FIBRE_NETWORK, INITIAL_NETWORK_CONNECTIVITY,N_NODES, INCLUDE_CELLS, ECM_POPULATION_SIZE
+        global INCLUDE_FIBRE_NETWORK, HETEROGENEOUS_DIFFUSION, INITIAL_NETWORK_CONNECTIVITY,N_NODES, INCLUDE_CELLS, ECM_POPULATION_SIZE
         BUCKLING_COEFF_D0 = FLAMEGPU.environment.getPropertyFloat("BUCKLING_COEFF_D0")
         STRAIN_STIFFENING_COEFF_DS = FLAMEGPU.environment.getPropertyFloat("STRAIN_STIFFENING_COEFF_DS")
         CRITICAL_STRAIN = FLAMEGPU.environment.getPropertyFloat("CRITICAL_STRAIN")
@@ -1411,7 +1411,7 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                     cell_radius = list()
                     cell_clock = list()
                     cell_cycle_phase = list()
-                    concentration_multi = list()  # this is a list of tuples. Each tuple has N_SPECIES elements
+                    c_sp_multi = list()  # this is a list of tuples. Each tuple has N_SPECIES elements
                     file_name = 'cells_t{:04d}.vtk'.format(stepCounter)
                     file_path = RES_PATH / file_name
                     cell_agent = FLAMEGPU.agent("CELL")
@@ -1425,7 +1425,7 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                         radius_ai = ai.getVariableFloat("radius")
                         clock_ai = ai.getVariableFloat("clock")
                         cycle_phase_ai = ai.getVariableInt("cycle_phase")
-                        concentration_multi.append(ai.getVariableArrayFloat("C_sp"))
+                        c_sp_multi.append(ai.getVariableArrayFloat("C_sp"))
                         cell_coords.append(coords_ai)
                         cell_velocity.append(velocity_ai)
                         cell_orientation.append(orientation_ai)
@@ -1461,7 +1461,7 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                         for s in range(N_SPECIES):
                             file.write("SCALARS concentration_species_{0} float 1 \n".format(s))
                             file.write("LOOKUP_TABLE default" + '\n')
-                            for c_ai in concentration_multi:
+                            for c_ai in c_sp_multi:
                                 file.write("{:.4f} \n".format(c_ai[s]))              
                         file.write("VECTORS velocity float" + '\n')
                         for v_ai in cell_velocity:
@@ -1502,7 +1502,9 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                 coords = list()
                 velocity = list()
                 force = list()
-                concentration_multi = list()  # this is a list of tuples. Each tuple has N_SPECIES elements
+                c_sp_multi = list()  # this is a list of tuples. Each tuple has N_SPECIES elements
+                if HETEROGENEOUS_DIFFUSION:
+                    d_sp_multi = list()  # this is a list of tuples. Each tuple has N_SPECIES elements
                 av = agent.getPopulationData()  # this returns a DeviceAgentVector
                 for ai in av:
                     coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
@@ -1511,7 +1513,9 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                     coords.append(coords_ai)
                     velocity.append(velocity_ai)
                     force.append(force_ai)
-                    concentration_multi.append(ai.getVariableArrayFloat("C_sp"))
+                    c_sp_multi.append(ai.getVariableArrayFloat("C_sp"))
+                    if HETEROGENEOUS_DIFFUSION:
+                        d_sp_multi.append(ai.getVariableArrayFloat("D_sp"))
                 print("====== SAVING DATA FROM Step {:03d} TO FILE ======".format(stepCounter))
                 with open(str(file_path), 'w') as file:
                     for line in self.header:
@@ -1616,10 +1620,19 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                         file.write("SCALARS concentration_species_{0} float 1 \n".format(s))
                         file.write("LOOKUP_TABLE default" + '\n')
 
-                        for c_ai in concentration_multi:
+                        for c_ai in c_sp_multi:
                             file.write("{:.4f} \n".format(c_ai[s]))
                         for i in range(8):
                             file.write("0.0 \n")  # boundary corners
+                    if HETEROGENEOUS_DIFFUSION:
+                        for s in range(N_SPECIES):
+                            file.write("SCALARS diffusion_coeff_{0} float 1 \n".format(s))
+                            file.write("LOOKUP_TABLE default" + '\n')
+
+                            for d_ai in d_sp_multi:
+                                file.write("{:.4f} \n".format(d_ai[s]))
+                            for i in range(8):
+                                file.write("0.0 \n")  # boundary corners
 
                     file.write("VECTORS velocity float" + '\n')
                     for v_ai in velocity:
