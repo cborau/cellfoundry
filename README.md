@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo_cellfoundry.png" alt="CellFoundry logo" width="320">
+</p>
+
 # CellFoundry
 
 **CellFoundry** is a multi-physics, agent-based simulation framework built on FLAMEGPU2 for studying the cellular microenvironment.
@@ -6,4 +10,4 @@ The framework integrates interacting cells, extracellular matrix (ECM), fibre ne
 
 CellFoundry is modular, extensible, and suitable for large-scale parameter studies, digital twin development, and mechanobiology-driven hypothesis testing.
 
-This is a work in progress with new features added progressively. 
+This is a work in progress with new features added progressively.
