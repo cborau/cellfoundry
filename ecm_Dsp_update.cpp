@@ -68,7 +68,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_Dsp_update, flamegpu::MessageSpatial3D, flamegpu::Me
   const float m_min = 0.05f;    // floor multiplier so diffusion never fully stops
 
   // Saturating mapping
-  float m = 1.0f / (1.0f + alpha * rho);
+  float m = 1.0f / (1.0f + alpha * fmaxf(rho - 1.0f, 0.0f)); // no penalty for densities below 1, then saturating reduction for higher densities. 
   m = fmaxf(m_min, fminf(1.0f, m));
 
   // Apply to each species
