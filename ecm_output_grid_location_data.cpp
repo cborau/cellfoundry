@@ -13,6 +13,11 @@ FLAMEGPU_AGENT_FUNCTION(ecm_output_grid_location_data, flamegpu::MessageNone, fl
   const uint8_t N_SPECIES = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
 
   for (int i = 0; i < N_SPECIES; i++) {
+    float ncol = FLAMEGPU->getVariable<float, N_SPECIES>("D_sp", i);
+    FLAMEGPU->message_out.setVariable<float, N_SPECIES>("D_sp", i, ncol);
+  }
+
+  for (int i = 0; i < N_SPECIES; i++) {
     float ncol = FLAMEGPU->getVariable<float, N_SPECIES>("C_sp", i);
     FLAMEGPU->message_out.setVariable<float, N_SPECIES>("C_sp", i, ncol);
   }

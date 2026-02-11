@@ -33,7 +33,7 @@ PAUSE_EVERY_STEP = False  # If True, the visualization stops every step until P 
 SAVE_PICKLE = True  # If True, dumps model configuration into a pickle file for post-processing
 SHOW_PLOTS = False  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
-SAVE_EVERY_N_STEPS = 5 # Affects both the .vtk files and the Dataframes storing boundary data
+SAVE_EVERY_N_STEPS = 50 # Affects both the .vtk files and the Dataframes storing boundary data
 
 CURR_PATH = pathlib.Path().absolute()
 RES_PATH = CURR_PATH / 'result_files'
@@ -49,7 +49,7 @@ N = 21
 # Time simulation parameters
 # ----------------------------------------------------------------------
 TIME_STEP = 0.01# time. WARNING: diffusion and cell migration events might need different scales
-STEPS = 50
+STEPS = 2000
 
 # +====================================================================+
 # | BOUNDARY CONDITIONS                                                |
@@ -167,7 +167,7 @@ BOUNDARY_CONC_INIT_MULTI = [[50.0,50.0, 50.0, 50.0, 50.0, 50.0],
 BOUNDARY_CONC_FIXED_MULTI = [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                              # concentration boundary conditions at each surface. WARNING: -1.0 means initial condition prevails. Don't use 0.0 as initial condition if that value is not fixed. Use -1.0 instead
                              [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
-
+HETEROGENEOUS_DIFFUSION = True  # if True, diffusion coefficient is multiplied by (1 - local ECM density) to simulate hindered diffusion through the ECM. WARNING: this is a very simple approximation of the phenomenon and highly depends on grid density (N). 
 # +====================================================================+
 # | CELL PARAMETERS                                                   |
 # +====================================================================+
@@ -255,7 +255,8 @@ if INCLUDE_FIBRE_NETWORK:
         N_NODES = nodes.shape[0]
         NODE_COORDS = nodes
         INITIAL_NETWORK_CONNECTIVITY = connectivity
-
+        AVG_NETWORK_VOXEL_DENSITY = math.ceil((N_NODES / (L0_x * L0_y * L0_z)) * ECM_VOXEL_VOLUME) # average number of fibre nodes per voxel, used to adjust the heterogeneous diffusion effect
+        print(f'Average network voxel density (number of fibre nodes per voxel): {AVG_NETWORK_VOXEL_DENSITY}')
     if nodes is not None and connectivity is not None:
         N_FIBRES = len(connectivity)
     else:
@@ -293,6 +294,9 @@ if INCLUDE_DIFFUSION:
             print(
                 'WARNING: diffusion problem is ill conditioned (Fi_z should be < 0.5), check parameters and consider decreasing time step\nSemi-implicit diffusion will be used instead')
             UNSTABLE_DIFFUSION = True
+    if not INCLUDE_FIBRE_NETWORK and HETEROGENEOUS_DIFFUSION:
+        print(f'WARNING: HETEROGENEOUS_DIFFUSION is set to True but no fibre network is included, default D values ({DIFFUSION_COEFF_MULTI}) will be used instead')
+        HETEROGENEOUS_DIFFUSION = False
 
 if INCLUDE_CELLS:
     if MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION < (2 * CELL_RADIUS):
@@ -330,6 +334,7 @@ ecm_ecm_interaction_file = "ecm_ecm_interaction.cpp"
 ecm_boundary_concentration_conditions_file = "ecm_boundary_concentration_conditions.cpp"
 ecm_move_file = "ecm_move.cpp"
 ecm_Csp_update_file = "ecm_Csp_update.cpp"
+ecm_Dsp_update_file = "ecm_Dsp_update.cpp"
 
 """
   CELL
@@ -374,7 +379,9 @@ env.newPropertyFloat("TIME_STEP", TIME_STEP)
 env.newPropertyArrayUInt("ECM_AGENTS_PER_DIR", ECM_AGENTS_PER_DIR)
 # Diffusion coefficient
 env.newPropertyUInt("INCLUDE_DIFFUSION", INCLUDE_DIFFUSION)
+env.newPropertyUInt("HETEROGENEOUS_DIFFUSION", HETEROGENEOUS_DIFFUSION)
 env.newPropertyUInt("UNSTABLE_DIFFUSION", UNSTABLE_DIFFUSION)
+env.newPropertyUInt("AVG_NETWORK_VOXEL_DENSITY", AVG_NETWORK_VOXEL_DENSITY)
 env.newPropertyArrayFloat("DIFFUSION_COEFF_MULTI", DIFFUSION_COEFF_MULTI)
 env.newPropertyFloat("ECM_VOXEL_VOLUME", ECM_VOXEL_VOLUME)
 
@@ -479,7 +486,12 @@ bcorner_location_message.newVariableInt("id")
 
 if INCLUDE_FIBRE_NETWORK:
     fnode_spatial_location_message = model.newMessageSpatial3D("fnode_spatial_location_message")
-    fnode_spatial_location_message.setRadius(MAX_SEARCH_RADIUS_FNODES)  
+    # If heterogeneous diffusion is included, the search/broadcast radius for fibre nodes must be at least equal to the equilibrium distance to make sure that ECM nodes can find all the fibre nodes when looking for neighbours. 
+    # WARNING: increasing this radius will increase the number of messages of fnode_fnode_spatial_interaction and therefore the computational cost of the simulation, so it should be kept as low as possible while making sure that fibre nodes are found by ECM nodes.
+    if (MAX_SEARCH_RADIUS_FNODES < ECM_ECM_EQUILIBRIUM_DISTANCE) and INCLUDE_DIFFUSION and HETEROGENEOUS_DIFFUSION:
+        fnode_spatial_location_message.setRadius(ECM_ECM_EQUILIBRIUM_DISTANCE) 
+    else:
+        fnode_spatial_location_message.setRadius(MAX_SEARCH_RADIUS_FNODES)  
     fnode_spatial_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS,MIN_EXPECTED_BOUNDARY_POS)
     fnode_spatial_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS,MAX_EXPECTED_BOUNDARY_POS)
     fnode_spatial_location_message.newVariableInt("id") # as an edge can have multiple inner agents, this stores the position within the edge
@@ -513,7 +525,8 @@ ECM_grid_location_message.newVariableInt("grid_lin_id")
 ECM_grid_location_message.newVariableUInt8("grid_i")
 ECM_grid_location_message.newVariableUInt8("grid_j")
 ECM_grid_location_message.newVariableUInt8("grid_k")
-ECM_grid_location_message.newVariableArrayFloat("C_sp", N_SPECIES) 
+ECM_grid_location_message.newVariableArrayFloat("D_sp", N_SPECIES)  # diffusion coefficient of each species at the agent location (used for heterogeneous diffusion)
+ECM_grid_location_message.newVariableArrayFloat("C_sp", N_SPECIES)  
 ECM_grid_location_message.newVariableArrayFloat("C_sp_sat", N_SPECIES) 
 ECM_grid_location_message.newVariableFloat("k_elast")
 ECM_grid_location_message.newVariableFloat("d_dumping")
@@ -644,6 +657,7 @@ ECM_agent.newVariableInt("grid_lin_id", 0) # linear index in the 3D grid that ma
 ECM_agent.newVariableUInt8("grid_i", 0)
 ECM_agent.newVariableUInt8("grid_j", 0)
 ECM_agent.newVariableUInt8("grid_k", 0)
+ECM_agent.newVariableArrayFloat("D_sp", N_SPECIES)  # diffusion coefficient of each species at the agent location (used for heterogeneous diffusion)
 ECM_agent.newVariableArrayFloat("C_sp", N_SPECIES) 
 ECM_agent.newVariableArrayFloat("C_sp_sat", N_SPECIES) 
 ECM_agent.newVariableFloat("k_elast")
@@ -664,6 +678,8 @@ ECM_agent.newRTCFunctionFile("ecm_output_grid_location_data", ecm_output_grid_lo
 ECM_agent.newRTCFunctionFile("ecm_ecm_interaction", ecm_ecm_interaction_file).setMessageInput("ECM_grid_location_message")
 ECM_agent.newRTCFunctionFile("ecm_boundary_concentration_conditions", ecm_boundary_concentration_conditions_file)
 ECM_agent.newRTCFunctionFile("ecm_Csp_update", ecm_Csp_update_file)
+if HETEROGENEOUS_DIFFUSION and INCLUDE_FIBRE_NETWORK:
+    ECM_agent.newRTCFunctionFile("ecm_Dsp_update", ecm_Dsp_update_file).setMessageInput("fnode_spatial_location_message")
 if MOVING_BOUNDARIES:
     ECM_agent.newRTCFunctionFile("ecm_move", ecm_move_file)
 
@@ -709,7 +725,7 @@ if INCLUDE_CELLS:
 class initAgentPopulations(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
         # TODO: clean this line of globals
-        global INIT_ECM_CONCENTRATION_VALS, INIT_CELL_CONCENTRATION_VALS,INIT_CELL_CONC_MASS_VALS, INIT_ECM_SAT_CONCENTRATION_VALS, INIT_CELL_CONSUMPTION_RATES, INIT_CELL_PRODUCTION_RATES,INIT_CELL_REACTION_RATES, N_SPECIES, INCLUDE_DIFFUSION,INCLUDE_FIBRE_NETWORK, INCLUDE_CELLS, N_CELLS, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, MAX_CONNECTIVITY
+        global DIFFUSION_COEFF_MULTI, INIT_ECM_CONCENTRATION_VALS, INIT_CELL_CONCENTRATION_VALS,INIT_CELL_CONC_MASS_VALS, INIT_ECM_SAT_CONCENTRATION_VALS, INIT_CELL_CONSUMPTION_RATES, INIT_CELL_PRODUCTION_RATES,INIT_CELL_REACTION_RATES, N_SPECIES, INCLUDE_DIFFUSION,INCLUDE_FIBRE_NETWORK, INCLUDE_CELLS, N_CELLS, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, MAX_CONNECTIVITY
         # BOUNDARY CORNERS
         current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
         coord_boundary = FLAMEGPU.environment.getPropertyArrayFloat("COORDS_BOUNDARIES")
@@ -838,7 +854,6 @@ class initAgentPopulations(pyflamegpu.HostFunction):
 
             FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
 
-        # TODO: make this dependent on INCLUDE_DIFFUSION
         # ECM
         k_elast = FLAMEGPU.environment.getPropertyFloat("ECM_K_ELAST")
         d_dumping = FLAMEGPU.environment.getPropertyFloat("ECM_D_DUMPING")
@@ -882,6 +897,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableFloat("fz", 0.0)
                     instance.setVariableFloat("k_elast", k_elast)
                     instance.setVariableFloat("d_dumping", d_dumping)
+                    instance.setVariableArrayFloat("D_sp", DIFFUSION_COEFF_MULTI)
                     instance.setVariableArrayFloat("C_sp", INIT_ECM_CONCENTRATION_VALS)
                     instance.setVariableArrayFloat("C_sp_sat", INIT_ECM_SAT_CONCENTRATION_VALS)
                     instance.setVariableUInt8("clamped_bx_pos", 0)
@@ -1193,7 +1209,7 @@ class SaveDataToFile(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
         global SAVE_DATA_TO_FILE, SAVE_EVERY_N_STEPS, N_SPECIES
         global RES_PATH, ENSEMBLE
-        global INCLUDE_FIBRE_NETWORK, INITIAL_NETWORK_CONNECTIVITY,N_NODES, INCLUDE_CELLS, ECM_POPULATION_SIZE
+        global INCLUDE_FIBRE_NETWORK, HETEROGENEOUS_DIFFUSION, INITIAL_NETWORK_CONNECTIVITY,N_NODES, INCLUDE_CELLS, ECM_POPULATION_SIZE
         BUCKLING_COEFF_D0 = FLAMEGPU.environment.getPropertyFloat("BUCKLING_COEFF_D0")
         STRAIN_STIFFENING_COEFF_DS = FLAMEGPU.environment.getPropertyFloat("STRAIN_STIFFENING_COEFF_DS")
         CRITICAL_STRAIN = FLAMEGPU.environment.getPropertyFloat("CRITICAL_STRAIN")
@@ -1395,7 +1411,7 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                     cell_radius = list()
                     cell_clock = list()
                     cell_cycle_phase = list()
-                    concentration_multi = list()  # this is a list of tuples. Each tuple has N_SPECIES elements
+                    c_sp_multi = list()  # this is a list of tuples. Each tuple has N_SPECIES elements
                     file_name = 'cells_t{:04d}.vtk'.format(stepCounter)
                     file_path = RES_PATH / file_name
                     cell_agent = FLAMEGPU.agent("CELL")
@@ -1409,7 +1425,7 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                         radius_ai = ai.getVariableFloat("radius")
                         clock_ai = ai.getVariableFloat("clock")
                         cycle_phase_ai = ai.getVariableInt("cycle_phase")
-                        concentration_multi.append(ai.getVariableArrayFloat("C_sp"))
+                        c_sp_multi.append(ai.getVariableArrayFloat("C_sp"))
                         cell_coords.append(coords_ai)
                         cell_velocity.append(velocity_ai)
                         cell_orientation.append(orientation_ai)
@@ -1445,7 +1461,7 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                         for s in range(N_SPECIES):
                             file.write("SCALARS concentration_species_{0} float 1 \n".format(s))
                             file.write("LOOKUP_TABLE default" + '\n')
-                            for c_ai in concentration_multi:
+                            for c_ai in c_sp_multi:
                                 file.write("{:.4f} \n".format(c_ai[s]))              
                         file.write("VECTORS velocity float" + '\n')
                         for v_ai in cell_velocity:
@@ -1486,7 +1502,9 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                 coords = list()
                 velocity = list()
                 force = list()
-                concentration_multi = list()  # this is a list of tuples. Each tuple has N_SPECIES elements
+                c_sp_multi = list()  # this is a list of tuples. Each tuple has N_SPECIES elements
+                if HETEROGENEOUS_DIFFUSION:
+                    d_sp_multi = list()  # this is a list of tuples. Each tuple has N_SPECIES elements
                 av = agent.getPopulationData()  # this returns a DeviceAgentVector
                 for ai in av:
                     coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
@@ -1495,7 +1513,9 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                     coords.append(coords_ai)
                     velocity.append(velocity_ai)
                     force.append(force_ai)
-                    concentration_multi.append(ai.getVariableArrayFloat("C_sp"))
+                    c_sp_multi.append(ai.getVariableArrayFloat("C_sp"))
+                    if HETEROGENEOUS_DIFFUSION:
+                        d_sp_multi.append(ai.getVariableArrayFloat("D_sp"))
                 print("====== SAVING DATA FROM Step {:03d} TO FILE ======".format(stepCounter))
                 with open(str(file_path), 'w') as file:
                     for line in self.header:
@@ -1600,10 +1620,19 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                         file.write("SCALARS concentration_species_{0} float 1 \n".format(s))
                         file.write("LOOKUP_TABLE default" + '\n')
 
-                        for c_ai in concentration_multi:
+                        for c_ai in c_sp_multi:
                             file.write("{:.4f} \n".format(c_ai[s]))
                         for i in range(8):
                             file.write("0.0 \n")  # boundary corners
+                    if HETEROGENEOUS_DIFFUSION:
+                        for s in range(N_SPECIES):
+                            file.write("SCALARS diffusion_coeff_{0} float 1 \n".format(s))
+                            file.write("LOOKUP_TABLE default" + '\n')
+
+                            for d_ai in d_sp_multi:
+                                file.write("{:.4f} \n".format(d_ai[s]))
+                            for i in range(8):
+                                file.write("0.0 \n")  # boundary corners
 
                     file.write("VECTORS velocity float" + '\n')
                     for v_ai in velocity:
@@ -1695,6 +1724,8 @@ if INCLUDE_CELLS and INCLUDE_DIFFUSION:
 if INCLUDE_DIFFUSION:
     # L4_ECM_Csp_Update
     model.newLayer("L4_ECM_Csp_Update").addAgentFunction("ECM", "ecm_Csp_update")
+    if HETEROGENEOUS_DIFFUSION and INCLUDE_FIBRE_NETWORK:
+        model.newLayer("L4_ECM_Dsp_Update").addAgentFunction("ECM", "ecm_Dsp_update")
     # L5_Diffusion
     model.newLayer("L5_Diffusion").addAgentFunction("ECM", "ecm_ecm_interaction")
     # L6_Diffusion_Boundary (called twice to ensure concentration at boundaries is properly shown visually)

@@ -35,6 +35,9 @@ FLAMEGPU_DEVICE_FUNCTION float getAngleBetweenVec(const float x1, const float y1
 }
 
 FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu::MessageNone) {
+  // This function serves two main purposes:
+  // 1- Compute the forces between ECM agents and their neighbours, modelled as springs with elastic and dumping components. This is only used to adapt the grid distance when boundaries are moving. No foces are transmitted elsewhere. 
+  // 2- Compute the diffusion of species in the ECM, solving the diffusion equation with a finite difference scheme. Both standard Forward Euler and a semi-implicit (damped) update are implemented, as Forward Euler can become unstable for large time steps, small grid distances, or large diffusion coefficients.
   
   // Agent array variables
   const uint8_t N_SPECIES = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
@@ -59,7 +62,12 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
   float agent_vz = FLAMEGPU->getVariable<float>("vz");
   // Agent concentration of species
   int INCLUDE_DIFFUSION = FLAMEGPU->environment.getProperty<int>("INCLUDE_DIFFUSION");
+  int HETEROGENEOUS_DIFFUSION = FLAMEGPU->environment.getProperty<int>("HETEROGENEOUS_DIFFUSION");
   int UNSTABLE_DIFFUSION = FLAMEGPU->environment.getProperty<int>("UNSTABLE_DIFFUSION");
+  float D_sp[N_SPECIES] = {}; 
+  for (int i = 0; i < N_SPECIES; i++) {
+    D_sp[i] = FLAMEGPU->getVariable<float, N_SPECIES>("D_sp", i);
+  }
   float C_sp[N_SPECIES] = {}; 
   for (int i = 0; i < N_SPECIES; i++) {
     C_sp[i] = FLAMEGPU->getVariable<float, N_SPECIES>("C_sp", i);
@@ -271,8 +279,16 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
     
     //Apply diffusion equation for multiple species
     float agent_C_sp_prev[N_SPECIES] = {}; 
+    float DIFFUSION_COEFF = 0.0;
+
     for (int i = 0; i < N_SPECIES; i++) {
-      float DIFFUSION_COEFF = FLAMEGPU->environment.getProperty<float>("DIFFUSION_COEFF_MULTI",i);
+      if (HETEROGENEOUS_DIFFUSION == 1) {
+        DIFFUSION_COEFF = D_sp[i];
+      } 
+      else {
+        DIFFUSION_COEFF = FLAMEGPU->environment.getProperty<float>("DIFFUSION_COEFF_MULTI",i);
+      }
+
       float Fx = DIFFUSION_COEFF * TIME_STEP / powf(dx, 2.0);
       float Fy = DIFFUSION_COEFF * TIME_STEP / powf(dy, 2.0);
       float Fz = DIFFUSION_COEFF * TIME_STEP / powf(dz, 2.0);
