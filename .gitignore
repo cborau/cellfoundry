@@ -2,3 +2,6 @@
 *.docx
 *.pyc
 *.ai
+model.py.bak
+network_3d.pkl
+result_files/output_data_0.pickle
