@@ -201,12 +201,23 @@ INIT_CELL_CONSUMPTION_RATES = [0.001, 0.0]  # consumption rate of each species b
 INIT_CELL_PRODUCTION_RATES = [0.0, 10.0]  # production rate of each species by the CELL agents 
 INIT_CELL_REACTION_RATES = [0.00018, 0.00018]  # metabolic reaction rates of each species by the CELL agents 
 # +====================================================================+
-# | FOCAL ADHESION PARAMETERS                                          |
+# | FOCAL ADHESION PARAMETERS  (units: um, s, nN)                      |
 # +====================================================================+
-INCLUDE_FOCAL_ADHESIONS = False
+INCLUDE_FOCAL_ADHESIONS = True
 INIT_N_FOCAD_PER_CELL = 10 # initial number of focal adhesions per cell. 
-INIT_REST_LENGTH = CELL_RADIUS - CELL_NUCLEUS_RADIUS # rest length of focal adhesions at the moment of their formation. 
 N_ANCHOR_POINTS = 20 # number of anchor points to which focal adhesions can attach on the nucleus surface. Their positions change with nucleus deformation
+MAX_SEARCH_RADIUS_FOCAD = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE# maximum distance at which focal adhesions can find fibre nodes to attach to. WARNING: this value strongly affects the number of bins and therefore the memory allocated for simulations (more bins -> more memory -> faster (in theory))
+# WARNING: rate values below assume global timestep ~ 1.0 s
+FOCAD_REST_LENGTH_0 = CELL_RADIUS - CELL_NUCLEUS_RADIUS # [um] Initial rest/target length at creation time.
+FOCAD_K_FA = 2.0 # [nN/um] Adhesion stiffness (effective spring constant). Typical range: ~0.1–10 nN/um; 
+FOCAD_F_MAX= 20.0 # [nN] Maximum force per adhesion (cap to avoid runaway and represent myosin/structural limits).Typical range: ~5–50 nN.
+FOCAD_V_C = 0.02 # [um/s] Contractile shortening speed of L(t) (actomyosin-driven).
+FOCAD_K_ON = 0.01 # [1/s] Binding rate (for stochastic attachment). Mean waiting time ~1/K_ON .
+FOCAD_K_OFF_0 = 0.003 # [1/s] Zero-force unbinding rate (baseline detachment). Mean lifetime ~1/K_OFF_0 = 333 s (~5.5 min) at very low force.
+FOCAD_F_C = 5.0 # [nN] Force scale controlling force sensitivity in koff(F) (catch/slip style). Typical range: ~2–10 nN. Sets how quickly detachment probability changes as traction builds.
+# Example (simple slip): koff(F)=K_OFF_0*exp(|F|/F_C) => faster turnover under high force.
+FOCAD_K_REINF = 0.001 # [1/s] Reinforcement rate for adhesion strengthening. Timescale ~1/K_REINF = 1000 s (~17 min). E.g. something like k_fa <- k_fa + K_REINF * g(|F|) * DT, adhesions gradually stiffen over tens of minutes when they carry load.
+
 # +====================================================================+
 # | OTHER DERIVED PARAMETERS AND MODEL CHECKS                          |
 # +====================================================================+
@@ -310,6 +321,12 @@ if INCLUDE_CELLS:
     if MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION < (2 * CELL_RADIUS):
         print('MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION: {0} must be higher than 2 * CELL_RADIUS: 2 * {1}'.format(MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION, CELL_RADIUS))
         critical_error = True
+    if INCLUDE_FOCAL_ADHESIONS and not INCLUDE_FIBRE_NETWORK: 
+        print('ERROR: focal adhesions cannot be included if there is no fibre network to interact with')
+        critical_error = True
+elif INCLUDE_FOCAL_ADHESIONS:
+    print('ERROR: focal adhesions cannot be included if there are no cells to form them')
+    critical_error= True
 
 
 if critical_error:
@@ -354,6 +371,15 @@ cell_bucket_location_data_file = "cell_bucket_location_data.cpp"
 cell_update_stress_file = "cell_update_stress.cpp"
 
 """
+  FOCAD
+"""
+focad_bucket_location_data_file = "focad_bucket_location_data.cpp"
+focad_spatial_location_data_file = "focad_spatial_location_data.cpp"
+focad_anchor_update_file = "focad_anchor_update.cpp"
+focad_fnode_interaction_file = "focad_fnode_interaction.cpp"
+focad_move_file = "focad_move.cpp"
+
+"""
   BCORNER  
 """
 bcorner_output_location_data_file = "bcorner_output_location_data.cpp"
@@ -368,9 +394,10 @@ fnode_boundary_interaction_file = "fnode_boundary_interaction.cpp"
 fnode_fnode_spatial_interaction_file = "fnode_fnode_spatial_interaction.cpp"
 fnode_fnode_bucket_interaction_file = "fnode_fnode_bucket_interaction.cpp"
 fnode_move_file = "fnode_move.cpp"
+fnode_focad_interaction_file = "fnode_focad_interaction.cpp"
 
 
-model = pyflamegpu.ModelDescription("metabolism")
+model = pyflamegpu.ModelDescription("cellfoundry")
 
 # ++==================================================================++
 # ++ Globals                                                           |
@@ -485,47 +512,47 @@ env.newPropertyUInt("MOVING_BOUNDARIES", MOVING_BOUNDARIES)
 """
   LOCATION MESSAGES
 """
-bcorner_location_message = model.newMessageSpatial3D("bcorner_location_message")
+BCORNER_location_message = model.newMessageSpatial3D("bcorner_location_message")
 # Set the range and bounds.
-bcorner_location_message.setRadius(MAX_EXPECTED_BOUNDARY_POS - MIN_EXPECTED_BOUNDARY_POS)  # corners are not actually interacting with anything
-bcorner_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS)
-bcorner_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS)
+BCORNER_location_message.setRadius(MAX_EXPECTED_BOUNDARY_POS - MIN_EXPECTED_BOUNDARY_POS)  # corners are not actually interacting with anything
+BCORNER_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS)
+BCORNER_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS)
 # A message to hold the location of an agent. WARNING: spatial3D messages already define x,y,z variables internally.
-bcorner_location_message.newVariableInt("id")
+BCORNER_location_message.newVariableInt("id")
 
 
 if INCLUDE_FIBRE_NETWORK:
-    fnode_spatial_location_message = model.newMessageSpatial3D("fnode_spatial_location_message")
+    FNODE_spatial_location_message = model.newMessageSpatial3D("fnode_spatial_location_message")
     # If heterogeneous diffusion is included, the search/broadcast radius for fibre nodes must be at least equal to the equilibrium distance to make sure that ECM nodes can find all the fibre nodes when looking for neighbours. 
     # WARNING: increasing this radius will increase the number of messages of fnode_fnode_spatial_interaction and therefore the computational cost of the simulation, so it should be kept as low as possible while making sure that fibre nodes are found by ECM nodes.
     if (MAX_SEARCH_RADIUS_FNODES < ECM_ECM_EQUILIBRIUM_DISTANCE) and INCLUDE_DIFFUSION and HETEROGENEOUS_DIFFUSION:
-        fnode_spatial_location_message.setRadius(ECM_ECM_EQUILIBRIUM_DISTANCE) 
+        FNODE_spatial_location_message.setRadius(ECM_ECM_EQUILIBRIUM_DISTANCE) 
     else:
-        fnode_spatial_location_message.setRadius(MAX_SEARCH_RADIUS_FNODES)  
-    fnode_spatial_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS,MIN_EXPECTED_BOUNDARY_POS)
-    fnode_spatial_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS,MAX_EXPECTED_BOUNDARY_POS)
-    fnode_spatial_location_message.newVariableInt("id") # as an edge can have multiple inner agents, this stores the position within the edge
+        FNODE_spatial_location_message.setRadius(MAX_SEARCH_RADIUS_FNODES)  
+    FNODE_spatial_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS,MIN_EXPECTED_BOUNDARY_POS)
+    FNODE_spatial_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS,MAX_EXPECTED_BOUNDARY_POS)
+    FNODE_spatial_location_message.newVariableInt("id") # as an edge can have multiple inner agents, this stores the position within the edge
 
-    fnode_bucket_location_message = model.newMessageBucket("fnode_bucket_location_message")
+    FNODE_bucket_location_message = model.newMessageBucket("fnode_bucket_location_message")
     # Set the range and bounds.
     # setBounds(min, max) where min and max are the min and max ids of the message buckets. This is independent of the number of agents (there can be more agents than buckets and vice versa).
     # Here, we assign one bucket per fibre node so that each fibre node can be found in its own bucket when searching for neighbours.
-    fnode_bucket_location_message.setBounds(8,N_NODES + 8) # +8 because domain corners have idx from 1 to 8. WARNING: make sure to initialize fibre nodes starting from index 9
+    FNODE_bucket_location_message.setBounds(8,N_NODES + 8) # +8 because domain corners have idx from 1 to 8. WARNING: make sure to initialize fibre nodes starting from index 9
 
-    fnode_bucket_location_message.newVariableInt("id")
-    fnode_bucket_location_message.newVariableFloat("x")
-    fnode_bucket_location_message.newVariableFloat("y")
-    fnode_bucket_location_message.newVariableFloat("z")
-    fnode_bucket_location_message.newVariableFloat("vx")
-    fnode_bucket_location_message.newVariableFloat("vy")
-    fnode_bucket_location_message.newVariableFloat("vz")
-    fnode_bucket_location_message.newVariableFloat("k_elast")
-    fnode_bucket_location_message.newVariableFloat("d_dumping")
-    fnode_bucket_location_message.newVariableArrayFloat("equilibrium_distance", MAX_CONNECTIVITY) # each segment can have a different equilibrium distance depending on the rest length assigned during network generation
-    fnode_bucket_location_message.newVariableArrayInt("linked_nodes", MAX_CONNECTIVITY) # store the index of the linked nodes, which is a proxy for the bucket id
+    FNODE_bucket_location_message.newVariableInt("id")
+    FNODE_bucket_location_message.newVariableFloat("x")
+    FNODE_bucket_location_message.newVariableFloat("y")
+    FNODE_bucket_location_message.newVariableFloat("z")
+    FNODE_bucket_location_message.newVariableFloat("vx")
+    FNODE_bucket_location_message.newVariableFloat("vy")
+    FNODE_bucket_location_message.newVariableFloat("vz")
+    FNODE_bucket_location_message.newVariableFloat("k_elast")
+    FNODE_bucket_location_message.newVariableFloat("d_dumping")
+    FNODE_bucket_location_message.newVariableArrayFloat("equilibrium_distance", MAX_CONNECTIVITY) # each segment can have a different equilibrium distance depending on the rest length assigned during network generation
+    FNODE_bucket_location_message.newVariableArrayInt("linked_nodes", MAX_CONNECTIVITY) # store the index of the linked nodes, which is a proxy for the bucket id
 
 
-ECM_grid_location_message = model.newMessageArray3D("ECM_grid_location_message")
+ECM_grid_location_message = model.newMessageArray3D("ecm_grid_location_message")
 ECM_grid_location_message.setDimensions(ECM_AGENTS_PER_DIR[0], ECM_AGENTS_PER_DIR[1], ECM_AGENTS_PER_DIR[2])
 ECM_grid_location_message.newVariableInt("id")
 ECM_grid_location_message.newVariableFloat("x")
@@ -555,7 +582,7 @@ ECM_grid_location_message.newVariableUInt8("clamped_bz_neg")
 
 if INCLUDE_CELLS:
     # If message type is MessageSpatial3D, variables x, y, z are included internally.
-    CELL_spatial_location_message = model.newMessageSpatial3D("CELL_spatial_location_message")
+    CELL_spatial_location_message = model.newMessageSpatial3D("cell_spatial_location_message")
     CELL_spatial_location_message.setRadius(MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION)
     CELL_spatial_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS)
     CELL_spatial_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS)
@@ -576,20 +603,65 @@ if INCLUDE_CELLS:
     CELL_spatial_location_message.newVariableFloat("cycle_phase")
     CELL_spatial_location_message.newVariableFloat("clock")
     CELL_spatial_location_message.newVariableInt("completed_cycles")
-    
-    CELL_bucket_location_message = model.newMessageBucket("CELL_bucket_location_message")
+        
     # Set the range and bounds.
-    if INCLUDE_FIBRE_NETWORK:
+    if INCLUDE_FOCAL_ADHESIONS:
+        CELL_bucket_location_message = model.newMessageBucket("cell_bucket_location_message")
         CELL_bucket_location_message.setBounds(8+N_NODES, 8+N_NODES+N_CELLS) # +8 because domain corners have idx from 1 to 8, +N_NODES because fibre nodes have idx from 9 to 8+N_NODES. WARNING: make sure to initialize cell agents starting from index 8+N_NODES
-    else:
-        CELL_bucket_location_message.setBounds(8, N_CELLS+8)    
-    CELL_bucket_location_message.newVariableInt("id")
-    CELL_bucket_location_message.newVariableFloat("x")
-    CELL_bucket_location_message.newVariableFloat("y")
-    CELL_bucket_location_message.newVariableFloat("z")
-    CELL_bucket_location_message.newVariableArrayFloat("x_i", N_ANCHOR_POINTS)
-    CELL_bucket_location_message.newVariableArrayFloat("y_i", N_ANCHOR_POINTS)
-    CELL_bucket_location_message.newVariableArrayFloat("z_i", N_ANCHOR_POINTS)
+        CELL_bucket_location_message.newVariableInt("id")
+        CELL_bucket_location_message.newVariableFloat("x")
+        CELL_bucket_location_message.newVariableFloat("y")
+        CELL_bucket_location_message.newVariableFloat("z")
+        CELL_bucket_location_message.newVariableArrayFloat("x_i", N_ANCHOR_POINTS)
+        CELL_bucket_location_message.newVariableArrayFloat("y_i", N_ANCHOR_POINTS)
+        CELL_bucket_location_message.newVariableArrayFloat("z_i", N_ANCHOR_POINTS)
+        
+        FOCAD_bucket_location_message = model.newMessageBucket("focad_bucket_location_message")
+        FOCAD_bucket_location_message.setBounds(8+N_NODES+N_CELLS,8+N_NODES+N_CELLS+(INIT_N_FOCAD_PER_CELL*N_CELLS)) # WARNING: if the number of focar adhesions grow over time, upper bound should be increased accordingly. Make sure to initialize focal adhesion agents starting from index 8+N_NODES+N_CELLS
+        FOCAD_bucket_location_message.newVariableInt("id")
+        FOCAD_bucket_location_message.newVariableInt("cell_id")
+        FOCAD_bucket_location_message.newVariableInt("fnode_id")
+        FOCAD_bucket_location_message.newVariableFloat("x")
+        FOCAD_bucket_location_message.newVariableFloat("y")
+        FOCAD_bucket_location_message.newVariableFloat("z")
+        FOCAD_bucket_location_message.newVariableFloat("vx")
+        FOCAD_bucket_location_message.newVariableFloat("vy")
+        FOCAD_bucket_location_message.newVariableFloat("vz")
+        FOCAD_bucket_location_message.newVariableFloat("fx")
+        FOCAD_bucket_location_message.newVariableFloat("fy")
+        FOCAD_bucket_location_message.newVariableFloat("fz")
+        FOCAD_bucket_location_message.newVariableFloat("x_i")
+        FOCAD_bucket_location_message.newVariableFloat("y_i")
+        FOCAD_bucket_location_message.newVariableFloat("z_i")
+        FOCAD_bucket_location_message.newVariableFloat("x_c")
+        FOCAD_bucket_location_message.newVariableFloat("y_c")
+        FOCAD_bucket_location_message.newVariableFloat("z_c")
+        FOCAD_bucket_location_message.newVariableFloat("rest_length_0")
+        FOCAD_bucket_location_message.newVariableFloat("rest_length")
+        FOCAD_bucket_location_message.newVariableFloat("k_fa")
+        FOCAD_bucket_location_message.newVariableFloat("f_max")
+        FOCAD_bucket_location_message.newVariableUInt8("attached")
+        FOCAD_bucket_location_message.newVariableUInt8("active")
+        FOCAD_bucket_location_message.newVariableFloat("v_c")
+        FOCAD_bucket_location_message.newVariableUInt8("fa_state")
+        FOCAD_bucket_location_message.newVariableFloat("age")
+        FOCAD_bucket_location_message.newVariableFloat("k_on")
+        FOCAD_bucket_location_message.newVariableFloat("k_off_0")
+        FOCAD_bucket_location_message.newVariableFloat("f_c")
+        FOCAD_bucket_location_message.newVariableFloat("k_reinf")
+
+        
+        FOCAD_spatial_location_message = model.newMessageSpatial3D("focad_spatial_location_message")
+        FOCAD_spatial_location_message.setRadius(MAX_SEARCH_RADIUS_FOCAD)
+        FOCAD_spatial_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS)
+        FOCAD_spatial_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS)
+        FOCAD_spatial_location_message.newVariableInt("id")
+        FOCAD_spatial_location_message.newVariableFloat("fx")
+        FOCAD_spatial_location_message.newVariableFloat("fy")
+        FOCAD_spatial_location_message.newVariableFloat("fz")
+        FOCAD_spatial_location_message.newVariableInt("fnode_id")
+        FOCAD_spatial_location_message.newVariableUInt8("attached")
+        FOCAD_spatial_location_message.newVariableUInt8("active")
 
 # ++==================================================================++
 # ++ Agents                                                            |
@@ -601,72 +673,74 @@ if INCLUDE_CELLS:
 """
   BCORNER agent
 """
-bcorner_agent = model.newAgent("BCORNER") # boundary corner agent to track boundary positions
-bcorner_agent.newVariableInt("id")
-bcorner_agent.newVariableFloat("x")
-bcorner_agent.newVariableFloat("y")
-bcorner_agent.newVariableFloat("z")
+BCORNER_agent = model.newAgent("BCORNER") # boundary corner agent to track boundary positions
+BCORNER_agent.newVariableInt("id")
+BCORNER_agent.newVariableFloat("x")
+BCORNER_agent.newVariableFloat("y")
+BCORNER_agent.newVariableFloat("z")
 
-bcorner_agent.newRTCFunctionFile("bcorner_output_location_data", bcorner_output_location_data_file).setMessageOutput("bcorner_location_message")
+BCORNER_agent.newRTCFunctionFile("bcorner_output_location_data", bcorner_output_location_data_file).setMessageOutput("bcorner_location_message")
 if MOVING_BOUNDARIES:
-    bcorner_agent.newRTCFunctionFile("bcorner_move", bcorner_move_file)
+    BCORNER_agent.newRTCFunctionFile("bcorner_move", bcorner_move_file)
 
 """
   FIBRE NODE agent
 """
 if INCLUDE_FIBRE_NETWORK:
-    fnode_agent = model.newAgent("FNODE")
-    fnode_agent.newVariableInt("id")
-    fnode_agent.newVariableFloat("x")
-    fnode_agent.newVariableFloat("y")
-    fnode_agent.newVariableFloat("z")
-    fnode_agent.newVariableFloat("vx", 0.0)
-    fnode_agent.newVariableFloat("vy", 0.0)
-    fnode_agent.newVariableFloat("vz", 0.0)
-    fnode_agent.newVariableFloat("fx", 0.0)
-    fnode_agent.newVariableFloat("fy", 0.0)
-    fnode_agent.newVariableFloat("fz", 0.0)
-    fnode_agent.newVariableFloat("k_elast")
-    fnode_agent.newVariableFloat("d_dumping")
-    fnode_agent.newVariableArrayFloat("equilibrium_distance", MAX_CONNECTIVITY) # each segment can have a different equilibrium distance depending on the rest length assigned during network generation
-    fnode_agent.newVariableFloat("boundary_fx")  # boundary_f[A]: normal force coming from boundary [A] when elastic boundaries option is selected.
-    fnode_agent.newVariableFloat("boundary_fy")
-    fnode_agent.newVariableFloat("boundary_fz")
-    fnode_agent.newVariableFloat("f_bx_pos")  # f_b[A]_[B]: normal force transmitted to the boundary [A]_[B] when agent is clamped
-    fnode_agent.newVariableFloat("f_bx_neg")
-    fnode_agent.newVariableFloat("f_by_pos")
-    fnode_agent.newVariableFloat("f_by_neg")
-    fnode_agent.newVariableFloat("f_bz_pos")
-    fnode_agent.newVariableFloat("f_bz_neg")
-    fnode_agent.newVariableFloat("f_bx_pos_y")  # f_b[A]_[B]_[C]: shear force transmitted to the boundary [A]_[B] in the direction [C] when agent is clamped
-    fnode_agent.newVariableFloat("f_bx_pos_z")
-    fnode_agent.newVariableFloat("f_bx_neg_y")
-    fnode_agent.newVariableFloat("f_bx_neg_z")
-    fnode_agent.newVariableFloat("f_by_pos_x")
-    fnode_agent.newVariableFloat("f_by_pos_z")
-    fnode_agent.newVariableFloat("f_by_neg_x")
-    fnode_agent.newVariableFloat("f_by_neg_z")
-    fnode_agent.newVariableFloat("f_bz_pos_x")
-    fnode_agent.newVariableFloat("f_bz_pos_y")
-    fnode_agent.newVariableFloat("f_bz_neg_x")
-    fnode_agent.newVariableFloat("f_bz_neg_y")
-    fnode_agent.newVariableFloat("f_extension")
-    fnode_agent.newVariableFloat("f_compression")
-    fnode_agent.newVariableFloat("elastic_energy")
-    fnode_agent.newVariableArrayFloat("linked_nodes", MAX_CONNECTIVITY)
-    fnode_agent.newVariableUInt8("clamped_bx_pos")
-    fnode_agent.newVariableUInt8("clamped_bx_neg")
-    fnode_agent.newVariableUInt8("clamped_by_pos")
-    fnode_agent.newVariableUInt8("clamped_by_neg")
-    fnode_agent.newVariableUInt8("clamped_bz_pos")
-    fnode_agent.newVariableUInt8("clamped_bz_neg")
+    FNODE_agent = model.newAgent("FNODE")
+    FNODE_agent.newVariableInt("id")
+    FNODE_agent.newVariableFloat("x")
+    FNODE_agent.newVariableFloat("y")
+    FNODE_agent.newVariableFloat("z")
+    FNODE_agent.newVariableFloat("vx", 0.0)
+    FNODE_agent.newVariableFloat("vy", 0.0)
+    FNODE_agent.newVariableFloat("vz", 0.0)
+    FNODE_agent.newVariableFloat("fx", 0.0)
+    FNODE_agent.newVariableFloat("fy", 0.0)
+    FNODE_agent.newVariableFloat("fz", 0.0)
+    FNODE_agent.newVariableFloat("k_elast")
+    FNODE_agent.newVariableFloat("d_dumping")
+    FNODE_agent.newVariableArrayFloat("equilibrium_distance", MAX_CONNECTIVITY) # each segment can have a different equilibrium distance depending on the rest length assigned during network generation
+    FNODE_agent.newVariableFloat("boundary_fx")  # boundary_f[A]: normal force coming from boundary [A] when elastic boundaries option is selected.
+    FNODE_agent.newVariableFloat("boundary_fy")
+    FNODE_agent.newVariableFloat("boundary_fz")
+    FNODE_agent.newVariableFloat("f_bx_pos")  # f_b[A]_[B]: normal force transmitted to the boundary [A]_[B] when agent is clamped
+    FNODE_agent.newVariableFloat("f_bx_neg")
+    FNODE_agent.newVariableFloat("f_by_pos")
+    FNODE_agent.newVariableFloat("f_by_neg")
+    FNODE_agent.newVariableFloat("f_bz_pos")
+    FNODE_agent.newVariableFloat("f_bz_neg")
+    FNODE_agent.newVariableFloat("f_bx_pos_y")  # f_b[A]_[B]_[C]: shear force transmitted to the boundary [A]_[B] in the direction [C] when agent is clamped
+    FNODE_agent.newVariableFloat("f_bx_pos_z")
+    FNODE_agent.newVariableFloat("f_bx_neg_y")
+    FNODE_agent.newVariableFloat("f_bx_neg_z")
+    FNODE_agent.newVariableFloat("f_by_pos_x")
+    FNODE_agent.newVariableFloat("f_by_pos_z")
+    FNODE_agent.newVariableFloat("f_by_neg_x")
+    FNODE_agent.newVariableFloat("f_by_neg_z")
+    FNODE_agent.newVariableFloat("f_bz_pos_x")
+    FNODE_agent.newVariableFloat("f_bz_pos_y")
+    FNODE_agent.newVariableFloat("f_bz_neg_x")
+    FNODE_agent.newVariableFloat("f_bz_neg_y")
+    FNODE_agent.newVariableFloat("f_extension")
+    FNODE_agent.newVariableFloat("f_compression")
+    FNODE_agent.newVariableFloat("elastic_energy")
+    FNODE_agent.newVariableArrayFloat("linked_nodes", MAX_CONNECTIVITY)
+    FNODE_agent.newVariableUInt8("clamped_bx_pos")
+    FNODE_agent.newVariableUInt8("clamped_bx_neg")
+    FNODE_agent.newVariableUInt8("clamped_by_pos")
+    FNODE_agent.newVariableUInt8("clamped_by_neg")
+    FNODE_agent.newVariableUInt8("clamped_bz_pos")
+    FNODE_agent.newVariableUInt8("clamped_bz_neg")
 
-    fnode_agent.newRTCFunctionFile("fnode_spatial_location_data", fnode_spatial_location_data_file).setMessageOutput("fnode_spatial_location_message")
-    fnode_agent.newRTCFunctionFile("fnode_bucket_location_data", fnode_bucket_location_data_file).setMessageOutput("fnode_bucket_location_message")
-    fnode_agent.newRTCFunctionFile("fnode_boundary_interaction", fnode_boundary_interaction_file)
-    fnode_agent.newRTCFunctionFile("fnode_fnode_spatial_interaction", fnode_fnode_spatial_interaction_file).setMessageInput("fnode_spatial_location_message")
-    fnode_agent.newRTCFunctionFile("fnode_fnode_bucket_interaction", fnode_fnode_bucket_interaction_file).setMessageInput("fnode_bucket_location_message")
-    fnode_agent.newRTCFunctionFile("fnode_move", fnode_move_file)
+    FNODE_agent.newRTCFunctionFile("fnode_spatial_location_data", fnode_spatial_location_data_file).setMessageOutput("fnode_spatial_location_message")
+    FNODE_agent.newRTCFunctionFile("fnode_bucket_location_data", fnode_bucket_location_data_file).setMessageOutput("fnode_bucket_location_message")
+    FNODE_agent.newRTCFunctionFile("fnode_boundary_interaction", fnode_boundary_interaction_file)
+    FNODE_agent.newRTCFunctionFile("fnode_fnode_spatial_interaction", fnode_fnode_spatial_interaction_file).setMessageInput("fnode_spatial_location_message")
+    FNODE_agent.newRTCFunctionFile("fnode_fnode_bucket_interaction", fnode_fnode_bucket_interaction_file).setMessageInput("fnode_bucket_location_message")
+    FNODE_agent.newRTCFunctionFile("fnode_move", fnode_move_file)
+    if INCLUDE_FOCAL_ADHESIONS:
+        FNODE_agent.newRTCFunctionFile("fnode_focad_interaction", fnode_focad_interaction_file).setMessageInput("focad_spatial_location_message")
 
 
 """
@@ -698,8 +772,8 @@ ECM_agent.newVariableUInt8("clamped_by_pos")
 ECM_agent.newVariableUInt8("clamped_by_neg")
 ECM_agent.newVariableUInt8("clamped_bz_pos")
 ECM_agent.newVariableUInt8("clamped_bz_neg")
-ECM_agent.newRTCFunctionFile("ecm_grid_location_data", ecm_grid_location_data_file).setMessageOutput("ECM_grid_location_message")
-ECM_agent.newRTCFunctionFile("ecm_ecm_interaction", ecm_ecm_interaction_file).setMessageInput("ECM_grid_location_message")
+ECM_agent.newRTCFunctionFile("ecm_grid_location_data", ecm_grid_location_data_file).setMessageOutput("ecm_grid_location_message")
+ECM_agent.newRTCFunctionFile("ecm_ecm_interaction", ecm_ecm_interaction_file).setMessageInput("ecm_grid_location_message")
 ECM_agent.newRTCFunctionFile("ecm_boundary_concentration_conditions", ecm_boundary_concentration_conditions_file)
 ECM_agent.newRTCFunctionFile("ecm_Csp_update", ecm_Csp_update_file)
 if HETEROGENEOUS_DIFFUSION and INCLUDE_FIBRE_NETWORK:
@@ -734,13 +808,60 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableInt("cycle_phase", 1) # [1:G1] [2:S] [3:G2] [4:M]
     CELL_agent.newVariableFloat("clock", 0.0) # internal clock of the cell to switch phases
     CELL_agent.newVariableInt("completed_cycles", 0)
-    CELL_agent.newRTCFunctionFile("cell_spatial_location_data", cell_spatial_location_data_file).setMessageOutput("CELL_spatial_location_message")
-    CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ECM_grid_location_message")
+    CELL_agent.newRTCFunctionFile("cell_spatial_location_data", cell_spatial_location_data_file).setMessageOutput("cell_spatial_location_message")
+    CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ecm_grid_location_message")
     CELL_agent.newRTCFunctionFile("cell_move", cell_move_file)
     if INCLUDE_FOCAL_ADHESIONS: 
         CELL_agent.newVariableArrayFloat("x_i", N_ANCHOR_POINTS)
         CELL_agent.newVariableArrayFloat("y_i", N_ANCHOR_POINTS) 
         CELL_agent.newVariableArrayFloat("z_i", N_ANCHOR_POINTS)  
+        CELL_agent.newRTCFunctionFile("cell_bucket_location_data", cell_bucket_location_data_file).setMessageOutput("cell_bucket_location_message")
+        CELL_agent.newRTCFunctionFile("cell_update_stress", cell_update_stress_file).setMessageInput("focad_bucket_location_message")
+        
+"""
+  FOCAD agent
+"""
+if INCLUDE_FOCAL_ADHESIONS:
+    FOCAD_agent = model.newAgent("FOCAD")
+    FOCAD_agent.newVariableInt("id", 0)
+    FOCAD_agent.newVariableInt("cell_id")
+    FOCAD_agent.newVariableInt("fnode_id")
+    FOCAD_agent.newVariableFloat("x", 0.0)
+    FOCAD_agent.newVariableFloat("y", 0.0)
+    FOCAD_agent.newVariableFloat("z", 0.0)
+    FOCAD_agent.newVariableFloat("vx", 0.0)
+    FOCAD_agent.newVariableFloat("vy", 0.0)
+    FOCAD_agent.newVariableFloat("vz", 0.0)
+    FOCAD_agent.newVariableFloat("fx", 0.0)
+    FOCAD_agent.newVariableFloat("fy", 0.0)
+    FOCAD_agent.newVariableFloat("fz", 0.0)
+    FOCAD_agent.newVariableFloat("x_i", 0.0)
+    FOCAD_agent.newVariableFloat("y_i", 0.0)
+    FOCAD_agent.newVariableFloat("z_i", 0.0)
+    FOCAD_agent.newVariableFloat("x_c", 0.0)
+    FOCAD_agent.newVariableFloat("y_c", 0.0)
+    FOCAD_agent.newVariableFloat("z_c", 0.0)
+    FOCAD_agent.newVariableFloat("rest_length_0")
+    FOCAD_agent.newVariableFloat("rest_length")
+    FOCAD_agent.newVariableFloat("k_fa")
+    FOCAD_agent.newVariableFloat("f_max")
+    FOCAD_agent.newVariableUInt8("attached")
+    FOCAD_agent.newVariableUInt8("active")
+    FOCAD_agent.newVariableFloat("v_c")
+    FOCAD_agent.newVariableUInt8("fa_state")
+    FOCAD_agent.newVariableFloat("age")
+    FOCAD_agent.newVariableFloat("k_on")
+    FOCAD_agent.newVariableFloat("k_off_0")
+    FOCAD_agent.newVariableFloat("f_c")
+    FOCAD_agent.newVariableFloat("k_reinf")
+
+
+    FOCAD_agent.newRTCFunctionFile("focad_bucket_location_data", focad_bucket_location_data_file).setMessageOutput("focad_bucket_location_message")
+    FOCAD_agent.newRTCFunctionFile("focad_spatial_location_data", focad_spatial_location_data_file).setMessageOutput("focad_spatial_location_message")
+    FOCAD_agent.newRTCFunctionFile("focad_anchor_update", focad_anchor_update_file).setMessageInput("cell_bucket_location_message")
+    FOCAD_agent.newRTCFunctionFile("focad_fnode_interaction", focad_fnode_interaction_file).setMessageInput("fnode_spatial_location_message")
+    FOCAD_agent.newRTCFunctionFile("focad_move", focad_move_file).setMessageInput("fnode_bucket_location_message")        
+
 
 
 """
