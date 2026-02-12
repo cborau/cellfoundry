@@ -41,8 +41,9 @@ RES_PATH.mkdir(parents=True, exist_ok=True)
 EPSILON = 0.0000000001
 
 print("Executing in ", CURR_PATH)
-# Minimum number of agents per direction (x,y,z). 
+# Minimum number of ECM agents per direction (x,y,z). 
 # If domain is not cubical, N is asigned to the shorter dimension and more agents are added to the longer ones
+# NOTE: ECM agents are always present (mandatory) eventhough they are only used when INCLUDE_DIFFUSION is True. If there is no diffusion, set N to a small value to reduce computational cost.
 # ----------------------------------------------------------------------
 N = 21
 
@@ -169,7 +170,7 @@ BOUNDARY_CONC_FIXED_MULTI = [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                              [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
 HETEROGENEOUS_DIFFUSION = True  # if True, diffusion coefficient is multiplied by (1 - local ECM density) to simulate hindered diffusion through the ECM. WARNING: this is a very simple approximation of the phenomenon and highly depends on grid density (N). 
 # +====================================================================+
-# | CELL PARAMETERS                                                   |
+# | CELL PARAMETERS                                                    |
 # +====================================================================+
 INCLUDE_CELLS = True
 INCLUDE_CELL_ORIENTATION = True
@@ -181,6 +182,7 @@ N_CELLS = 1
 CELL_K_ELAST = 2.0  # [N/units/kg]
 CELL_D_DUMPING = 0.4  # [N*time/units/kg]
 CELL_RADIUS = 8.412 #ECM_ECM_EQUILIBRIUM_DISTANCE / 2 # [units]
+CELL_NUCLEUS_RADIUS = CELL_RADIUS / 2 # [units]
 CELL_SPEED_REF = ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / 10.0 # [units/time]
 CYCLE_PHASE_G1_DURATION = 10.0 #[h]
 CYCLE_PHASE_S_DURATION = 8.0
@@ -198,7 +200,13 @@ INIT_ECM_SAT_CONCENTRATION_VALS = [0.0, 10.0]  # initial saturation concentratio
 INIT_CELL_CONSUMPTION_RATES = [0.001, 0.0]  # consumption rate of each species by the CELL agents 
 INIT_CELL_PRODUCTION_RATES = [0.0, 10.0]  # production rate of each species by the CELL agents 
 INIT_CELL_REACTION_RATES = [0.00018, 0.00018]  # metabolic reaction rates of each species by the CELL agents 
-
+# +====================================================================+
+# | FOCAL ADHESION PARAMETERS                                          |
+# +====================================================================+
+INCLUDE_FOCAL_ADHESIONS = False
+INIT_N_FOCAD_PER_CELL = 10 # initial number of focal adhesions per cell. 
+INIT_REST_LENGTH = CELL_RADIUS - CELL_NUCLEUS_RADIUS # rest length of focal adhesions at the moment of their formation. 
+N_ANCHOR_POINTS = 20 # number of anchor points to which focal adhesions can attach on the nucleus surface. Their positions change with nucleus deformation
 # +====================================================================+
 # | OTHER DERIVED PARAMETERS AND MODEL CHECKS                          |
 # +====================================================================+
@@ -329,7 +337,7 @@ AGENT Files
 """
   ECM
 """
-ecm_output_grid_location_data_file = "ecm_output_grid_location_data.cpp"
+ecm_grid_location_data_file = "ecm_grid_location_data.cpp"
 ecm_ecm_interaction_file = "ecm_ecm_interaction.cpp"
 ecm_boundary_concentration_conditions_file = "ecm_boundary_concentration_conditions.cpp"
 ecm_move_file = "ecm_move.cpp"
@@ -339,9 +347,11 @@ ecm_Dsp_update_file = "ecm_Dsp_update.cpp"
 """
   CELL
 """
-cell_output_location_data_file = "cell_output_location_data.cpp"
+cell_spatial_location_data_file = "cell_spatial_location_data.cpp"
 cell_ecm_interaction_metabolism_file = "cell_ecm_interaction_metabolism.cpp"
 cell_move_file = "cell_move.cpp"
+cell_bucket_location_data_file = "cell_bucket_location_data.cpp"
+cell_update_stress_file = "cell_update_stress.cpp"
 
 """
   BCORNER  
@@ -566,6 +576,20 @@ if INCLUDE_CELLS:
     CELL_spatial_location_message.newVariableFloat("cycle_phase")
     CELL_spatial_location_message.newVariableFloat("clock")
     CELL_spatial_location_message.newVariableInt("completed_cycles")
+    
+    CELL_bucket_location_message = model.newMessageBucket("CELL_bucket_location_message")
+    # Set the range and bounds.
+    if INCLUDE_FIBRE_NETWORK:
+        CELL_bucket_location_message.setBounds(8+N_NODES, 8+N_NODES+N_CELLS) # +8 because domain corners have idx from 1 to 8, +N_NODES because fibre nodes have idx from 9 to 8+N_NODES. WARNING: make sure to initialize cell agents starting from index 8+N_NODES
+    else:
+        CELL_bucket_location_message.setBounds(8, N_CELLS+8)    
+    CELL_bucket_location_message.newVariableInt("id")
+    CELL_bucket_location_message.newVariableFloat("x")
+    CELL_bucket_location_message.newVariableFloat("y")
+    CELL_bucket_location_message.newVariableFloat("z")
+    CELL_bucket_location_message.newVariableArrayFloat("x_i", N_ANCHOR_POINTS)
+    CELL_bucket_location_message.newVariableArrayFloat("y_i", N_ANCHOR_POINTS)
+    CELL_bucket_location_message.newVariableArrayFloat("z_i", N_ANCHOR_POINTS)
 
 # ++==================================================================++
 # ++ Agents                                                            |
@@ -674,7 +698,7 @@ ECM_agent.newVariableUInt8("clamped_by_pos")
 ECM_agent.newVariableUInt8("clamped_by_neg")
 ECM_agent.newVariableUInt8("clamped_bz_pos")
 ECM_agent.newVariableUInt8("clamped_bz_neg")
-ECM_agent.newRTCFunctionFile("ecm_output_grid_location_data", ecm_output_grid_location_data_file).setMessageOutput("ECM_grid_location_message")
+ECM_agent.newRTCFunctionFile("ecm_grid_location_data", ecm_grid_location_data_file).setMessageOutput("ECM_grid_location_message")
 ECM_agent.newRTCFunctionFile("ecm_ecm_interaction", ecm_ecm_interaction_file).setMessageInput("ECM_grid_location_message")
 ECM_agent.newRTCFunctionFile("ecm_boundary_concentration_conditions", ecm_boundary_concentration_conditions_file)
 ECM_agent.newRTCFunctionFile("ecm_Csp_update", ecm_Csp_update_file)
@@ -710,9 +734,13 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableInt("cycle_phase", 1) # [1:G1] [2:S] [3:G2] [4:M]
     CELL_agent.newVariableFloat("clock", 0.0) # internal clock of the cell to switch phases
     CELL_agent.newVariableInt("completed_cycles", 0)
-    CELL_agent.newRTCFunctionFile("cell_output_location_data", cell_output_location_data_file).setMessageOutput("CELL_spatial_location_message")
+    CELL_agent.newRTCFunctionFile("cell_spatial_location_data", cell_spatial_location_data_file).setMessageOutput("CELL_spatial_location_message")
     CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ECM_grid_location_message")
     CELL_agent.newRTCFunctionFile("cell_move", cell_move_file)
+    if INCLUDE_FOCAL_ADHESIONS: 
+        CELL_agent.newVariableArrayFloat("x_i", N_ANCHOR_POINTS)
+        CELL_agent.newVariableArrayFloat("y_i", N_ANCHOR_POINTS) 
+        CELL_agent.newVariableArrayFloat("z_i", N_ANCHOR_POINTS)  
 
 
 """
@@ -853,6 +881,59 @@ class initAgentPopulations(pyflamegpu.HostFunction):
 
 
             FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
+            
+        # CELLS
+        if INCLUDE_CELLS:
+            current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
+            current_id += 1
+            print(f"--- Initializing CELLS ({N_CELLS})")
+            print("  |-> current_id:", current_id)
+            count = -1
+            cell_orientations = getRandomVectors3D(N_CELLS)
+            k_elast = FLAMEGPU.environment.getPropertyFloat("CELL_K_ELAST")
+            d_dumping = FLAMEGPU.environment.getPropertyFloat("CELL_D_DUMPING")
+            radius = FLAMEGPU.environment.getPropertyFloat("CELL_RADIUS")
+            for i in range(N_CELLS):
+                count += 1
+                instance = FLAMEGPU.agent("CELL").newAgent()
+                instance.setVariableInt("id", current_id + count)
+                instance.setVariableFloat("x", 0.0)
+                instance.setVariableFloat("y", 0.0)
+                instance.setVariableFloat("z", 0.0)
+                instance.setVariableFloat("vx", 0.0)
+                instance.setVariableFloat("vy", 0.0)
+                instance.setVariableFloat("vz", 0.0)
+                instance.setVariableFloat("orx", cell_orientations[count, 0])
+                instance.setVariableFloat("ory", cell_orientations[count, 1])
+                instance.setVariableFloat("orz", cell_orientations[count, 2])
+                instance.setVariableFloat("alignment", 0.0)
+                instance.setVariableFloat("k_elast", k_elast)
+                instance.setVariableFloat("d_dumping", d_dumping)
+                instance.setVariableArrayFloat("C_sp", INIT_CELL_CONCENTRATION_VALS)
+                instance.setVariableArrayFloat("M_sp", INIT_CELL_CONC_MASS_VALS)                
+                instance.setVariableArrayFloat("k_consumption", INIT_CELL_CONSUMPTION_RATES)
+                instance.setVariableArrayFloat("k_production", INIT_CELL_PRODUCTION_RATES)
+                instance.setVariableArrayFloat("k_reaction", INIT_CELL_REACTION_RATES)
+                instance.setVariableFloat("radius", radius)
+                cycle_phase = random.randint(1, 4) # [1:G1] [2:S] [3:G2] [4:M]
+                instance.setVariableInt("cycle_phase", cycle_phase)
+                cycle_clock = 0.0
+                if cycle_phase == 1:
+                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G1_START") 
+                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G1_DURATION")                
+                elif cycle_phase == 2:
+                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_S_START")
+                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_S_DURATION")                    
+                elif cycle_phase == 3:
+                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G2_START")
+                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G2_DURATION")                    
+                elif cycle_phase == 4:
+                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_M_START")
+                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_M_DURATION")                    
+                instance.setVariableFloat("clock", cycle_clock)
+                instance.setVariableInt("completed_cycles",0)
+
+            FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
 
         # ECM
         k_elast = FLAMEGPU.environment.getPropertyFloat("ECM_K_ELAST")
@@ -911,59 +992,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableUInt8("grid_k", k)
 
         FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
-
-        # CELLS
-        if INCLUDE_CELLS:
-            current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
-            current_id += 1
-            print(f"--- Initializing CELLS ({N_CELLS})")
-            print("  |-> current_id:", current_id)
-            count = -1
-            cell_orientations = getRandomVectors3D(N_CELLS)
-            k_elast = FLAMEGPU.environment.getPropertyFloat("CELL_K_ELAST")
-            d_dumping = FLAMEGPU.environment.getPropertyFloat("CELL_D_DUMPING")
-            radius = FLAMEGPU.environment.getPropertyFloat("CELL_RADIUS")
-            for i in range(N_CELLS):
-                count += 1
-                instance = FLAMEGPU.agent("CELL").newAgent()
-                instance.setVariableInt("id", current_id + count)
-                instance.setVariableFloat("x", 0.0)
-                instance.setVariableFloat("y", 0.0)
-                instance.setVariableFloat("z", 0.0)
-                instance.setVariableFloat("vx", 0.0)
-                instance.setVariableFloat("vy", 0.0)
-                instance.setVariableFloat("vz", 0.0)
-                instance.setVariableFloat("orx", cell_orientations[count, 0])
-                instance.setVariableFloat("ory", cell_orientations[count, 1])
-                instance.setVariableFloat("orz", cell_orientations[count, 2])
-                instance.setVariableFloat("alignment", 0.0)
-                instance.setVariableFloat("k_elast", k_elast)
-                instance.setVariableFloat("d_dumping", d_dumping)
-                instance.setVariableArrayFloat("C_sp", INIT_CELL_CONCENTRATION_VALS)
-                instance.setVariableArrayFloat("M_sp", INIT_CELL_CONC_MASS_VALS)                
-                instance.setVariableArrayFloat("k_consumption", INIT_CELL_CONSUMPTION_RATES)
-                instance.setVariableArrayFloat("k_production", INIT_CELL_PRODUCTION_RATES)
-                instance.setVariableArrayFloat("k_reaction", INIT_CELL_REACTION_RATES)
-                instance.setVariableFloat("radius", radius)
-                cycle_phase = random.randint(1, 4) # [1:G1] [2:S] [3:G2] [4:M]
-                instance.setVariableInt("cycle_phase", cycle_phase)
-                cycle_clock = 0.0
-                if cycle_phase == 1:
-                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G1_START") 
-                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G1_DURATION")                
-                elif cycle_phase == 2:
-                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_S_START")
-                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_S_DURATION")                    
-                elif cycle_phase == 3:
-                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G2_START")
-                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G2_DURATION")                    
-                elif cycle_phase == 4:
-                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_M_START")
-                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_M_DURATION")                    
-                instance.setVariableFloat("clock", cycle_clock)
-                instance.setVariableInt("completed_cycles",0)
-
-            FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
+        
         
         return
 
@@ -1704,9 +1733,9 @@ model.addStepFunction(sdf)
 # L1: Agent_Locations
 model.newLayer("L1_Agent_Locations").addAgentFunction("BCORNER", "bcorner_output_location_data")
 if INCLUDE_DIFFUSION:
-    model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_output_grid_location_data")
+    model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_grid_location_data")
 if INCLUDE_CELLS:
-    model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_output_location_data")
+    model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_spatial_location_data")
 if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L1_FNODE_Locations_1").addAgentFunction("FNODE", "fnode_spatial_location_data")
     # These functions share data of the same agent, so must be in separate layers

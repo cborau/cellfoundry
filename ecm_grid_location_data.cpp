@@ -1,5 +1,5 @@
 // exposes i,j,k position of the ECM grid agents
-FLAMEGPU_AGENT_FUNCTION(ecm_output_grid_location_data, flamegpu::MessageNone, flamegpu::MessageArray3D) {
+FLAMEGPU_AGENT_FUNCTION(ecm_grid_location_data, flamegpu::MessageNone, flamegpu::MessageArray3D) {
   FLAMEGPU->message_out.setIndex(FLAMEGPU->getVariable<uint8_t>("grid_i"), FLAMEGPU->getVariable<uint8_t>("grid_j"), FLAMEGPU->getVariable<uint8_t>("grid_k"));
   FLAMEGPU->message_out.setVariable<int>("id", FLAMEGPU->getVariable<int>("id"));
   FLAMEGPU->message_out.setVariable<float>("x", FLAMEGPU->getVariable<float>("x"));
