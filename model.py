@@ -1741,15 +1741,186 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                         for i in range(num_cells):
                             for j in range(FLAMEGPU.environment.getPropertyUInt("N_ANCHOR_POINTS")):
                                 file.write("0.0 0.0 0.0 \n") 
+                                
+                if INCLUDE_FOCAL_ADHESIONS:
+                    focad_coords = list()
+                    focad_velocity = list()
+                    focad_force = list()
+                    focad_ori = list()
+                    focad_cell_id = list()
+                    focad_rest_length = list()
+                    focad_k_fa = list()
+                    focad_f_max = list()
+                    focad_attached = list()
+                    focad_active = list()
+                    focad_v_c = list()
+                    focad_fa_state = list()
+                    focad_age = list()
+                    focad_k_on = list()
+                    focad_k_off_0 = list()
+                    focad_f_c = list()
+                    focad_k_reinf = list()
 
-                file_name = 'ecm_data_t{:04d}.vtk'.format(stepCounter)
-                if ENSEMBLE:
-                    dir_name = f"BUCKLING_COEFF_D0_{BUCKLING_COEFF_D0:.3f}_STRAIN_STIFFENING_COEFF_DS_{STRAIN_STIFFENING_COEFF_DS:.3f}_CRITICAL_STRAIN_{CRITICAL_STRAIN:.3f}"
-                    # Combine the base directory with the current directory name
-                    file_path = RES_PATH / dir_name / file_name
-                else:
+                    # (single) internal point variables, not arrays
+                    focad_x_i = list()
+                    focad_y_i = list()
+                    focad_z_i = list()
+
+                    file_name = 'focad_t{:04d}.vtk'.format(stepCounter)
                     file_path = RES_PATH / file_name
 
+                    focad_agent = FLAMEGPU.agent("FOCAD")
+                    focad_agent.sortInt("id", pyflamegpu.HostAgentAPI.Asc)  # keep ids ordered for viz
+                    av = focad_agent.getPopulationData()
+                    num_focad = len(av)
+
+                    for ai in av:
+                        x = ai.getVariableFloat("x")
+                        y = ai.getVariableFloat("y")
+                        z = ai.getVariableFloat("z")
+                        vx = ai.getVariableFloat("vx")
+                        vy = ai.getVariableFloat("vy")
+                        vz = ai.getVariableFloat("vz")
+                        fx = ai.getVariableFloat("fx")
+                        fy = ai.getVariableFloat("fy")
+                        fz = ai.getVariableFloat("fz")
+                        x_i = ai.getVariableFloat("x_i")
+                        y_i = ai.getVariableFloat("y_i")
+                        z_i = ai.getVariableFloat("z_i")
+                        # ori = (x_i,y_i,z_i) - (x,y,z) to draw an arrow from the anchor point to the FOCAD position
+                        ox = x_i - x # this is because Paraview draws the arrow starting at x,y,z in the direction of the vector (invert arrows in paraview for visualiation)
+                        oy = y_i - y
+                        oz = z_i - z
+
+                        focad_coords.append((x, y, z))
+                        focad_velocity.append((vx, vy, vz))
+                        focad_force.append((fx, fy, fz))
+                        focad_ori.append((ox, oy, oz))
+                        focad_x_i.append(x_i)
+                        focad_y_i.append(y_i)
+                        focad_z_i.append(z_i)
+                        focad_cell_id.append(ai.getVariableInt("cell_id"))
+                        focad_rest_length.append(ai.getVariableFloat("rest_length"))
+                        focad_k_fa.append(ai.getVariableFloat("k_fa"))
+                        focad_f_max.append(ai.getVariableFloat("f_max"))
+                        focad_attached.append(ai.getVariableUInt8("attached"))
+                        focad_active.append(ai.getVariableUInt8("active"))
+                        focad_v_c.append(ai.getVariableFloat("v_c"))
+                        focad_fa_state.append(ai.getVariableUInt8("fa_state"))
+                        focad_age.append(ai.getVariableFloat("age"))
+                        focad_k_on.append(ai.getVariableFloat("k_on"))
+                        focad_k_off_0.append(ai.getVariableFloat("k_off_0"))
+                        focad_f_c.append(ai.getVariableFloat("f_c"))
+                        focad_k_reinf.append(ai.getVariableFloat("k_reinf"))
+
+                    with open(str(file_path), 'w') as file:
+                        for line in self.focaladhesionsdata:
+                            file.write(line + '\n')
+
+                        file.write("POINTS {} float \n".format(num_focad))
+                        for coords_ai in focad_coords:
+                            file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
+
+                        file.write("POINT_DATA {} \n".format(num_focad))
+
+                        file.write("SCALARS cell_id int 1\n")
+                        file.write("LOOKUP_TABLE default\n")
+                        for v in focad_cell_id:
+                            file.write("{} \n".format(v))
+
+                        file.write("SCALARS attached int 1\n")
+                        file.write("LOOKUP_TABLE default\n")
+                        for v in focad_attached:
+                            file.write("{} \n".format(int(v)))
+
+                        file.write("SCALARS active int 1\n")
+                        file.write("LOOKUP_TABLE default\n")
+                        for v in focad_active:
+                            file.write("{} \n".format(int(v)))
+
+                        file.write("SCALARS fa_state int 1\n")
+                        file.write("LOOKUP_TABLE default\n")
+                        for v in focad_fa_state:
+                            file.write("{} \n".format(int(v)))
+
+                        file.write("SCALARS rest_length float 1\n")
+                        file.write("LOOKUP_TABLE default\n")
+                        for v in focad_rest_length:
+                            file.write("{:.4f} \n".format(v))
+
+                        file.write("SCALARS k_fa float 1\n")
+                        file.write("LOOKUP_TABLE default\n")
+                        for v in focad_k_fa:
+                            file.write("{:.4f} \n".format(v))
+
+                        file.write("SCALARS f_max float 1\n")
+                        file.write("LOOKUP_TABLE default\n")
+                        for v in focad_f_max:
+                            file.write("{:.4f} \n".format(v))
+
+                        file.write("SCALARS v_c float 1\n")
+                        file.write("LOOKUP_TABLE default\n")
+                        for v in focad_v_c:
+                            file.write("{:.4f} \n".format(v))
+
+                        file.write("SCALARS age float 1\n")
+                        file.write("LOOKUP_TABLE default\n")
+                        for v in focad_age:
+                            file.write("{:.4f} \n".format(v))
+
+                        file.write("SCALARS k_on float 1\n")
+                        file.write("LOOKUP_TABLE default\n")
+                        for v in focad_k_on:
+                            file.write("{:.4f} \n".format(v))
+
+                        file.write("SCALARS k_off_0 float 1\n")
+                        file.write("LOOKUP_TABLE default\n")
+                        for v in focad_k_off_0:
+                            file.write("{:.4f} \n".format(v))
+
+                        file.write("SCALARS f_c float 1\n")
+                        file.write("LOOKUP_TABLE default\n")
+                        for v in focad_f_c:
+                            file.write("{:.4f} \n".format(v))
+
+                        file.write("SCALARS k_reinf float 1\n")
+                        file.write("LOOKUP_TABLE default\n")
+                        for v in focad_k_reinf:
+                            file.write("{:.4f} \n".format(v))
+
+                        # Optional: export x_i,y_i,z_i as scalars too (handy for debugging)
+                        file.write("SCALARS x_i float 1\n")
+                        file.write("LOOKUP_TABLE default\n")
+                        for v in focad_x_i:
+                            file.write("{:.6f} \n".format(v))
+
+                        file.write("SCALARS y_i float 1\n")
+                        file.write("LOOKUP_TABLE default\n")
+                        for v in focad_y_i:
+                            file.write("{:.6f} \n".format(v))
+
+                        file.write("SCALARS z_i float 1\n")
+                        file.write("LOOKUP_TABLE default\n")
+                        for v in focad_z_i:
+                            file.write("{:.6f} \n".format(v))
+
+                        # --- Vectors ---
+                        file.write("VECTORS velocity float\n")
+                        for v_ai in focad_velocity:
+                            file.write("{:.6f} {:.6f} {:.6f} \n".format(v_ai[0], v_ai[1], v_ai[2]))
+
+                        file.write("VECTORS force float\n")
+                        for f_ai in focad_force:
+                            file.write("{:.6f} {:.6f} {:.6f} \n".format(f_ai[0], f_ai[1], f_ai[2]))
+
+                        file.write("VECTORS ori float\n")
+                        for o_ai in focad_ori:
+                            file.write("{:.6f} {:.6f} {:.6f} \n".format(o_ai[0], o_ai[1], o_ai[2]))
+                
+
+                # ECM file is mandatory
+                file_name = 'ecm_data_t{:04d}.vtk'.format(stepCounter)
+                file_path = RES_PATH / file_name
                 agent = FLAMEGPU.agent("ECM")
                 # reaction forces, currently unused in ECM agents. FNODE agents bear the load instead
                 sum_bx_pos = 0.0
