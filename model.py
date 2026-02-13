@@ -1,6 +1,6 @@
 # +====================================================================+
-# | Model: metabolism                                                  |
-# | Last update: 02/02/2026 - 13:28:03                                 |
+# | Model: CELLFOUNDRY                                                 |
+# | Last update: 13/02/2026 - 13:28:03                                 |
 # +====================================================================+
 
 
@@ -18,6 +18,13 @@ import pickle
 import matplotlib.pyplot as plt
 from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D
 
+# TODO LIST:
+# Review functions (name, caller agent, input agent, message type, description)
+# - focad_anchor_update    FOCAD   CELL   bucket   Updates x_i, x_c values
+# - focad_fnode_interaction  FOCAD  FNODE  Spatial  If it's close, it attaches to an FNODE and computes adhesion force (NEXT)
+# - fnode_focad_interaction  FNODE  FOCAD  Spatial  Updates the force on the FNODE
+# - focad_move  FOCAD  FNODE  Bucket  Updates FOCAD position. If attached to an FNODE, it follows it; otherwise, it moves randomly away from the cell (DONE: but tweak values)
+
 
 start_time = time.time()
 
@@ -33,7 +40,7 @@ PAUSE_EVERY_STEP = False  # If True, the visualization stops every step until P 
 SAVE_PICKLE = True  # If True, dumps model configuration into a pickle file for post-processing
 SHOW_PLOTS = False  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
-SAVE_EVERY_N_STEPS = 50 # Affects both the .vtk files and the Dataframes storing boundary data
+SAVE_EVERY_N_STEPS = 1 # Affects both the .vtk files and the Dataframes storing boundary data
 
 CURR_PATH = pathlib.Path().absolute()
 RES_PATH = CURR_PATH / 'result_files'
@@ -50,7 +57,7 @@ N = 21
 # Time simulation parameters
 # ----------------------------------------------------------------------
 TIME_STEP = 0.01# time. WARNING: diffusion and cell migration events might need different scales
-STEPS = 2000
+STEPS = 50
 
 # +====================================================================+
 # | BOUNDARY CONDITIONS                                                |
@@ -207,6 +214,7 @@ INCLUDE_FOCAL_ADHESIONS = True
 INIT_N_FOCAD_PER_CELL = 10 # initial number of focal adhesions per cell. 
 N_ANCHOR_POINTS = 20 # number of anchor points to which focal adhesions can attach on the nucleus surface. Their positions change with nucleus deformation
 MAX_SEARCH_RADIUS_FOCAD = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE# maximum distance at which focal adhesions can find fibre nodes to attach to. WARNING: this value strongly affects the number of bins and therefore the memory allocated for simulations (more bins -> more memory -> faster (in theory))
+MAX_FOCAD_ARM_LENGTH = 4 * CELL_RADIUS  # maximum length of the focal adhesion "arm" (distance between the focal adhesion and its anchor point on the nucleus). If the arm is stretched beyond this length, the focal adhesion moves back towards the anchor point. This is a simple way to represent the limited reach of cellular protrusions and avoid unrealistic stretching of focal adhesions. WARNING: make sure this value is consistent with CELL_RADIUS and MAX_SEARCH_RADIUS_FOCAD to avoid unrealistic behavior.
 # WARNING: rate values below assume global timestep ~ 1.0 s
 FOCAD_REST_LENGTH_0 = CELL_RADIUS - CELL_NUCLEUS_RADIUS # [um] Initial rest/target length at creation time.
 FOCAD_K_FA = 2.0 # [nN/um] Adhesion stiffness (effective spring constant). Typical range: ~0.1–10 nN/um; 
@@ -324,6 +332,8 @@ if INCLUDE_CELLS:
     if INCLUDE_FOCAL_ADHESIONS and not INCLUDE_FIBRE_NETWORK: 
         print('ERROR: focal adhesions cannot be included if there is no fibre network to interact with')
         critical_error = True
+    if INCLUDE_FOCAL_ADHESIONS and MAX_FOCAD_ARM_LENGTH < CELL_RADIUS:
+        print('ERROR: MAX_FOCAD_ARM_LENGTH: {0} must be bigger than CELL_RADIUS: {1}, as focal adhesions are initiated at the cell surface and should be able to grow away'.format(MAX_FOCAD_ARM_LENGTH, CELL_RADIUS))
 elif INCLUDE_FOCAL_ADHESIONS:
     print('ERROR: focal adhesions cannot be included if there are no cells to form them')
     critical_error= True
@@ -471,6 +481,7 @@ env.newPropertyUInt("N_CELLS", N_CELLS)
 env.newPropertyFloat("CELL_K_ELAST", CELL_K_ELAST)
 env.newPropertyFloat("CELL_D_DUMPING", CELL_D_DUMPING)
 env.newPropertyFloat("CELL_RADIUS", CELL_RADIUS)
+env.newPropertyFloat("CELL_NUCLEUS_RADIUS", CELL_NUCLEUS_RADIUS)
 env.newPropertyFloat("CELL_SPEED_REF", CELL_SPEED_REF)
 env.newPropertyFloat("CELL_ORIENTATION_RATE", CELL_ORIENTATION_RATE)
 env.newPropertyFloat("MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION", MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION)
@@ -490,6 +501,7 @@ env.newPropertyUInt("INCLUDE_FOCAL_ADHESIONS", INCLUDE_FOCAL_ADHESIONS)
 env.newPropertyUInt("INIT_N_FOCAD_PER_CELL", INIT_N_FOCAD_PER_CELL)
 env.newPropertyUInt("N_ANCHOR_POINTS", N_ANCHOR_POINTS)
 env.newPropertyFloat("MAX_SEARCH_RADIUS_FOCAD", MAX_SEARCH_RADIUS_FOCAD)
+env.newPropertyFloat("MAX_FOCAD_ARM_LENGTH", MAX_FOCAD_ARM_LENGTH)
 env.newPropertyFloat("FOCAD_REST_LENGTH_0", FOCAD_REST_LENGTH_0)
 env.newPropertyFloat("FOCAD_K_FA", FOCAD_K_FA)
 env.newPropertyFloat("FOCAD_F_MAX", FOCAD_F_MAX)
@@ -2183,6 +2195,8 @@ if INCLUDE_CELLS:
     model.newLayer("L8_CELL_Movement").addAgentFunction("CELL", "cell_move")
 if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L8_FNODE_Movement").addAgentFunction("FNODE", "fnode_move")
+if INCLUDE_FOCAL_ADHESIONS:
+    model.newLayer("L8_FOCAD_Movement").addAgentFunction("FOCAD", "focad_move")
 # If boundaries are not moving, the ECM grid does not need to be updated
 if MOVING_BOUNDARIES:
     model.newLayer("L8_BCORNER_Movement").addAgentFunction("BCORNER", "bcorner_move")
