@@ -485,6 +485,20 @@ env.newPropertyFloat("CYCLE_PHASE_S_START", CYCLE_PHASE_S_START)
 env.newPropertyFloat("CYCLE_PHASE_G2_START", CYCLE_PHASE_G2_START)
 env.newPropertyFloat("CYCLE_PHASE_M_START", CYCLE_PHASE_M_START)
 
+# Focal adhesion properties
+env.newPropertyUInt("INCLUDE_FOCAL_ADHESIONS", INCLUDE_FOCAL_ADHESIONS)
+env.newPropertyUInt("INIT_N_FOCAD_PER_CELL", INIT_N_FOCAD_PER_CELL)
+env.newPropertyUInt("N_ANCHOR_POINTS", N_ANCHOR_POINTS)
+env.newPropertyFloat("MAX_SEARCH_RADIUS_FOCAD", MAX_SEARCH_RADIUS_FOCAD)
+env.newPropertyFloat("FOCAD_REST_LENGTH_0", FOCAD_REST_LENGTH_0)
+env.newPropertyFloat("FOCAD_K_FA", FOCAD_K_FA)
+env.newPropertyFloat("FOCAD_F_MAX", FOCAD_F_MAX)
+env.newPropertyFloat("FOCAD_V_C", FOCAD_V_C)
+env.newPropertyFloat("FOCAD_K_ON", FOCAD_K_ON)
+env.newPropertyFloat("FOCAD_K_OFF_0", FOCAD_K_OFF_0)
+env.newPropertyFloat("FOCAD_F_C", FOCAD_F_C)
+env.newPropertyFloat("FOCAD_K_REINF", FOCAD_K_REINF)
+
 # ECM BEHAVIOUR 
 # ------------------------------------------------------
 # Equilibrium radius at which elastic force is 0.  TODO: add ECM_FIBRE elements
@@ -1426,11 +1440,18 @@ class SaveDataToFile(pyflamegpu.HostFunction):
         self.celldata.append("Cell agents")
         self.celldata.append("ASCII")
         self.celldata.append("DATASET UNSTRUCTURED_GRID")
+        # FOCAL ADHESIONS
+        self.focaladhesionsdata = list()  # a different file is created to show focal adhesion agent data
+        self.focaladhesionsdata.append("# vtk DataFile Version 3.0")
+        self.focaladhesionsdata.append("Focal adhesions")
+        self.focaladhesionsdata.append("ASCII")
+        self.focaladhesionsdata.append("DATASET UNSTRUCTURED_GRID")
 
     def run(self, FLAMEGPU):
         global SAVE_DATA_TO_FILE, SAVE_EVERY_N_STEPS, N_SPECIES
         global RES_PATH, ENSEMBLE
         global INCLUDE_FIBRE_NETWORK, HETEROGENEOUS_DIFFUSION, INITIAL_NETWORK_CONNECTIVITY,N_NODES, INCLUDE_CELLS, ECM_POPULATION_SIZE
+        global INCLUDE_FOCAL_ADHESIONS
         BUCKLING_COEFF_D0 = FLAMEGPU.environment.getPropertyFloat("BUCKLING_COEFF_D0")
         STRAIN_STIFFENING_COEFF_DS = FLAMEGPU.environment.getPropertyFloat("STRAIN_STIFFENING_COEFF_DS")
         CRITICAL_STRAIN = FLAMEGPU.environment.getPropertyFloat("CRITICAL_STRAIN")
@@ -1632,6 +1653,9 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                     cell_radius = list()
                     cell_clock = list()
                     cell_cycle_phase = list()
+                    cell_anchor_points_x = list() # this is a list of tuples. Each tuple has N_ANCHOR_POINTS elements.
+                    cell_anchor_points_y = list() # this is a list of tuples. Each tuple has N_ANCHOR_POINTS elements.
+                    cell_anchor_points_z = list() # this is a list of tuples. Each tuple has N_ANCHOR_POINTS elements. 
                     c_sp_multi = list()  # this is a list of tuples. Each tuple has N_SPECIES elements
                     file_name = 'cells_t{:04d}.vtk'.format(stepCounter)
                     file_path = RES_PATH / file_name
@@ -1646,6 +1670,9 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                         radius_ai = ai.getVariableFloat("radius")
                         clock_ai = ai.getVariableFloat("clock")
                         cycle_phase_ai = ai.getVariableInt("cycle_phase")
+                        cell_anchor_points_x.append(ai.getVariableArrayFloat("x_i"))
+                        cell_anchor_points_y.append(ai.getVariableArrayFloat("y_i"))
+                        cell_anchor_points_z.append(ai.getVariableArrayFloat("z_i"))
                         c_sp_multi.append(ai.getVariableArrayFloat("C_sp"))
                         cell_coords.append(coords_ai)
                         cell_velocity.append(velocity_ai)
@@ -1657,39 +1684,63 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                     with open(str(file_path), 'w') as file:
                         for line in self.celldata:
                             file.write(line + '\n')
-                        file.write("POINTS {} float \n".format(
-                            FLAMEGPU.environment.getPropertyUInt("N_CELLS")))  # number of cell agents
+                        num_cells = FLAMEGPU.environment.getPropertyUInt("N_CELLS")
+                        num_total_anchor_points = num_cells * FLAMEGPU.environment.getPropertyUInt("N_ANCHOR_POINTS")
+                        file.write("POINTS {} float \n".format(num_cells + num_total_anchor_points))  # number of cell agents + anchor points
                         for coords_ai in cell_coords:
                             file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
-                        file.write("POINT_DATA {} \n".format(
-                            FLAMEGPU.environment.getPropertyUInt("N_CELLS")))  
+                        for i in range(num_cells):
+                            for j in range(FLAMEGPU.environment.getPropertyUInt("N_ANCHOR_POINTS")):
+                                file.write("{} {} {} \n".format(cell_anchor_points_x[i][j], cell_anchor_points_y[i][j], cell_anchor_points_z[i][j]))
+                        file.write("POINT_DATA {} \n".format(num_cells + num_total_anchor_points))  
                         file.write("SCALARS alignment float 1" + '\n')
                         file.write("LOOKUP_TABLE default" + '\n')
                         for a_ai in cell_alignment:
-                            file.write("{:.4f} \n".format(a_ai))                            
+                            file.write("{:.4f} \n".format(a_ai))
+                        for i in range(num_cells):
+                            for j in range(FLAMEGPU.environment.getPropertyUInt("N_ANCHOR_POINTS")):
+                                file.write("{:.4f} \n".format(a_ai))                            
                         file.write("SCALARS radius float 1" + '\n')
                         file.write("LOOKUP_TABLE default" + '\n')
                         for r_ai in cell_radius:
-                            file.write("{:.4f} \n".format(r_ai))                            
+                            file.write("{:.4f} \n".format(r_ai)) 
+                        for i in range(num_cells):
+                            for j in range(FLAMEGPU.environment.getPropertyUInt("N_ANCHOR_POINTS")):
+                                file.write("{:.4f} \n".format(r_ai / 10))  # asign 1/10 for visualization                           
                         file.write("SCALARS clock float 1" + '\n')
                         file.write("LOOKUP_TABLE default" + '\n')
                         for c_ai in cell_clock:
-                            file.write("{:.4f} \n".format(c_ai))                        
+                            file.write("{:.4f} \n".format(c_ai)) 
+                        for i in range(num_cells):
+                            for j in range(FLAMEGPU.environment.getPropertyUInt("N_ANCHOR_POINTS")):
+                                file.write("{:.4f} \n".format(c_ai))                        
                         file.write("SCALARS cycle_phase int 1" + '\n')
                         file.write("LOOKUP_TABLE default" + '\n')
                         for ccp_ai in cell_cycle_phase:
-                            file.write("{} \n".format(ccp_ai))    
+                            file.write("{} \n".format(ccp_ai)) 
+                        for i in range(num_cells):
+                            for j in range(FLAMEGPU.environment.getPropertyUInt("N_ANCHOR_POINTS")):
+                                file.write("{} \n".format(ccp_ai))                           
                         for s in range(N_SPECIES):
                             file.write("SCALARS concentration_species_{0} float 1 \n".format(s))
                             file.write("LOOKUP_TABLE default" + '\n')
                             for c_ai in c_sp_multi:
-                                file.write("{:.4f} \n".format(c_ai[s]))              
+                                file.write("{:.4f} \n".format(c_ai[s]))  
+                            for i in range(num_cells):
+                                for j in range(FLAMEGPU.environment.getPropertyUInt("N_ANCHOR_POINTS")):
+                                    file.write("{:.4f} \n".format(c_ai[s]))  # anchor points have no alignment value             
                         file.write("VECTORS velocity float" + '\n')
                         for v_ai in cell_velocity:
                             file.write("{:.4f} {:.4f} {:.4f} \n".format(v_ai[0], v_ai[1], v_ai[2]))
+                        for i in range(num_cells):
+                            for j in range(FLAMEGPU.environment.getPropertyUInt("N_ANCHOR_POINTS")):
+                                file.write("0.0 0.0 0.0 \n")  
                         file.write("VECTORS orientation float" + '\n')
                         for o_ai in cell_orientation:
                             file.write("{:.4f} {:.4f} {:.4f} \n".format(o_ai[0], o_ai[1], o_ai[2]))
+                        for i in range(num_cells):
+                            for j in range(FLAMEGPU.environment.getPropertyUInt("N_ANCHOR_POINTS")):
+                                file.write("0.0 0.0 0.0 \n") 
 
                 file_name = 'ecm_data_t{:04d}.vtk'.format(stepCounter)
                 if ENSEMBLE:
