@@ -16,7 +16,7 @@ import random
 import os
 import pickle
 import matplotlib.pyplot as plt
-from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network
+from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D
 
 
 start_time = time.time()
@@ -262,7 +262,7 @@ for i in range(6):
 
 
 if INCLUDE_FIBRE_NETWORK:
-    nodes, connectivity, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, fibre_critical_error = load_fibre_network(
+    nodes, connectivity, n_fib, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, fibre_critical_error = load_fibre_network(
         file_name='network_3d.pkl',
         boundary_coords=BOUNDARY_COORDS,
         epsilon=EPSILON,
@@ -277,7 +277,7 @@ if INCLUDE_FIBRE_NETWORK:
         AVG_NETWORK_VOXEL_DENSITY = math.ceil((N_NODES / (L0_x * L0_y * L0_z)) * ECM_VOXEL_VOLUME) # average number of fibre nodes per voxel, used to adjust the heterogeneous diffusion effect
         print(f'Average network voxel density (number of fibre nodes per voxel): {AVG_NETWORK_VOXEL_DENSITY}')
     if nodes is not None and connectivity is not None:
-        N_FIBRES = len(connectivity)
+        N_FIBRES = n_fib
     else:
         N_FIBRES = None
 
@@ -537,7 +537,7 @@ if INCLUDE_FIBRE_NETWORK:
     # Set the range and bounds.
     # setBounds(min, max) where min and max are the min and max ids of the message buckets. This is independent of the number of agents (there can be more agents than buckets and vice versa).
     # Here, we assign one bucket per fibre node so that each fibre node can be found in its own bucket when searching for neighbours.
-    FNODE_bucket_location_message.setBounds(8,N_NODES + 8) # +8 because domain corners have idx from 1 to 8. WARNING: make sure to initialize fibre nodes starting from index 9
+    FNODE_bucket_location_message.setBounds(8+1,N_NODES + 8) # +8 because domain corners have idx from 1 to 8. WARNING: make sure to initialize fibre nodes starting from index 9
 
     FNODE_bucket_location_message.newVariableInt("id")
     FNODE_bucket_location_message.newVariableFloat("x")
@@ -607,7 +607,12 @@ if INCLUDE_CELLS:
     # Set the range and bounds.
     if INCLUDE_FOCAL_ADHESIONS:
         CELL_bucket_location_message = model.newMessageBucket("cell_bucket_location_message")
-        CELL_bucket_location_message.setBounds(8+N_NODES, 8+N_NODES+N_CELLS) # +8 because domain corners have idx from 1 to 8, +N_NODES because fibre nodes have idx from 9 to 8+N_NODES. WARNING: make sure to initialize cell agents starting from index 8+N_NODES
+        cell_bucket_min = 8 + N_NODES + 1
+        cell_bucket_max = 8 + N_NODES + N_CELLS
+        if cell_bucket_max <= cell_bucket_min:
+            cell_bucket_max = cell_bucket_min + 1 # to avoid compilation errors in case there is only 1 cell
+        # +8 because domain corners have idx from 1 to 8, +N_NODES because fibre nodes have idx from 9 to 8+N_NODES. WARNING: make sure to initialize cell agents starting from index 8+N_NODES
+        CELL_bucket_location_message.setBounds(cell_bucket_min, cell_bucket_max)
         CELL_bucket_location_message.newVariableInt("id")
         CELL_bucket_location_message.newVariableFloat("x")
         CELL_bucket_location_message.newVariableFloat("y")
@@ -617,7 +622,7 @@ if INCLUDE_CELLS:
         CELL_bucket_location_message.newVariableArrayFloat("z_i", N_ANCHOR_POINTS)
         
         FOCAD_bucket_location_message = model.newMessageBucket("focad_bucket_location_message")
-        FOCAD_bucket_location_message.setBounds(8+N_NODES+N_CELLS,8+N_NODES+N_CELLS+(INIT_N_FOCAD_PER_CELL*N_CELLS)) # WARNING: if the number of focar adhesions grow over time, upper bound should be increased accordingly. Make sure to initialize focal adhesion agents starting from index 8+N_NODES+N_CELLS
+        FOCAD_bucket_location_message.setBounds(8+N_NODES+N_CELLS+1, 8+N_NODES+N_CELLS+(INIT_N_FOCAD_PER_CELL*N_CELLS)) # WARNING: if the number of focar adhesions grow over time, upper bound should be increased accordingly. Make sure to initialize focal adhesion agents starting from index 8+N_NODES+N_CELLS
         FOCAD_bucket_location_message.newVariableInt("id")
         FOCAD_bucket_location_message.newVariableInt("cell_id")
         FOCAD_bucket_location_message.newVariableInt("fnode_id")
@@ -811,10 +816,10 @@ if INCLUDE_CELLS:
     CELL_agent.newRTCFunctionFile("cell_spatial_location_data", cell_spatial_location_data_file).setMessageOutput("cell_spatial_location_message")
     CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ecm_grid_location_message")
     CELL_agent.newRTCFunctionFile("cell_move", cell_move_file)
-    if INCLUDE_FOCAL_ADHESIONS: 
-        CELL_agent.newVariableArrayFloat("x_i", N_ANCHOR_POINTS)
-        CELL_agent.newVariableArrayFloat("y_i", N_ANCHOR_POINTS) 
-        CELL_agent.newVariableArrayFloat("z_i", N_ANCHOR_POINTS)  
+    CELL_agent.newVariableArrayFloat("x_i", N_ANCHOR_POINTS) # store the position of the anchor points on the cell. Unused if INCLUDE_FOCAL_ADHESIONS is False
+    CELL_agent.newVariableArrayFloat("y_i", N_ANCHOR_POINTS) 
+    CELL_agent.newVariableArrayFloat("z_i", N_ANCHOR_POINTS) 
+    if INCLUDE_FOCAL_ADHESIONS:  
         CELL_agent.newRTCFunctionFile("cell_bucket_location_data", cell_bucket_location_data_file).setMessageOutput("cell_bucket_location_message")
         CELL_agent.newRTCFunctionFile("cell_update_stress", cell_update_stress_file).setMessageInput("focad_bucket_location_message")
         
@@ -870,11 +875,21 @@ if INCLUDE_FOCAL_ADHESIONS:
 
 # Agent population initialization 
 # ----------------------------------------------------------------------    
-# This class is used to ensure that corner agents are assigned the first 8 ids
+# IMPORTANT NOTE: agents must be initialized in the following order to make sure that their ids are consistent with the assumptions made in the RTC functions and bucket message bounds:
+# 1) Boundary corners (idx 1 to 8)
+# 2) Fibre nodes (idx 9 to 8+N_NODES) if INCLUDE_FIBRE_NETWORK is True
+# 3) Cell agents (idx 8+N_NODES+1 to 8+N_NODES+N_CELLS)
+# 4) Focal adhesions (idx 8+N_NODES+N_CELLS+1 to 8+N_NODES+N_CELLS+(INIT_N_FOCAD_PER_CELL*N_CELLS)) if INCLUDE_FOCAL_ADHESIONS is True.
+# 5) ECM agents (idx starting from 8+N_NODES+N_CELLS+(INIT_N_FOCAD_PER_CELL*N_CELLS)+1)
 class initAgentPopulations(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
-        # TODO: clean this line of globals
-        global DIFFUSION_COEFF_MULTI, INIT_ECM_CONCENTRATION_VALS, INIT_CELL_CONCENTRATION_VALS,INIT_CELL_CONC_MASS_VALS, INIT_ECM_SAT_CONCENTRATION_VALS, INIT_CELL_CONSUMPTION_RATES, INIT_CELL_PRODUCTION_RATES,INIT_CELL_REACTION_RATES, N_SPECIES, INCLUDE_DIFFUSION,INCLUDE_FIBRE_NETWORK, INCLUDE_CELLS, N_CELLS, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, MAX_CONNECTIVITY
+        global INCLUDE_CELLS, N_CELLS, INIT_CELL_CONCENTRATION_VALS, INIT_CELL_REACTION_RATES
+        global INIT_CELL_CONC_MASS_VALS, INIT_CELL_CONSUMPTION_RATES, INIT_CELL_PRODUCTION_RATES
+        global INCLUDE_FOCAL_ADHESIONS, N_ANCHOR_POINTS, INIT_N_FOCAD_PER_CELL, CELL_RADIUS, CELL_NUCLEUS_RADIUS
+        global FOCAD_REST_LENGTH_0, FOCAD_K_FA, FOCAD_F_MAX, FOCAD_K_ON, FOCAD_K_OFF_0, FOCAD_F_C, FOCAD_K_REINF
+        global INCLUDE_DIFFUSION, N_SPECIES, DIFFUSION_COEFF_MULTI
+        global INIT_ECM_CONCENTRATION_VALS, INIT_ECM_SAT_CONCENTRATION_VALS
+        global INCLUDE_FIBRE_NETWORK, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, MAX_CONNECTIVITY
         # BOUNDARY CORNERS
         current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
         coord_boundary = FLAMEGPU.environment.getPropertyArrayFloat("COORDS_BOUNDARIES")
@@ -1010,23 +1025,29 @@ class initAgentPopulations(pyflamegpu.HostFunction):
             print(f"--- Initializing CELLS ({N_CELLS})")
             print("  |-> current_id:", current_id)
             count = -1
+            # cell_pos = getRandomCoords3D(N_CELLS,
+            #                              coord_boundary[0], coord_boundary[1],
+            #                              coord_boundary[2], coord_boundary[3],
+            #                              coord_boundary[4], coord_boundary[5])
+            cell_pos = np.array([[0.0, 0.0, 0.0]], dtype=float) # for testing with 1 cell. 
             cell_orientations = getRandomVectors3D(N_CELLS)
             k_elast = FLAMEGPU.environment.getPropertyFloat("CELL_K_ELAST")
             d_dumping = FLAMEGPU.environment.getPropertyFloat("CELL_D_DUMPING")
-            radius = FLAMEGPU.environment.getPropertyFloat("CELL_RADIUS")
+            cell_id_list = []
             for i in range(N_CELLS):
                 count += 1
+                cell_id_list.append(current_id + count) # store the cell ids in a list to be used for focal adhesion initialization if INCLUDE_FOCAL_ADHESIONS is True
                 instance = FLAMEGPU.agent("CELL").newAgent()
                 instance.setVariableInt("id", current_id + count)
-                instance.setVariableFloat("x", 0.0)
-                instance.setVariableFloat("y", 0.0)
-                instance.setVariableFloat("z", 0.0)
+                instance.setVariableFloat("x", cell_pos[i, 0])
+                instance.setVariableFloat("y", cell_pos[i, 1])
+                instance.setVariableFloat("z", cell_pos[i, 2])
                 instance.setVariableFloat("vx", 0.0)
                 instance.setVariableFloat("vy", 0.0)
                 instance.setVariableFloat("vz", 0.0)
-                instance.setVariableFloat("orx", cell_orientations[count, 0])
-                instance.setVariableFloat("ory", cell_orientations[count, 1])
-                instance.setVariableFloat("orz", cell_orientations[count, 2])
+                instance.setVariableFloat("orx", cell_orientations[i, 0])
+                instance.setVariableFloat("ory", cell_orientations[i, 1])
+                instance.setVariableFloat("orz", cell_orientations[i, 2])
                 instance.setVariableFloat("alignment", 0.0)
                 instance.setVariableFloat("k_elast", k_elast)
                 instance.setVariableFloat("d_dumping", d_dumping)
@@ -1035,7 +1056,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableArrayFloat("k_consumption", INIT_CELL_CONSUMPTION_RATES)
                 instance.setVariableArrayFloat("k_production", INIT_CELL_PRODUCTION_RATES)
                 instance.setVariableArrayFloat("k_reaction", INIT_CELL_REACTION_RATES)
-                instance.setVariableFloat("radius", radius)
+                instance.setVariableFloat("radius", CELL_RADIUS)
                 cycle_phase = random.randint(1, 4) # [1:G1] [2:S] [3:G2] [4:M]
                 instance.setVariableInt("cycle_phase", cycle_phase)
                 cycle_clock = 0.0
@@ -1053,7 +1074,57 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_M_DURATION")                    
                 instance.setVariableFloat("clock", cycle_clock)
                 instance.setVariableInt("completed_cycles",0)
+                
+                anchor_pos = getRandomCoordsAroundPoint(N_ANCHOR_POINTS, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_NUCLEUS_RADIUS, on_surface=True)
+                instance.setVariableArrayFloat("x_i", anchor_pos[:, 0].tolist())
+                instance.setVariableArrayFloat("y_i", anchor_pos[:, 1].tolist())
+                instance.setVariableArrayFloat("z_i", anchor_pos[:, 2].tolist())
 
+            FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
+            
+        if INCLUDE_FOCAL_ADHESIONS:
+            current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
+            current_id += 1
+            print(f"--- Initializing FOCAL ADHESIONS ({N_CELLS * INIT_N_FOCAD_PER_CELL})")
+            print("  |-> current_id:", current_id)
+            count = -1
+            for i in range(N_CELLS):
+                focad_pos = getRandomCoordsAroundPoint(INIT_N_FOCAD_PER_CELL, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_RADIUS, on_surface=True)
+                for j in range(INIT_N_FOCAD_PER_CELL):
+                    count += 1
+                    instance = FLAMEGPU.agent("FOCAD").newAgent()
+                    instance.setVariableInt("id", current_id + count)
+                    instance.setVariableInt("fnode_id", -1) # initialized as not attached to any fibre node
+                    instance.setVariableInt("cell_id", cell_id_list[i])
+                    instance.setVariableFloat("x", focad_pos[j, 0])
+                    instance.setVariableFloat("y", focad_pos[j, 1])
+                    instance.setVariableFloat("z", focad_pos[j, 2])                    
+                    instance.setVariableFloat("vx", 0.0)
+                    instance.setVariableFloat("vy", 0.0)
+                    instance.setVariableFloat("vz", 0.0)
+                    instance.setVariableFloat("fx", 0.0)
+                    instance.setVariableFloat("fy", 0.0)
+                    instance.setVariableFloat("fz", 0.0)
+                    instance.setVariableFloat("x_i", 0.0)
+                    instance.setVariableFloat("y_i", 0.0)
+                    instance.setVariableFloat("z_i", 0.0)
+                    instance.setVariableFloat("x_c", cell_pos[i, 0])
+                    instance.setVariableFloat("y_c", cell_pos[i, 1])
+                    instance.setVariableFloat("z_c", cell_pos[i, 2])
+                    instance.setVariableFloat("rest_length_0", FOCAD_REST_LENGTH_0)
+                    instance.setVariableFloat("rest_length", FOCAD_REST_LENGTH_0) # initialized at rest length, can be updated during the simulation if needed
+                    instance.setVariableFloat("k_fa", FOCAD_K_FA)
+                    instance.setVariableFloat("f_max", FOCAD_F_MAX)
+                    instance.setVariableUInt8("attached", 0) # initialized as not attached
+                    instance.setVariableUInt8("active", 1) # initialized as active (can form new attachments)
+                    instance.setVariableFloat("v_c", FOCAD_V_C)
+                    instance.setVariableUInt8("fa_state", 1) # [1: nascent] [2: mature] [3: disassembling]
+                    instance.setVariableFloat("age", 0.0)
+                    instance.setVariableFloat("k_on", FOCAD_K_ON)
+                    instance.setVariableFloat("k_off_0", FOCAD_K_OFF_0)
+                    instance.setVariableFloat("f_c", FOCAD_F_C)
+                    instance.setVariableFloat("k_reinf", FOCAD_K_REINF)
+            
             FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
 
         # ECM

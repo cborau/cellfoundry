@@ -74,6 +74,7 @@ def load_fibre_network(
     critical_error = False
     nodes = None
     connectivity = None
+    n_fiber = None
 
     if os.path.exists(file_name):
         # print(f'Loading network from {file_name}')
@@ -95,6 +96,7 @@ def load_fibre_network(
             expected_ly = network_parameters.get('LY')
             expected_lz = network_parameters.get('LZ')
             expected_edge_length = network_parameters.get('EDGE_LENGTH')
+            n_fiber = network_parameters.get('N_FIBER')
 
             if expected_lx is not None and not math.isclose(domain_lx, expected_lx, rel_tol=0.0, abs_tol=epsilon):
                 print('ERROR: Network LX does not match domain size.')
@@ -122,7 +124,7 @@ def load_fibre_network(
     else:
         print(f"ERROR: file {file_name} containing network nodes and connectivity was not found")
         critical_error = True
-        return nodes, connectivity, fibre_segment_equilibrium_distance, critical_error
+        return nodes, connectivity, n_fiber, fibre_segment_equilibrium_distance, critical_error
 
     msg_wrong_network_dimensions = (
         "WARNING: Fibre network nodes do not coincide with boundary faces on at least two axes. "
@@ -151,7 +153,7 @@ def load_fibre_network(
         print(msg_wrong_network_dimensions)
         critical_error = True
 
-    return nodes, connectivity, fibre_segment_equilibrium_distance, critical_error
+    return nodes, connectivity, n_fiber, fibre_segment_equilibrium_distance, critical_error
 
 
 #Helper functions for agent initialization
@@ -234,7 +236,7 @@ def getFixedVectors3D(n_vectors: int, v_dir: np.array):
     return v_array
     
     
-def getRandomCoordsAroundPoint(n, px, py, pz, radius):
+def getRandomCoordsAroundPoint(n, px, py, pz, radius, on_surface=False):
     """
     Generates N random 3D coordinates within a sphere of a specific radius around a central point.
 
@@ -250,6 +252,8 @@ def getRandomCoordsAroundPoint(n, px, py, pz, radius):
         The z-coordinate of the central point.
     radius : float
         The radius of the sphere.
+    on_surface : bool
+        If True, points lie on the sphere surface; otherwise, points are within the sphere.
 
     Returns
     -------
@@ -261,7 +265,10 @@ def getRandomCoordsAroundPoint(n, px, py, pz, radius):
     coords = np.zeros((n, 3))
     np.random.seed()
     for i in range(n):
-        radius_i = np.random.uniform(0.0, 1.0) * radius        
+        if on_surface:
+            radius_i = radius
+        else:
+            radius_i = np.random.uniform(0.0, 1.0) * radius
         coords[i, :] = central_point + np.array(rand_dirs[i, :] * radius_i, dtype='float')
     
 
@@ -350,6 +357,19 @@ class ModelParameterConfig:
         init_cell_consumption_rates: list = None,
         init_cell_production_rates: list = None,
         init_cell_reaction_rates: list = None,
+        # Focal adhesions
+        include_focal_adhesions: bool = None,
+        init_n_focad_per_cell: int = None,
+        n_anchor_points: int = None,
+        max_search_radius_focad: float = None,
+        focad_rest_length_0: float = None,
+        focad_k_fa: float = None,
+        focad_f_max: float = None,
+        focad_v_c: float = None,
+        focad_k_on: float = None,
+        focad_k_off_0: float = None,
+        focad_f_c: float = None,
+        focad_k_reinf: float = None,
         # Oscillatory assay
         oscillatory_shear_assay: bool = None,
         max_strain: float = None,
@@ -442,6 +462,18 @@ class ModelParameterConfig:
         self.INIT_CELL_CONSUMPTION_RATES = init_cell_consumption_rates
         self.INIT_CELL_PRODUCTION_RATES = init_cell_production_rates
         self.INIT_CELL_REACTION_RATES = init_cell_reaction_rates
+        self.INCLUDE_FOCAL_ADHESIONS = include_focal_adhesions
+        self.INIT_N_FOCAD_PER_CELL = init_n_focad_per_cell
+        self.N_ANCHOR_POINTS = n_anchor_points
+        self.MAX_SEARCH_RADIUS_FOCAD = max_search_radius_focad
+        self.FOCAD_REST_LENGTH_0 = focad_rest_length_0
+        self.FOCAD_K_FA = focad_k_fa
+        self.FOCAD_F_MAX = focad_f_max
+        self.FOCAD_V_C = focad_v_c
+        self.FOCAD_K_ON = focad_k_on
+        self.FOCAD_K_OFF_0 = focad_k_off_0
+        self.FOCAD_F_C = focad_f_c
+        self.FOCAD_K_REINF = focad_k_reinf
         self.OSCILLATORY_SHEAR_ASSAY = oscillatory_shear_assay
         self.MAX_STRAIN = max_strain
         self.OSCILLATORY_AMPLITUDE = oscillatory_amplitude
@@ -469,6 +501,13 @@ class ModelParameterConfig:
         print(f"ECM_AGENTS_PER_DIR: {self.ECM_AGENTS_PER_DIR}")
         print(f"INCLUDE_DIFFUSION: {self.INCLUDE_DIFFUSION} | N_SPECIES: {self.N_SPECIES}")
         print(f"INCLUDE_CELLS: {self.INCLUDE_CELLS} | N_CELLS: {self.N_CELLS}")
+        if self.INCLUDE_FOCAL_ADHESIONS and self.N_CELLS is not None and self.INIT_N_FOCAD_PER_CELL is not None:
+            focad_count = self.N_CELLS * self.INIT_N_FOCAD_PER_CELL
+            print(
+                f"INCLUDE_FOCAL_ADHESIONS: True | FOCAD_PER_CELL: {self.INIT_N_FOCAD_PER_CELL} | FOCAD_COUNT: {focad_count}"
+            )
+        else:
+            print(f"INCLUDE_FOCAL_ADHESIONS: {self.INCLUDE_FOCAL_ADHESIONS}")
         print(f"INCLUDE_FIBRE_NETWORK: {self.INCLUDE_FIBRE_NETWORK}")
         print(f"MOVING_BOUNDARIES: {self.MOVING_BOUNDARIES}")
 
@@ -495,6 +534,7 @@ class ModelParameterConfig:
 
         print("=========================================\n")
         print("MODEL RUNNING...\n")
+        
     def print_agent_config(self, n_nodes=None, n_fibres=None):
         print("=========== Agent Configuration =========")
         print("== ECM: ")
@@ -525,7 +565,7 @@ class ModelParameterConfig:
             nodes_text = "unknown" if n_nodes is None else str(n_nodes)
             fibres_text = "unknown" if n_fibres is None else str(n_fibres)
             print(
-                "Fibre network: enabled | Nodes: {0} | Fibres: {1} | Segment equilibrium: {2}".format(
+                "Fibre network: enabled | Nodes: {0} | Fibres: {1} | Segment length: {2}".format(
                     nodes_text,
                     fibres_text,
                     self.FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE,
@@ -550,6 +590,17 @@ class ModelParameterConfig:
         )
         else:
             print("Cells: disabled")
+        print()
+        
+        if self.INCLUDE_FOCAL_ADHESIONS and self.N_CELLS is not None and self.INIT_N_FOCAD_PER_CELL is not None:
+            focad_count = self.N_CELLS * self.INIT_N_FOCAD_PER_CELL
+            total_number_of_agents += focad_count
+            print("== FOCAL ADHESIONS: ")
+            print("Focal adhesions: enabled")
+            print(f" - FOCAD_PER_CELL: {self.INIT_N_FOCAD_PER_CELL}")
+            print(f" - FOCAD_COUNT: {focad_count}")
+            print(f" - Search radius: {self.MAX_SEARCH_RADIUS_FOCAD}")
+
         print()
         print(f"TOTAL NUMBER OF AGENTS: {total_number_of_agents}")
 
@@ -843,6 +894,18 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         init_cell_consumption_rates=ns.get("INIT_CELL_CONSUMPTION_RATES"),
         init_cell_production_rates=ns.get("INIT_CELL_PRODUCTION_RATES"),
         init_cell_reaction_rates=ns.get("INIT_CELL_REACTION_RATES"),
+        include_focal_adhesions=ns.get("INCLUDE_FOCAL_ADHESIONS"),
+        init_n_focad_per_cell=ns.get("INIT_N_FOCAD_PER_CELL"),
+        n_anchor_points=ns.get("N_ANCHOR_POINTS"),
+        max_search_radius_focad=ns.get("MAX_SEARCH_RADIUS_FOCAD"),
+        focad_rest_length_0=ns.get("FOCAD_REST_LENGTH_0"),
+        focad_k_fa=ns.get("FOCAD_K_FA"),
+        focad_f_max=ns.get("FOCAD_F_MAX"),
+        focad_v_c=ns.get("FOCAD_V_C"),
+        focad_k_on=ns.get("FOCAD_K_ON"),
+        focad_k_off_0=ns.get("FOCAD_K_OFF_0"),
+        focad_f_c=ns.get("FOCAD_F_C"),
+        focad_k_reinf=ns.get("FOCAD_K_REINF"),
         oscillatory_shear_assay=ns.get("OSCILLATORY_SHEAR_ASSAY"),
         max_strain=ns.get("MAX_STRAIN"),
         oscillatory_amplitude=ns.get("OSCILLATORY_AMPLITUDE"),

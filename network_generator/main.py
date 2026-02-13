@@ -132,6 +132,7 @@ if __name__ == "__main__":
                         'LX': LX,
                         'LY': LY,
                         'LZ': LZ,
+                        'N_FIBER': len(fibers),
                         'L_FIBER': L_FIBER,
                         'RHO': RHO,
                         'EDGE_LENGTH': EDGE_LENGTH,
