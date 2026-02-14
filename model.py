@@ -61,7 +61,7 @@ N = 21
 
 # Time simulation parameters
 # ----------------------------------------------------------------------
-TIME_STEP = 0.01# time. WARNING: diffusion and cell migration events might need different scales
+TIME_STEP = 0.1 # time. WARNING: diffusion and cell migration events might need different scales
 STEPS = 50
 
 # +====================================================================+
@@ -89,7 +89,7 @@ BOUNDARY_STIFFNESS = [BOUNDARY_STIFFNESS_VALUE * x for x in RELATIVE_BOUNDARY_ST
 BOUNDARY_DUMPING = [BOUNDARY_DUMPING_VALUE * x for x in RELATIVE_BOUNDARY_STIFFNESS]
 #CLAMP_AGENT_TOUCHING_BOUNDARY = [0, 0, 1, 1, 0, 0]# +X,-X,+Y,-Y,+Z,-Z [bool] - shear assay
 CLAMP_AGENT_TOUCHING_BOUNDARY = [1, 1, 1, 1, 1, 1]# +X,-X,+Y,-Y,+Z,-Z [bool]
-ALLOW_AGENT_SLIDING = [0, 0, 0, 0, 0, 0]# +X,-X,+Y,-Y,+Z,-Z [bool]
+ALLOW_AGENT_SLIDING = [1, 1, 1, 1, 1, 1]# +X,-X,+Y,-Y,+Z,-Z [bool]
 
 if any(rate != 0.0 for rate in BOUNDARY_DISP_RATES_PARALLEL) or any(rate != 0.0 for rate in BOUNDARY_DISP_RATES):
     MOVING_BOUNDARIES = True
@@ -223,9 +223,9 @@ MAX_FOCAD_ARM_LENGTH = 4 * CELL_RADIUS  # maximum length of the focal adhesion "
 # WARNING: rate values below assume global timestep ~ 1.0 s
 FOCAD_REST_LENGTH_0 = CELL_RADIUS - CELL_NUCLEUS_RADIUS # [um] Initial rest/target length at creation time.
 FOCAD_MIN_REST_LENGTH = FOCAD_REST_LENGTH_0 / 10.0 # [um] Minimum rest length to prevent collapse. 
-FOCAD_K_FA = 2.0 # [nN/um] Adhesion stiffness (effective spring constant). Typical range: ~0.1–10 nN/um; 
-FOCAD_F_MAX= 20.0 # [nN] Maximum force per adhesion (cap to avoid runaway and represent myosin/structural limits).Typical range: ~5–50 nN. WARNING: 0 means "no cap" 
-FOCAD_V_C = 0.02 # [um/s] Contractile shortening speed of L(t) (actomyosin-driven).
+FOCAD_K_FA = 10.0 # [nN/um] Adhesion stiffness (effective spring constant). Typical range: ~0.1–10 nN/um; 
+FOCAD_F_MAX= 0.0 # [nN] Maximum force per adhesion (cap to avoid runaway and represent myosin/structural limits).Typical range: ~5–50 nN. WARNING: 0 means "no cap" 
+FOCAD_V_C = 0.2 # [um/s] Contractile shortening speed of L(t) (actomyosin-driven).
 FOCAD_K_ON = 0.01 # [1/s] Binding rate (for stochastic attachment). Mean waiting time ~1/K_ON .
 FOCAD_K_OFF_0 = 0.003 # [1/s] Zero-force unbinding rate (baseline detachment). Mean lifetime ~1/K_OFF_0 = 333 s (~5.5 min) at very low force.
 FOCAD_F_C = 5.0 # [nN] Force scale controlling force sensitivity in koff(F) (catch/slip style). Typical range: ~2–10 nN. Sets how quickly detachment probability changes as traction builds.

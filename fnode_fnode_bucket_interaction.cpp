@@ -92,9 +92,9 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket,
 
 
     
-  float agent_fx = FLAMEGPU->getVariable<float>("fx");
-  float agent_fy = FLAMEGPU->getVariable<float>("fy");
-  float agent_fz = FLAMEGPU->getVariable<float>("fz"); 
+  float agent_fx = 0.0f;
+  float agent_fy = 0.0f;
+  float agent_fz = 0.0f; 
   float agent_fx_abs = 0.0; // if there are opposing forces (F) in the same direction, agent_fx = 0, but agent_fx_abs = 2*F
   float agent_fy_abs = 0.0;
   float agent_fz_abs = 0.0; 

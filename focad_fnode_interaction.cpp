@@ -104,6 +104,7 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
       agent_rest_length_0 = ell0;
       agent_rest_length   = ell0;
       agent_age = 0.0f;  // reset age on attachment
+      printf("FOCAD %d (cell %d) attached to FNODE %d at distance %.4f um with initial rest length %.4f um\n", agent_focad_id, agent_cell_id, agent_fnode_id, sqrtf(best_r2), ell0);
     } else {
       // Not attached and no node found, keep force = 0 and exit early
       FLAMEGPU->setVariable<uint8_t>("attached", agent_attached);
@@ -125,7 +126,11 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   // 2) Contractility: shorten rest length if active
   // -------------------------
   if (agent_attached && agent_active) {
+    float rl = agent_rest_length - agent_v_c * TIME_STEP;    
     agent_rest_length = fmaxf(FOCAD_MIN_REST_LENGTH, agent_rest_length - agent_v_c * TIME_STEP);
+    if (rl < FOCAD_MIN_REST_LENGTH) {
+      printf("FOCAD %d (cell %d) rest length reached minimum value of %.4f um and cannot shorten further.\n", agent_focad_id, agent_cell_id, FOCAD_MIN_REST_LENGTH);
+    }
   }
 
   // -------------------------
@@ -135,10 +140,12 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   const float dx = message_x - agent_x_i;
   const float dy = message_y - agent_y_i;
   const float dz = message_z - agent_z_i;
-  const float ell = sqrtf(dx*dx + dy*dy + dz*dz);
+  const float ell = sqrtf(dx*dx + dy*dy + dz*dz);  
 
   // extension = max(0, ell - L)
   const float ext = fmaxf(0.0f, ell - agent_rest_length);
+
+  //printf("FOCAD %d, message_x = %.4f, message_y = %.4f, message_z = %.4f, agent_rest_length = %.4f um, ell0 = %.4f um, ell = %.4f um, diff = %.4f um, extension = %.4f um\n", agent_focad_id, message_x, message_y, message_z, agent_rest_length, agent_rest_length_0, ell, ell - agent_rest_length, ext);
 
   // |F| = k_fa * extension
   float Fmag = agent_k_fa * ext;

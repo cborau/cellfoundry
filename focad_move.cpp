@@ -19,10 +19,6 @@ FLAMEGPU_AGENT_FUNCTION(focad_move, flamegpu::MessageBucket, flamegpu::MessageNo
   const float MAX_SEARCH_RADIUS_FOCAD = FLAMEGPU->environment.getProperty<float>("MAX_SEARCH_RADIUS_FOCAD");
   const float MAX_FOCAD_ARM_LENGTH = FLAMEGPU->environment.getProperty<float>("MAX_FOCAD_ARM_LENGTH");
   const float CELL_NUCLEUS_RADIUS = FLAMEGPU->environment.getProperty<float>("CELL_NUCLEUS_RADIUS");
-  //Define message variables (FNODE agent sending the input message)
-  float message_vx = 0.0;
-  float message_vy = 0.0;
-  float message_vz = 0.0;
 
   if (agent_active == 0 || agent_attached == 0) {
     // move randomly away from the anchor point if not attached, or if active but not attached (this can happen when a focal adhesion detaches but is still active for a few steps)
@@ -90,12 +86,27 @@ FLAMEGPU_AGENT_FUNCTION(focad_move, flamegpu::MessageBucket, flamegpu::MessageNo
     else {
       // move with the FNODE agent
       for (const auto& message : FLAMEGPU->message_in(agent_fnode_id)) {
-        message_vx = message.getVariable<float>("vx");
-        message_vy = message.getVariable<float>("vy");
-        message_vz = message.getVariable<float>("vz");
+        float message_x = message.getVariable<float>("x");
+        float message_y = message.getVariable<float>("y");
+        float message_z = message.getVariable<float>("z");
+        agent_x = message_x;
+        agent_y = message_y;
+        agent_z = message_z;
+        float message_vx = message.getVariable<float>("vx");
+        float message_vy = message.getVariable<float>("vy");
+        float message_vz = message.getVariable<float>("vz");
         agent_vx = message_vx;
         agent_vy = message_vy;
         agent_vz = message_vz;
+
+        FLAMEGPU->setVariable<float>("x", agent_x);
+        FLAMEGPU->setVariable<float>("y", agent_y);
+        FLAMEGPU->setVariable<float>("z", agent_z);
+        FLAMEGPU->setVariable<float>("vx", agent_vx);
+        FLAMEGPU->setVariable<float>("vy", agent_vy);
+        FLAMEGPU->setVariable<float>("vz", agent_vz);
+
+        return flamegpu::ALIVE;
       }      
     }
   }
