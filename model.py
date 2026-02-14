@@ -21,9 +21,14 @@ from helper_module import compute_expected_boundary_pos_from_corners, getRandomV
 # TODO LIST:
 # Review functions (name, caller agent, input agent, message type, description)
 # - focad_anchor_update    FOCAD   CELL   bucket   Updates x_i, x_c values
-# - focad_fnode_interaction  FOCAD  FNODE  Spatial  If it's close, it attaches to an FNODE and computes adhesion force (NEXT)
-# - fnode_focad_interaction  FNODE  FOCAD  Spatial  Updates the force on the FNODE
+# - focad_fnode_interaction  FOCAD  FNODE  Spatial  If it's close, it attaches to an FNODE and computes adhesion force (DONE)
+# - fnode_focad_interaction  FNODE  FOCAD  Spatial  Updates the force on the FNODE (NEXT)
 # - focad_move  FOCAD  FNODE  Bucket  Updates FOCAD position. If attached to an FNODE, it follows it; otherwise, it moves randomly away from the cell (DONE: but tweak values)
+# Add Cell variables to compute stress tensor etc.
+# Add cell-fnode repulsion
+# Add chemotaxis (cells prefer to move towards higher concentration of a certain species, which could be implemented by making them prefer to move towards areas with higher concentration on the ECM agents)
+# Add durotaxis (cells prefer to move towards stiffer regions, which could be implemented by making them prefer to move towards areas with higher fibre density or stronger fibre connections)
+# Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
 
 
 start_time = time.time()
@@ -165,7 +170,7 @@ MAX_SEARCH_RADIUS_FNODES = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / 10.0 # must me s
 # +====================================================================+
 # | DIFFUSION PARAMETERS                                               |
 # +====================================================================+
-INCLUDE_DIFFUSION = True
+INCLUDE_DIFFUSION = False
 N_SPECIES = 2  # number of diffusing species.WARNING: make sure that the value coincides with the one declared in TODO
 DIFFUSION_COEFF_MULTI = [300.0, 300.0]  # diffusion coefficient in [units^2/s] per specie
 BOUNDARY_CONC_INIT_MULTI = [[50.0,50.0, 50.0, 50.0, 50.0, 50.0],
@@ -217,8 +222,9 @@ MAX_SEARCH_RADIUS_FOCAD = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE# maximum distance a
 MAX_FOCAD_ARM_LENGTH = 4 * CELL_RADIUS  # maximum length of the focal adhesion "arm" (distance between the focal adhesion and its anchor point on the nucleus). If the arm is stretched beyond this length, the focal adhesion moves back towards the anchor point. This is a simple way to represent the limited reach of cellular protrusions and avoid unrealistic stretching of focal adhesions. WARNING: make sure this value is consistent with CELL_RADIUS and MAX_SEARCH_RADIUS_FOCAD to avoid unrealistic behavior.
 # WARNING: rate values below assume global timestep ~ 1.0 s
 FOCAD_REST_LENGTH_0 = CELL_RADIUS - CELL_NUCLEUS_RADIUS # [um] Initial rest/target length at creation time.
+FOCAD_MIN_REST_LENGTH = FOCAD_REST_LENGTH_0 / 10.0 # [um] Minimum rest length to prevent collapse. 
 FOCAD_K_FA = 2.0 # [nN/um] Adhesion stiffness (effective spring constant). Typical range: ~0.1–10 nN/um; 
-FOCAD_F_MAX= 20.0 # [nN] Maximum force per adhesion (cap to avoid runaway and represent myosin/structural limits).Typical range: ~5–50 nN.
+FOCAD_F_MAX= 20.0 # [nN] Maximum force per adhesion (cap to avoid runaway and represent myosin/structural limits).Typical range: ~5–50 nN. WARNING: 0 means "no cap" 
 FOCAD_V_C = 0.02 # [um/s] Contractile shortening speed of L(t) (actomyosin-driven).
 FOCAD_K_ON = 0.01 # [1/s] Binding rate (for stochastic attachment). Mean waiting time ~1/K_ON .
 FOCAD_K_OFF_0 = 0.003 # [1/s] Zero-force unbinding rate (baseline detachment). Mean lifetime ~1/K_OFF_0 = 333 s (~5.5 min) at very low force.
@@ -503,6 +509,7 @@ env.newPropertyUInt("N_ANCHOR_POINTS", N_ANCHOR_POINTS)
 env.newPropertyFloat("MAX_SEARCH_RADIUS_FOCAD", MAX_SEARCH_RADIUS_FOCAD)
 env.newPropertyFloat("MAX_FOCAD_ARM_LENGTH", MAX_FOCAD_ARM_LENGTH)
 env.newPropertyFloat("FOCAD_REST_LENGTH_0", FOCAD_REST_LENGTH_0)
+env.newPropertyFloat("FOCAD_MIN_REST_LENGTH", FOCAD_MIN_REST_LENGTH)
 env.newPropertyFloat("FOCAD_K_FA", FOCAD_K_FA)
 env.newPropertyFloat("FOCAD_F_MAX", FOCAD_F_MAX)
 env.newPropertyFloat("FOCAD_V_C", FOCAD_V_C)
@@ -1140,7 +1147,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableFloat("rest_length_0", FOCAD_REST_LENGTH_0)
                     instance.setVariableFloat("rest_length", FOCAD_REST_LENGTH_0) # initialized at rest length, can be updated during the simulation if needed
                     instance.setVariableFloat("k_fa", FOCAD_K_FA)
-                    instance.setVariableFloat("f_max", FOCAD_F_MAX)
+                    instance.setVariableFloat("f_max", FOCAD_F_MAX) # WARNING: 0 means "no cap" 
                     instance.setVariableUInt8("attached", 0) # initialized as not attached
                     instance.setVariableUInt8("active", 1) # initialized as active (can form new attachments)
                     instance.setVariableFloat("v_c", FOCAD_V_C)
@@ -2189,6 +2196,8 @@ if INCLUDE_FIBRE_NETWORK:
     # L7_Fibre_Network Mechanical interactions
     model.newLayer("L7_FNODE_Repulsion").addAgentFunction("FNODE", "fnode_fnode_spatial_interaction")
     model.newLayer("L7_FNODE_Network_Mechanics").addAgentFunction("FNODE", "fnode_fnode_bucket_interaction")
+    if INCLUDE_FOCAL_ADHESIONS:
+        model.newLayer("L7_FOCAD_Mechanics").addAgentFunction("FOCAD", "focad_fnode_interaction")  
 
 # L8_Agent_Movement
 if INCLUDE_CELLS:

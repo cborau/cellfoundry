@@ -1,93 +1,193 @@
-// mirror function to fnode_focad_interaction. Computes and stores the force of the focal adhesion that will be later transmited to the corresponding fnode
+// Mirror function to fnode_focad_interaction (calling order should be:
+// 1) focad_fnode_interaction and then 2) fnode_focad_interaction).
+// If an FNODE is close enough to the calling FOCAD agent, they get attached.
+// Then, computes and stores the adhesion force that will be later transmitted
+// to the corresponding fnode (in a different function).
 FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, flamegpu::MessageNone) {
-  /*//Get agent variables (agent calling the function)
-  int agent_id = FLAMEGPU->getVariable<int>("id");
+  // -------------------------
+  // Read FOCAD variables
+  // -------------------------
+  const int agent_focad_id = FLAMEGPU->getVariable<int>("id");
+  const int agent_cell_id  = FLAMEGPU->getVariable<int>("cell_id");
+
+  // FOCAD position (used as spatial query center). After attachment (it it happens) this is set to FNODE pos.
   float agent_x = FLAMEGPU->getVariable<float>("x");
   float agent_y = FLAMEGPU->getVariable<float>("y");
   float agent_z = FLAMEGPU->getVariable<float>("z");
-  float agent_vx = FLAMEGPU->getVariable<float>("vx");
-  float agent_vy = FLAMEGPU->getVariable<float>("vy");
-  float agent_vz = FLAMEGPU->getVariable<float>("vz");
-  float agent_fx = FLAMEGPU->getVariable<float>("fx");
-  float agent_fy = FLAMEGPU->getVariable<float>("fy");
-  float agent_fz = FLAMEGPU->getVariable<float>("fz");
-  float agent_x_i = FLAMEGPU->getVariable<float>("x_i");
-  float agent_y_i = FLAMEGPU->getVariable<float>("y_i");
-  float agent_z_i = FLAMEGPU->getVariable<float>("z_i");
-  float agent_x_c = FLAMEGPU->getVariable<float>("x_c");
-  float agent_y_c = FLAMEGPU->getVariable<float>("y_c");
-  float agent_z_c = FLAMEGPU->getVariable<float>("z_c");
-  int agent_id = FLAMEGPU->getVariable<int>("id");
-  int agent_cell_id = FLAMEGPU->getVariable<int>("cell_id");
-  float agent_rest_length_0 = FLAMEGPU->getVariable<float>("rest_length_0");
-  float agent_rest_length = FLAMEGPU->getVariable<float>("rest_length");
-  float agent_k_fa = FLAMEGPU->getVariable<float>("k_fa");
-  float agent_f_max = FLAMEGPU->getVariable<float>("f_max");
-  uint8_t agent_active = FLAMEGPU->getVariable<uint8_t>("active");
-  float agent_v_c = FLAMEGPU->getVariable<float>("v_c");
-  uint8_t agent_fa_state = FLAMEGPU->getVariable<uint8_t>("fa_state");
-  float agent_age = FLAMEGPU->getVariable<float>("age");
-  float agent_k_on = FLAMEGPU->getVariable<float>("k_on");
-  float agent_k_off_0 = FLAMEGPU->getVariable<float>("k_off_0");
-  float agent_f_c = FLAMEGPU->getVariable<float>("f_c");
-  float agent_k_reinf = FLAMEGPU->getVariable<float>("k_reinf");
+
+  // Nucleus geometry for this adhesion (xi on nucleus surface, xc nucleus/cell center)
+  const float agent_x_i = FLAMEGPU->getVariable<float>("x_i");
+  const float agent_y_i = FLAMEGPU->getVariable<float>("y_i");
+  const float agent_z_i = FLAMEGPU->getVariable<float>("z_i");
+
+  const float agent_x_c = FLAMEGPU->getVariable<float>("x_c");
+  const float agent_y_c = FLAMEGPU->getVariable<float>("y_c");
+  const float agent_z_c = FLAMEGPU->getVariable<float>("z_c");
+
+  // Mechanics parameters/state
+  float  agent_rest_length_0 = FLAMEGPU->getVariable<float>("rest_length_0");  // L0 at creation
+  float  agent_rest_length = FLAMEGPU->getVariable<float>("rest_length");    // L(t)
+  const float agent_k_fa = FLAMEGPU->getVariable<float>("k_fa");
+  const float agent_f_max = FLAMEGPU->getVariable<float>("f_max");         // WARNING: 0 means "no cap" 
+
+  const uint8_t agent_active = FLAMEGPU->getVariable<uint8_t>("active");     // actomyosin engaged
+  const float   agent_v_c = FLAMEGPU->getVariable<float>("v_c");          // um/s rest-length shortening
+  uint8_t agent_attached  = FLAMEGPU->getVariable<uint8_t>("attached");
   int agent_fnode_id = FLAMEGPU->getVariable<int>("fnode_id");
-  uint8_t agent_attached = FLAMEGPU->getVariable<uint8_t>("attached");
 
-  //Define message variables (agent sending the input message)
-  int message_id = 0;
-  float message_x = 0.0;
-  float message_y = 0.0;
-  float message_z = 0.0;
-  float message_vx = 0.0;
-  float message_vy = 0.0;
-  float message_vz = 0.0;
+  float agent_age = FLAMEGPU->getVariable<float>("age");
 
-  //Loop through all agents sending input messages
-  for (const auto &message : FLAMEGPU->message_in(agent_x, agent_y, agent_z)) {
-    message_id = message.getVariable<int>("id");
-    message_x = message.getVariable<float>("x");
-    message_y = message.getVariable<float>("y");
-    message_z = message.getVariable<float>("z");
-    message_vx = message.getVariable<float>("vx");
-    message_vy = message.getVariable<float>("vy");
-    message_vz = message.getVariable<float>("vz");
+  // Outputs (force stored on FOCAD to be applied to FNODE later)
+  float agent_fx = 0.0f;
+  float agent_fy = 0.0f;
+  float agent_fz = 0.0f;
+
+  // -------------------------
+  // Read environment
+  // -------------------------
+  const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
+  const float MAX_SEARCH_RADIUS_FOCAD = FLAMEGPU->environment.getProperty<float>("MAX_SEARCH_RADIUS_FOCAD");
+
+  // Prevent L->0 forever
+  const float FOCAD_MIN_REST_LENGTH = FLAMEGPU->environment.getProperty<float>("FOCAD_MIN_REST_LENGTH");
+
+  // -------------------------
+  // 1) Attachment: if not attached, find closest FNODE in search radius
+  // -------------------------
+  float message_x = 0.0f;
+  float message_y = 0.0f;
+  float message_z = 0.0f;   // FNODE position (to be determined)
+  if (agent_attached == 0) {
+    float best_r2 = MAX_SEARCH_RADIUS_FOCAD * MAX_SEARCH_RADIUS_FOCAD;
+    int   best_id = -1;
+    float best_x = 0.0f;
+    float best_y = 0.0f;
+    float best_z = 0.0f;
+
+    for (const auto &message : FLAMEGPU->message_in(agent_x, agent_y, agent_z)) {
+      const float nx = message.getVariable<float>("x");
+      const float ny = message.getVariable<float>("y");
+      const float nz = message.getVariable<float>("z");
+      const int   nid = message.getVariable<int>("id");
+
+      const float dx = nx - agent_x;
+      const float dy = ny - agent_y;
+      const float dz = nz - agent_z;
+      const float r2 = dx*dx + dy*dy + dz*dz;
+
+      if (r2 < best_r2) {
+        best_r2 = r2;
+        best_id = nid;
+        best_x = nx;
+        best_y = ny;
+        best_z = nz;
+      }
+    }
+
+    if (best_id >= 0) {
+      // Attach to closest node
+      agent_attached = 1;
+      agent_fnode_id = best_id;
+      message_x = best_x;
+      message_y = best_y; 
+      message_z = best_z;
+      agent_x = message_x;
+      agent_y = message_y;
+      agent_z = message_z;
+
+      // Initialize rest lengths so the adhesion starts unstrained even if yi is far from nucleus
+      const float dx0 = message_x - agent_x_i;
+      const float dy0 = message_y - agent_y_i;
+      const float dz0 = message_z - agent_z_i;
+      const float ell0 = sqrtf(dx0*dx0 + dy0*dy0 + dz0*dz0);
+
+      agent_rest_length_0 = ell0;
+      agent_rest_length   = ell0;
+      agent_age = 0.0f;  // reset age on attachment
+    } else {
+      // Not attached and no node found, keep force = 0 and exit early
+      FLAMEGPU->setVariable<uint8_t>("attached", agent_attached);
+      FLAMEGPU->setVariable<float>("fx", 0.0f);
+      FLAMEGPU->setVariable<float>("fy", 0.0f);
+      FLAMEGPU->setVariable<float>("fz", 0.0f);
+      FLAMEGPU->setVariable<float>("age", agent_age);
+      // keep x,y,z as-is
+      return flamegpu::ALIVE;
+    }
+  } else {
+    // Already attached: FOCAD position == FNODE position.
+    message_x = agent_x; 
+    message_y = agent_y; 
+    message_z = agent_z;
   }
 
-  //Set agent variables
-  FLAMEGPU->setVariable<int>("id", agent_id);
+  // -------------------------
+  // 2) Contractility: shorten rest length if active
+  // -------------------------
+  if (agent_attached && agent_active) {
+    agent_rest_length = fmaxf(FOCAD_MIN_REST_LENGTH, agent_rest_length - agent_v_c * TIME_STEP);
+  }
+
+  // -------------------------
+  // 3) Compute adhesion traction (tension-only spring with optional cap)
+  //    xi on nucleus surface, message_i at FNODE position
+  // -------------------------
+  const float dx = message_x - agent_x_i;
+  const float dy = message_y - agent_y_i;
+  const float dz = message_z - agent_z_i;
+  const float ell = sqrtf(dx*dx + dy*dy + dz*dz);
+
+  // extension = max(0, ell - L)
+  const float ext = fmaxf(0.0f, ell - agent_rest_length);
+
+  // |F| = k_fa * extension
+  float Fmag = agent_k_fa * ext;
+
+  // Optional cap to avoid runaway
+  if (agent_f_max > 0.0f) {
+    Fmag = fminf(Fmag, agent_f_max);
+  }
+
+  // Direction from xi -> message_i (avoid divide by 0)
+  float inv_ell = 0.0f;
+  if (ell > 1e-12f) inv_ell = 1.0f / ell;
+
+  const float ux = dx * inv_ell;
+  const float uy = dy * inv_ell;
+  const float uz = dz * inv_ell;
+
+  // Important sign convention:
+  // - Tension wants to reduce ell, pulling message_i toward xi.
+  // - Force ON THE FNODE (at message_i) points from message_i toward xi, i.e. -(xi->message_i) direction.
+  agent_fx = -Fmag * ux;
+  agent_fy = -Fmag * uy;
+  agent_fz = -Fmag * uz;
+
+  // -------------------------
+  // 4) Update bookkeeping
+  // -------------------------
+  if (agent_attached) {
+    agent_age += TIME_STEP;
+  }
+
+  // -------------------------
+  // Write back variables
+  // -------------------------
   FLAMEGPU->setVariable<float>("x", agent_x);
   FLAMEGPU->setVariable<float>("y", agent_y);
   FLAMEGPU->setVariable<float>("z", agent_z);
-  FLAMEGPU->setVariable<float>("vx", agent_vx);
-  FLAMEGPU->setVariable<float>("vy", agent_vy);
-  FLAMEGPU->setVariable<float>("vz", agent_vz);
+
+  FLAMEGPU->setVariable<float>("rest_length_0", agent_rest_length_0);
+  FLAMEGPU->setVariable<float>("rest_length", agent_rest_length);
+
+  FLAMEGPU->setVariable<uint8_t>("attached", agent_attached);
+  FLAMEGPU->setVariable<int>("fnode_id", agent_fnode_id);
+
   FLAMEGPU->setVariable<float>("fx", agent_fx);
   FLAMEGPU->setVariable<float>("fy", agent_fy);
   FLAMEGPU->setVariable<float>("fz", agent_fz);
-  FLAMEGPU->setVariable<float>("x_i", agent_x_i);
-  FLAMEGPU->setVariable<float>("y_i", agent_y_i);
-  FLAMEGPU->setVariable<float>("z_i", agent_z_i);
-  FLAMEGPU->setVariable<float>("x_c", agent_x_c);
-  FLAMEGPU->setVariable<float>("y_c", agent_y_c);
-  FLAMEGPU->setVariable<float>("z_c", agent_z_c);
-  FLAMEGPU->setVariable<int>("id", agent_id);
-  FLAMEGPU->setVariable<int>("cell_id", agent_cell_id);
-  FLAMEGPU->setVariable<float>("rest_length_0", agent_rest_length_0);
-  FLAMEGPU->setVariable<float>("rest_length", agent_rest_length);
-  FLAMEGPU->setVariable<float>("k_fa", agent_k_fa);
-  FLAMEGPU->setVariable<float>("f_max", agent_f_max);
-  FLAMEGPU->setVariable<uint8_t>("active", agent_active);
-  FLAMEGPU->setVariable<float>("v_c", agent_v_c);
-  FLAMEGPU->setVariable<uint8_t>("fa_state", agent_fa_state);
+
   FLAMEGPU->setVariable<float>("age", agent_age);
-  FLAMEGPU->setVariable<float>("k_on", agent_k_on);
-  FLAMEGPU->setVariable<float>("k_off_0", agent_k_off_0);
-  FLAMEGPU->setVariable<float>("f_c", agent_f_c);
-  FLAMEGPU->setVariable<float>("k_reinf", agent_k_reinf);
-  FLAMEGPU->setVariable<int>("fnode_id", agent_fnode_id);
-  FLAMEGPU->setVariable<uint8_t>("attached", agent_attached);
-*/
 
   return flamegpu::ALIVE;
 }
