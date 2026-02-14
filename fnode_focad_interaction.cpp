@@ -1,93 +1,81 @@
-// mirror function to focad_fnode_interaction. Reads the force from the focal adhesion and adds it to the current fnode
+// Mirror function to focad_fnode_interaction.
+// Reads the force from the focal adhesion and adds it to the current FNODE.
+// The calling FNODE agent checks the closest FOCAD agent, and if that FOCAD:
+//   - has fnode_id == this FNODE id
+//   - is attached == 1
+//   - is active   == 1
+// then the FNODE adds the adhesion force (fx,fy,fz) stored in the FOCAD.
+//
+// Notes:
+// - This assumes focad_fnode_interaction has already stored (fx,fy,fz) in the FOCAD,
+//   where (fx,fy,fz) is the force that should be applied to the FNODE.
+// - The force direction is already "pull FNODE towards xi".
 FLAMEGPU_AGENT_FUNCTION(fnode_focad_interaction, flamegpu::MessageSpatial3D, flamegpu::MessageNone) {
-  /*//Get agent variables (agent calling the function)
-  int agent_id = FLAMEGPU->getVariable<int>("id");
-  float agent_x = FLAMEGPU->getVariable<float>("x");
-  float agent_y = FLAMEGPU->getVariable<float>("y");
-  float agent_z = FLAMEGPU->getVariable<float>("z");
-  float agent_vx = FLAMEGPU->getVariable<float>("vx");
-  float agent_vy = FLAMEGPU->getVariable<float>("vy");
-  float agent_vz = FLAMEGPU->getVariable<float>("vz");
+  // -------------------------
+  // Get FNODE agent variables (agent calling the function)
+  // -------------------------
+  const int   agent_id = FLAMEGPU->getVariable<int>("id");
+  const float agent_x  = FLAMEGPU->getVariable<float>("x");
+  const float agent_y  = FLAMEGPU->getVariable<float>("y");
+  const float agent_z  = FLAMEGPU->getVariable<float>("z");
+  float agent_fx = FLAMEGPU->getVariable<float>("fx");
+  float agent_fy = FLAMEGPU->getVariable<float>("fy");
+  float agent_fz = FLAMEGPU->getVariable<float>("fz");
 
-  //Define message variables (agent sending the input message)
-  int message_id = 0;
-  float message_x = 0.0;
-  float message_y = 0.0;
-  float message_z = 0.0;
-  float message_vx = 0.0;
-  float message_vy = 0.0;
-  float message_vz = 0.0;
-  float message_fx = 0.0;
-  float message_fy = 0.0;
-  float message_fz = 0.0;
-  float message_x_i = 0.0;
-  float message_y_i = 0.0;
-  float message_z_i = 0.0;
-  float message_x_c = 0.0;
-  float message_y_c = 0.0;
-  float message_z_c = 0.0;
-  int message_id = 0;
-  int message_cell_id = 0;
-  float message_rest_length_0 = 0.0;
-  float message_rest_length = 0.0;
-  float message_k_fa = 0.0;
-  float message_f_max = 0.0;
-  uint8_t message_active = 0;
-  float message_v_c = 0.0;
-  uint8_t message_state = 0;
-  float message_age = 0.0;
-  float message_k_on = 0.0;
-  float message_k_off_0 = 0.0;
-  float message_f_c = 0.0;
-  float message_k_reinf = 0.0;
-  int message_fnode_id = 0;
-  uint8_t message_attached = 0;
+  const float MAX_SEARCH_RADIUS_FOCAD = FLAMEGPU->environment.getProperty<float>("MAX_SEARCH_RADIUS_FOCAD");
+  const float max_r2 = MAX_SEARCH_RADIUS_FOCAD * MAX_SEARCH_RADIUS_FOCAD;
 
-  //Loop through all agents sending input messages
+  // -------------------------
+  // Find closest relevant FOCAD
+  // -------------------------
+  float best_r2 = max_r2;
+
+  float best_fx = 0.0f;
+  float best_fy = 0.0f;
+  float best_fz = 0.0f;
+
+  int found = 0;
+
   for (const auto &message : FLAMEGPU->message_in(agent_x, agent_y, agent_z)) {
-    message_id = message.getVariable<int>("id");
-    message_x = message.getVariable<float>("x");
-    message_y = message.getVariable<float>("y");
-    message_z = message.getVariable<float>("z");
-    message_vx = message.getVariable<float>("vx");
-    message_vy = message.getVariable<float>("vy");
-    message_vz = message.getVariable<float>("vz");
-    message_fx = message.getVariable<float>("fx");
-    message_fy = message.getVariable<float>("fy");
-    message_fz = message.getVariable<float>("fz");
-    message_x_i = message.getVariable<float>("x_i");
-    message_y_i = message.getVariable<float>("y_i");
-    message_z_i = message.getVariable<float>("z_i");
-    message_x_c = message.getVariable<float>("x_c");
-    message_y_c = message.getVariable<float>("y_c");
-    message_z_c = message.getVariable<float>("z_c");
-    message_id = message.getVariable<int>("id");
-    message_cell_id = message.getVariable<int>("cell_id");
-    message_rest_length_0 = message.getVariable<float>("rest_length_0");
-    message_rest_length = message.getVariable<float>("rest_length");
-    message_k_fa = message.getVariable<float>("k_fa");
-    message_f_max = message.getVariable<float>("f_max");
-    message_active = message.getVariable<uint8_t>("active");
-    message_v_c = message.getVariable<float>("v_c");
-    message_state = message.getVariable<uint8_t>("state");
-    message_age = message.getVariable<float>("age");
-    message_k_on = message.getVariable<float>("k_on");
-    message_k_off_0 = message.getVariable<float>("k_off_0");
-    message_f_c = message.getVariable<float>("f_c");
-    message_k_reinf = message.getVariable<float>("k_reinf");
-    message_fnode_id = message.getVariable<int>("fnode_id");
-    message_attached = message.getVariable<uint8_t>("attached");
+    // Basic spatial info (for "closest" criterion)
+    const float message_x = message.getVariable<float>("x");
+    const float message_y = message.getVariable<float>("y");
+    const float message_z = message.getVariable<float>("z");
+
+    const float dx = message_x - agent_x;
+    const float dy = message_y - agent_y;
+    const float dz = message_z - agent_z;
+    const float r2 = dx*dx + dy*dy + dz*dz;
+
+    // Filter: only adhesions that belong to this node and are active/attached
+    const int     message_fnode_id = message.getVariable<int>("fnode_id");
+    const uint8_t message_attached = message.getVariable<uint8_t>("attached");
+    const uint8_t message_active   = message.getVariable<uint8_t>("active");
+
+    if (message_fnode_id != agent_id) continue;
+    if (!message_attached) continue;
+    if (!message_active) continue;
+
+    // Choose closest relevant FOCAD
+    if (r2 < best_r2) {
+      best_r2 = r2;
+      best_fx = message.getVariable<float>("fx");
+      best_fy = message.getVariable<float>("fy");
+      best_fz = message.getVariable<float>("fz");
+      found = 1;
+      printf("FNODE %d found relevant FOCAD at distance %.4f um with force (%.4f, %.4f, %.4f)\n", agent_id, sqrtf(r2), best_fx, best_fy, best_fz);
+    }
   }
 
-  //Set agent variables
-  FLAMEGPU->setVariable<int>("id", agent_id);
-  FLAMEGPU->setVariable<float>("x", agent_x);
-  FLAMEGPU->setVariable<float>("y", agent_y);
-  FLAMEGPU->setVariable<float>("z", agent_z);
-  FLAMEGPU->setVariable<float>("vx", agent_vx);
-  FLAMEGPU->setVariable<float>("vy", agent_vy);
-  FLAMEGPU->setVariable<float>("vz", agent_vz);
-*/
+  if (found == 1) {
+    agent_fx += best_fx;
+    agent_fy += best_fy;
+    agent_fz += best_fz;
+  }
+
+  FLAMEGPU->setVariable<float>("fx", agent_fx);
+  FLAMEGPU->setVariable<float>("fy", agent_fy);
+  FLAMEGPU->setVariable<float>("fz", agent_fz);
 
   return flamegpu::ALIVE;
 }

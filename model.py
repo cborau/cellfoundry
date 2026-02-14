@@ -655,7 +655,7 @@ if INCLUDE_CELLS:
         CELL_bucket_location_message.newVariableArrayFloat("z_i", N_ANCHOR_POINTS)
         
         FOCAD_bucket_location_message = model.newMessageBucket("focad_bucket_location_message")
-        FOCAD_bucket_location_message.setBounds(8+N_NODES+N_CELLS+1, 8+N_NODES+N_CELLS+(INIT_N_FOCAD_PER_CELL*N_CELLS)) # WARNING: if the number of focar adhesions grow over time, upper bound should be increased accordingly. Make sure to initialize focal adhesion agents starting from index 8+N_NODES+N_CELLS
+        FOCAD_bucket_location_message.setBounds(cell_bucket_min, cell_bucket_max) # WARNING: the key in the bucket list is the cell_id, not the focad id
         FOCAD_bucket_location_message.newVariableInt("id")
         FOCAD_bucket_location_message.newVariableInt("cell_id")
         FOCAD_bucket_location_message.newVariableInt("fnode_id")
@@ -2169,10 +2169,14 @@ if INCLUDE_DIFFUSION:
     model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_grid_location_data")
 if INCLUDE_CELLS:
     model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_spatial_location_data")
+    if INCLUDE_FOCAL_ADHESIONS:
+        model.newLayer("L1_FOCAD_Locations_1").addAgentFunction("FOCAD", "focad_spatial_location_data")
+        model.newLayer("L1_FOCAD_Locations_2").addAgentFunction("FOCAD", "focad_bucket_location_data") 
 if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L1_FNODE_Locations_1").addAgentFunction("FNODE", "fnode_spatial_location_data")
     # These functions share data of the same agent, so must be in separate layers
     model.newLayer("L1_FNODE_Locations_2").addAgentFunction("FNODE", "fnode_bucket_location_data")
+    
 
 # L2: Boundary_Interactions  
 if INCLUDE_DIFFUSION:
@@ -2197,7 +2201,8 @@ if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L7_FNODE_Repulsion").addAgentFunction("FNODE", "fnode_fnode_spatial_interaction")
     model.newLayer("L7_FNODE_Network_Mechanics").addAgentFunction("FNODE", "fnode_fnode_bucket_interaction")
     if INCLUDE_FOCAL_ADHESIONS:
-        model.newLayer("L7_FOCAD_Mechanics").addAgentFunction("FOCAD", "focad_fnode_interaction")  
+        model.newLayer("L7_FOCAD_Mechanics").addAgentFunction("FOCAD", "focad_fnode_interaction") 
+        model.newLayer("L7_FNODE_Force_Update").addAgentFunction("FNODE", "fnode_focad_interaction")  
 
 # L8_Agent_Movement
 if INCLUDE_CELLS:
