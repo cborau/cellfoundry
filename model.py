@@ -20,12 +20,14 @@ from helper_module import compute_expected_boundary_pos_from_corners, getRandomV
 
 # TODO LIST:
 # Review functions (name, caller agent, input agent, message type, description)
-# - focad_anchor_update    FOCAD   CELL   bucket   Updates x_i, x_c values
+# - focad_anchor_update    FOCAD   CELL   bucket   Updates x_i, x_c values (NEXT)
 # - focad_fnode_interaction  FOCAD  FNODE  Spatial  If it's close, it attaches to an FNODE and computes adhesion force (DONE)
-# - fnode_focad_interaction  FNODE  FOCAD  Spatial  Updates the force on the FNODE (NEXT)
+# - fnode_focad_interaction  FNODE  FOCAD  Spatial  Updates the force on the FNODE (DONE)
 # - focad_move  FOCAD  FNODE  Bucket  Updates FOCAD position. If attached to an FNODE, it follows it; otherwise, it moves randomly away from the cell (DONE: but tweak values)
 # Add Cell variables to compute stress tensor etc.
 # Add cell-fnode repulsion
+# Add FOCAD interaction with other FOCADs from other cells.
+# Add FOCAD growth and disassembly dynamics (e.g. increase k_fa with time when attached to a fibre, decrease it when not attached, add max lifetime, etc.)
 # Add chemotaxis (cells prefer to move towards higher concentration of a certain species, which could be implemented by making them prefer to move towards areas with higher concentration on the ECM agents)
 # Add durotaxis (cells prefer to move towards stiffer regions, which could be implemented by making them prefer to move towards areas with higher fibre density or stronger fibre connections)
 # Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
