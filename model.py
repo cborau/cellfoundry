@@ -31,7 +31,7 @@ from helper_module import compute_expected_boundary_pos_from_corners, getRandomV
 # Add chemotaxis (cells prefer to move towards higher concentration of a certain species, which could be implemented by making them prefer to move towards areas with higher concentration on the ECM agents)
 # Add durotaxis (cells prefer to move towards stiffer regions, which could be implemented by making them prefer to move towards areas with higher fibre density or stronger fibre connections)
 # Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
-
+# Add matrix degradation / deposition. Easy: Modifying FNODE properties, Complex: removing / adding FNODE agents (which would require updating the connectivity matrix)
 
 start_time = time.time()
 
