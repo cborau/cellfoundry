@@ -20,7 +20,7 @@ from helper_module import compute_expected_boundary_pos_from_corners, getRandomV
 
 # TODO LIST:
 # Review functions (name, caller agent, input agent, message type, description)
-# - focad_anchor_update    FOCAD   CELL   bucket   Updates x_i, x_c values (NEXT)
+# - focad_anchor_update    FOCAD   CELL   bucket   Updates x_i, x_c values (DONE)
 # - focad_fnode_interaction  FOCAD  FNODE  Spatial  If it's close, it attaches to an FNODE and computes adhesion force (DONE)
 # - fnode_focad_interaction  FNODE  FOCAD  Spatial  Updates the force on the FNODE (DONE)
 # - focad_move  FOCAD  FNODE  Bucket  Updates FOCAD position. If attached to an FNODE, it follows it; otherwise, it moves randomly away from the cell (DONE: but tweak values)
@@ -2171,9 +2171,11 @@ if INCLUDE_DIFFUSION:
     model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_grid_location_data")
 if INCLUDE_CELLS:
     model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_spatial_location_data")
+    model.newLayer("L1_CELL_Locations_2").addAgentFunction("CELL", "cell_bucket_location_data")  # these functions share data of the same agent, so must be in separate layers
     if INCLUDE_FOCAL_ADHESIONS:
+        model.newLayer("L1_FOCAD_Update_Anchors").addAgentFunction("FOCAD", "focad_anchor_update")
         model.newLayer("L1_FOCAD_Locations_1").addAgentFunction("FOCAD", "focad_spatial_location_data")
-        model.newLayer("L1_FOCAD_Locations_2").addAgentFunction("FOCAD", "focad_bucket_location_data") 
+        model.newLayer("L1_FOCAD_Locations_2").addAgentFunction("FOCAD", "focad_bucket_location_data")         
 if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L1_FNODE_Locations_1").addAgentFunction("FNODE", "fnode_spatial_location_data")
     # These functions share data of the same agent, so must be in separate layers

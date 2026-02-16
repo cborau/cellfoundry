@@ -1,93 +1,102 @@
+// FOCAD agent updates its anchor point on the nucleus surface (xi) using bucket messages from CELL.
+// - The calling agent is FOCAD
+// - Receives MessageBucket from CELL agents
+// - Reads the bucket with index = agent_cell_id
+// - Updates FOCAD nucleus center (x_c,y_c,z_c) from the CELL
+// - Loops through all CELL anchors (a fixed-size list) and selects the closest anchor to the FOCAD position (x,y,z)
+// - Updates FOCAD (x_i,y_i,z_i) with that closest anchor position
+//
+// Assumptions / required message fields from CELL bucket message:
+// - "id" (CELL id, to sanity check)
+// - "x_c","y_c","z_c" (cell nucleus center)
+// - Anchor arrays, size = N_ANCHOR_POINTS (compile-time constant):
+//     "x_i","y_i","z_i" as variable arrays in the message
+//
 FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::MessageNone) {
   
-  /*//Get agent variables (agent calling the function)
-  int agent_id = FLAMEGPU->getVariable<int>("id");
-  float agent_x = FLAMEGPU->getVariable<float>("x");
-  float agent_y = FLAMEGPU->getVariable<float>("y");
-  float agent_z = FLAMEGPU->getVariable<float>("z");
-  float agent_vx = FLAMEGPU->getVariable<float>("vx");
-  float agent_vy = FLAMEGPU->getVariable<float>("vy");
-  float agent_vz = FLAMEGPU->getVariable<float>("vz");
-  float agent_fx = FLAMEGPU->getVariable<float>("fx");
-  float agent_fy = FLAMEGPU->getVariable<float>("fy");
-  float agent_fz = FLAMEGPU->getVariable<float>("fz");
-  float agent_x_i = FLAMEGPU->getVariable<float>("x_i");
-  float agent_y_i = FLAMEGPU->getVariable<float>("y_i");
-  float agent_z_i = FLAMEGPU->getVariable<float>("z_i");
+  const uint8_t N_ANCHOR_POINTS = 20; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  // -------------------------
+  // Get FOCAD agent variables (agent calling the function)
+  // -------------------------
+  const int agent_cell_id = FLAMEGPU->getVariable<int>("cell_id");
+  const float MAX_FOCAD_ARM_LENGTH = FLAMEGPU->environment.getProperty<float>("MAX_FOCAD_ARM_LENGTH");
+
+  const float agent_x = FLAMEGPU->getVariable<float>("x");
+  const float agent_y = FLAMEGPU->getVariable<float>("y");
+  const float agent_z = FLAMEGPU->getVariable<float>("z");
+
+  // Current stored cell center / anchor positions
   float agent_x_c = FLAMEGPU->getVariable<float>("x_c");
   float agent_y_c = FLAMEGPU->getVariable<float>("y_c");
   float agent_z_c = FLAMEGPU->getVariable<float>("z_c");
-  int agent_id = FLAMEGPU->getVariable<int>("id");
-  int agent_cell_id = FLAMEGPU->getVariable<int>("cell_id");
-  float agent_rest_length_0 = FLAMEGPU->getVariable<float>("rest_length_0");
-  float agent_rest_length = FLAMEGPU->getVariable<float>("rest_length");
-  float agent_k_fa = FLAMEGPU->getVariable<float>("k_fa");
-  float agent_f_max = FLAMEGPU->getVariable<float>("f_max");
-  uint8_t agent_active = FLAMEGPU->getVariable<uint8_t>("active");
-  float agent_v_c = FLAMEGPU->getVariable<float>("v_c");
-  uint8_t agent_fa_state = FLAMEGPU->getVariable<uint8_t>("fa_state");
-  float agent_age = FLAMEGPU->getVariable<float>("age");
-  float agent_k_on = FLAMEGPU->getVariable<float>("k_on");
-  float agent_k_off_0 = FLAMEGPU->getVariable<float>("k_off_0");
-  float agent_f_c = FLAMEGPU->getVariable<float>("f_c");
-  float agent_k_reinf = FLAMEGPU->getVariable<float>("k_reinf");
-  int agent_fnode_id = FLAMEGPU->getVariable<int>("fnode_id");
-  uint8_t agent_attached = FLAMEGPU->getVariable<uint8_t>("attached");
 
-  //Define message variables (agent sending the input message)
-  int message_id = 0;
-  float message_x = 0.0;
-  float message_y = 0.0;
-  float message_z = 0.0;
-  float message_vx = 0.0;
-  float message_vy = 0.0;
-  float message_vz = 0.0;
+  float agent_x_i = FLAMEGPU->getVariable<float>("x_i");
+  float agent_y_i = FLAMEGPU->getVariable<float>("y_i");
+  float agent_z_i = FLAMEGPU->getVariable<float>("z_i");
 
-  //Loop through all agents sending input messages
-  for (const auto &message : FLAMEGPU->message_in(TODO: provide bucket index )) {
-    message_id = message.getVariable<int>("id");
-    message_x = message.getVariable<float>("x");
-    message_y = message.getVariable<float>("y");
-    message_z = message.getVariable<float>("z");
-    message_vx = message.getVariable<float>("vx");
-    message_vy = message.getVariable<float>("vy");
-    message_vz = message.getVariable<float>("vz");
+  // -------------------------
+  // Read CELL bucket: index = cell_id
+  // -------------------------
+  // Expect exactly 1 message in that bucket (the corresponding CELL).
+  uint8_t found_cell = 0;
+
+  // We will pick the closest anchor to the current FOCAD position (x,y,z)
+  float best_r2 = 2 * (MAX_FOCAD_ARM_LENGTH * MAX_FOCAD_ARM_LENGTH); // 2 times just to give it some margin
+  float best_xi = agent_x_i;
+  float best_yi = agent_y_i;
+  float best_zi = agent_z_i;
+
+  for (const auto &message : FLAMEGPU->message_in(agent_cell_id)) {
+    // Optional sanity check: you can ensure message id matches agent_cell_id
+    // const int message_id = message.getVariable<int>("id");
+
+    // Update stored nucleus center
+    agent_x_c = message.getVariable<float>("x");
+    agent_y_c = message.getVariable<float>("y");
+    agent_z_c = message.getVariable<float>("z");
+
+    // Loop anchors in message arrays and find closest to FOCAD (x,y,z)
+    for (unsigned int ai = 0; ai < N_ANCHOR_POINTS; ++ai) {
+      const float ax = message.getVariable<float, N_ANCHOR_POINTS>("x_i", ai);
+      const float ay = message.getVariable<float, N_ANCHOR_POINTS>("y_i", ai);
+      const float az = message.getVariable<float, N_ANCHOR_POINTS>("z_i", ai);
+
+      const float dx = ax - agent_x;
+      const float dy = ay - agent_y;
+      const float dz = az - agent_z;
+      const float r2 = dx*dx + dy*dy + dz*dz;
+
+      if (r2 < best_r2) {
+        best_r2 = r2;
+        best_xi = ax;
+        best_yi = ay;
+        best_zi = az;
+      }
+    }
+
+    found_cell = 1;
+    // There should only be one CELL message in the bucket;
+    break;
   }
 
-  //Set agent variables
-  FLAMEGPU->setVariable<int>("id", agent_id);
-  FLAMEGPU->setVariable<float>("x", agent_x);
-  FLAMEGPU->setVariable<float>("y", agent_y);
-  FLAMEGPU->setVariable<float>("z", agent_z);
-  FLAMEGPU->setVariable<float>("vx", agent_vx);
-  FLAMEGPU->setVariable<float>("vy", agent_vy);
-  FLAMEGPU->setVariable<float>("vz", agent_vz);
-  FLAMEGPU->setVariable<float>("fx", agent_fx);
-  FLAMEGPU->setVariable<float>("fy", agent_fy);
-  FLAMEGPU->setVariable<float>("fz", agent_fz);
-  FLAMEGPU->setVariable<float>("x_i", agent_x_i);
-  FLAMEGPU->setVariable<float>("y_i", agent_y_i);
-  FLAMEGPU->setVariable<float>("z_i", agent_z_i);
+  // If we found the cell message, update the chosen anchor
+  if (found_cell != 0) {
+    agent_x_i = best_xi;
+    agent_y_i = best_yi;
+    agent_z_i = best_zi;
+  }
+  // else: no message found in bucket (should not happen). Keep previous x_c/xi values.
+
+  // -------------------------
+  // Write back updated variables
+  // -------------------------
   FLAMEGPU->setVariable<float>("x_c", agent_x_c);
   FLAMEGPU->setVariable<float>("y_c", agent_y_c);
   FLAMEGPU->setVariable<float>("z_c", agent_z_c);
-  FLAMEGPU->setVariable<int>("id", agent_id);
-  FLAMEGPU->setVariable<int>("cell_id", agent_cell_id);
-  FLAMEGPU->setVariable<float>("rest_length_0", agent_rest_length_0);
-  FLAMEGPU->setVariable<float>("rest_length", agent_rest_length);
-  FLAMEGPU->setVariable<float>("k_fa", agent_k_fa);
-  FLAMEGPU->setVariable<float>("f_max", agent_f_max);
-  FLAMEGPU->setVariable<uint8_t>("active", agent_active);
-  FLAMEGPU->setVariable<float>("v_c", agent_v_c);
-  FLAMEGPU->setVariable<uint8_t>("fa_state", agent_state);
-  FLAMEGPU->setVariable<float>("age", agent_age);
-  FLAMEGPU->setVariable<float>("k_on", agent_k_on);
-  FLAMEGPU->setVariable<float>("k_off_0", agent_k_off_0);
-  FLAMEGPU->setVariable<float>("f_c", agent_f_c);
-  FLAMEGPU->setVariable<float>("k_reinf", agent_k_reinf);
-  FLAMEGPU->setVariable<int>("fnode_id", agent_fnode_id);
-  FLAMEGPU->setVariable<uint8_t>("attached", agent_attached);
- */
+
+  FLAMEGPU->setVariable<float>("x_i", agent_x_i);
+  FLAMEGPU->setVariable<float>("y_i", agent_y_i);
+  FLAMEGPU->setVariable<float>("z_i", agent_z_i);
 
   return flamegpu::ALIVE;
 }
