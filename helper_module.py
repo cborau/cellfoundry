@@ -409,6 +409,11 @@ class ModelParameterConfig:
         focad_k_off_0: float = None,
         focad_f_c: float = None,
         focad_k_reinf: float = None,
+        # Nucleus mechanics
+        nucleus_e: float = None,
+        nucleus_nu: float = None,
+        nucleus_tau: float = None,
+        nucleus_eps_clamp: float = None,
         # Oscillatory assay
         oscillatory_shear_assay: bool = None,
         max_strain: float = None,
@@ -513,6 +518,10 @@ class ModelParameterConfig:
         self.FOCAD_K_OFF_0 = focad_k_off_0
         self.FOCAD_F_C = focad_f_c
         self.FOCAD_K_REINF = focad_k_reinf
+        self.NUCLEUS_E = nucleus_e
+        self.NUCLEUS_NU = nucleus_nu
+        self.NUCLEUS_TAU = nucleus_tau
+        self.NUCLEUS_EPS_CLAMP = nucleus_eps_clamp
         self.OSCILLATORY_SHEAR_ASSAY = oscillatory_shear_assay
         self.MAX_STRAIN = max_strain
         self.OSCILLATORY_AMPLITUDE = oscillatory_amplitude
@@ -945,6 +954,10 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         focad_k_off_0=ns.get("FOCAD_K_OFF_0"),
         focad_f_c=ns.get("FOCAD_F_C"),
         focad_k_reinf=ns.get("FOCAD_K_REINF"),
+        nucleus_e=ns.get("NUCLEUS_E"),
+        nucleus_nu=ns.get("NUCLEUS_NU"),
+        nucleus_tau=ns.get("NUCLEUS_TAU"),
+        nucleus_eps_clamp=ns.get("NUCLEUS_EPS_CLAMP"),
         oscillatory_shear_assay=ns.get("OSCILLATORY_SHEAR_ASSAY"),
         max_strain=ns.get("MAX_STRAIN"),
         oscillatory_amplitude=ns.get("OSCILLATORY_AMPLITUDE"),
