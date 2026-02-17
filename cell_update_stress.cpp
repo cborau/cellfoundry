@@ -38,7 +38,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
   const float agent_y = FLAMEGPU->getVariable<float>("y");
   const float agent_z = FLAMEGPU->getVariable<float>("z");
 
-  const float agent_radius = FLAMEGPU->getVariable<float>("radius");
+  const float CELL_RADIUS = FLAMEGPU->getVariable<float>("radius");
+  const float CELL_NUCLEUS_RADIUS = FLAMEGPU->environment.getProperty<float>("CELL_NUCLEUS_RADIUS");
 
   // Stored viscoelastic strain state (symmetric small strain tensor)
   float agent_eps_xx = FLAMEGPU->getVariable<float>("eps_xx");
@@ -98,7 +99,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
   // Stress units: nN/um^2 (kPa)
   // -------------------------
   const float PI = 3.14159265358979323846f;
-  const float agent_V = (4.0f / 3.0f) * PI * agent_radius * agent_radius * agent_radius; // [um^3]
+  const float agent_V = (4.0f / 3.0f) * PI * CELL_RADIUS * CELL_RADIUS * CELL_RADIUS; // [um^3]
   const float invV = safeInv(agent_V, 1e-20f);
 
   const float agent_sig_xx = invV * agent_S_xx;
@@ -224,9 +225,9 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
     const float duz = uz + agent_eps_xz * ux + agent_eps_yz * uy + agent_eps_zz * uz;
 
     // Anchor positions on the deformed nucleus surface
-    const float anchor_x = agent_x + agent_radius * dux;
-    const float anchor_y = agent_y + agent_radius * duy;
-    const float anchor_z = agent_z + agent_radius * duz;
+    const float anchor_x = agent_x + CELL_NUCLEUS_RADIUS * dux;
+    const float anchor_y = agent_y + CELL_NUCLEUS_RADIUS * duy;
+    const float anchor_z = agent_z + CELL_NUCLEUS_RADIUS * duz;
 
     // Store updated anchors (CELL array variables)
     FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("x_i", a, anchor_x);

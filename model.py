@@ -1192,9 +1192,11 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableFloat("fy", 0.0)
                     instance.setVariableFloat("fz", 0.0)
                     instance.setVariableInt("anchor_id", -1) # initialized as not attached to any anchor point
-                    instance.setVariableFloat("x_i", 0.0)
-                    instance.setVariableFloat("y_i", 0.0)
-                    instance.setVariableFloat("z_i", 0.0)
+                    focad_dir = focad_pos[j, :] - cell_pos[i, :]
+                    anchor_pos = cell_pos[i, :] + (focad_dir / np.linalg.norm(focad_dir)) * CELL_NUCLEUS_RADIUS
+                    instance.setVariableFloat("x_i", anchor_pos[0])
+                    instance.setVariableFloat("y_i", anchor_pos[1])
+                    instance.setVariableFloat("z_i", anchor_pos[2])
                     instance.setVariableFloat("x_c", cell_pos[i, 0])
                     instance.setVariableFloat("y_c", cell_pos[i, 1])
                     instance.setVariableFloat("z_c", cell_pos[i, 2])
