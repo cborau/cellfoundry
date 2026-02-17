@@ -15,14 +15,10 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   float agent_y = FLAMEGPU->getVariable<float>("y");
   float agent_z = FLAMEGPU->getVariable<float>("z");
 
-  // Nucleus geometry for this adhesion (xi on nucleus surface, xc nucleus/cell center)
+  // Nucleus anchor point for this adhesion (xi on nucleus surface)
   const float agent_x_i = FLAMEGPU->getVariable<float>("x_i");
   const float agent_y_i = FLAMEGPU->getVariable<float>("y_i");
   const float agent_z_i = FLAMEGPU->getVariable<float>("z_i");
-
-  const float agent_x_c = FLAMEGPU->getVariable<float>("x_c");
-  const float agent_y_c = FLAMEGPU->getVariable<float>("y_c");
-  const float agent_z_c = FLAMEGPU->getVariable<float>("z_c");
 
   // Mechanics parameters/state
   float  agent_rest_length_0 = FLAMEGPU->getVariable<float>("rest_length_0");  // L0 at creation

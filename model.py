@@ -16,7 +16,7 @@ import random
 import os
 import pickle
 import matplotlib.pyplot as plt
-from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D
+from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos
 
 # TODO LIST:
 # Review functions (name, caller agent, input agent, message type, description)
@@ -24,7 +24,7 @@ from helper_module import compute_expected_boundary_pos_from_corners, getRandomV
 # - focad_fnode_interaction  FOCAD  FNODE  Spatial  If it's close, it attaches to an FNODE and computes adhesion force (DONE)
 # - fnode_focad_interaction  FNODE  FOCAD  Spatial  Updates the force on the FNODE (DONE)
 # - focad_move  FOCAD  FNODE  Bucket  Updates FOCAD position. If attached to an FNODE, it follows it; otherwise, it moves randomly away from the cell (DONE: but tweak values)
-# Add Cell variables to compute stress tensor etc.
+# Add Cell mechanical variables visualization.
 # Add cell-fnode repulsion
 # Add FOCAD interaction with other FOCADs from other cells.
 # Add FOCAD growth and disassembly dynamics (e.g. increase k_fa with time when attached to a fibre, decrease it when not attached, add max lifetime, etc.)
@@ -63,7 +63,7 @@ N = 21
 
 # Time simulation parameters
 # ----------------------------------------------------------------------
-TIME_STEP = 0.1 # time. WARNING: diffusion and cell migration events might need different scales
+TIME_STEP = 0.1 # s. WARNING: diffusion and cell migration events might need different scales
 STEPS = 50
 
 # +====================================================================+
@@ -72,20 +72,20 @@ STEPS = 50
 
 # Boundary interactions and mechanical parameters
 # ----------------------------------------------------------------------
-ECM_K_ELAST = 0.2  # [N/units/kg]
-ECM_D_DUMPING = 0.04  # [N*s/units/kg]
-ECM_ETA = 1  # [1/time]
+ECM_K_ELAST = 0.2  # [nN/um]
+ECM_D_DUMPING = 0.04  # [nN·s/um]
+ECM_ETA = 1  # [nN·s/µm]
 
 #BOUNDARY_COORDS = [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]  # +X,-X,+Y,-Y,+Z,-Z
 BOUNDARY_COORDS = [100.0, -100.0, 100.0, -100.0, 100.0, -100.0]# microdevice dimensions in um
 #BOUNDARY_COORDS = [coord / 1000.0 for coord in BOUNDARY_COORDS] # in mm
-BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [units/time]
-BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[units/time]
+BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
+BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[um/s]
 
 POISSON_DIRS = [0, 1]  # 0: xdir, 1:ydir, 2:zdir. poisson_ratio ~= -incL(dir1)/incL(dir2) dir2 is the direction in which the load is applied
 ALLOW_BOUNDARY_ELASTIC_MOVEMENT = [0, 0, 0, 0, 0, 0]  # [bool]
 RELATIVE_BOUNDARY_STIFFNESS = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-BOUNDARY_STIFFNESS_VALUE = 10.0  # N/units
+BOUNDARY_STIFFNESS_VALUE = 10.0  # nN/um
 BOUNDARY_DUMPING_VALUE = 5.0
 BOUNDARY_STIFFNESS = [BOUNDARY_STIFFNESS_VALUE * x for x in RELATIVE_BOUNDARY_STIFFNESS]
 BOUNDARY_DUMPING = [BOUNDARY_DUMPING_VALUE * x for x in RELATIVE_BOUNDARY_STIFFNESS]
@@ -134,7 +134,7 @@ MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION = 2 * ECM_ECM_EQUILIBRIUM_DISTANCE # thi
 OSCILLATORY_SHEAR_ASSAY = False  # if True, BOUNDARY_DISP_RATES_PARALLEL options are overrun but used to make the boundaries oscillate in their corresponding planes following a sin() function
 MAX_STRAIN = 0.25  # maximum strain applied during oscillatory shear assay (used to compute OSCILLATORY_AMPLITUDE)
 OSCILLATORY_AMPLITUDE = MAX_STRAIN * (BOUNDARY_COORDS[2] - BOUNDARY_COORDS[3])  # range [0-1] * domain size in the direction of oscillation
-OSCILLATORY_FREQ = 0.05  # strain oscillation frequency [time^-1]
+OSCILLATORY_FREQ = 0.05  # strain oscillation frequency [s^-1]
 OSCILLATORY_W = 2 * math.pi * OSCILLATORY_FREQ * TIME_STEP
 # Compute expected boundary positions after motion, WARNING: make sure the direction matches with OSCILLATORY_AMPLITUDE definition
 MAX_EXPECTED_BOUNDARY_POS_OSCILLATORY = 0.25 * (BOUNDARY_COORDS[2] - BOUNDARY_COORDS[3]) + BOUNDARY_COORDS[2]  # max pos reached at sin()=1
@@ -174,9 +174,9 @@ MAX_SEARCH_RADIUS_FNODES = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / 10.0 # must me s
 # +====================================================================+
 INCLUDE_DIFFUSION = False
 N_SPECIES = 2  # number of diffusing species.WARNING: make sure that the value coincides with the one declared in TODO
-DIFFUSION_COEFF_MULTI = [300.0, 300.0]  # diffusion coefficient in [units^2/s] per specie
+DIFFUSION_COEFF_MULTI = [300.0, 300.0]  # diffusion coefficient in [um^2/s] per specie
 BOUNDARY_CONC_INIT_MULTI = [[50.0,50.0, 50.0, 50.0, 50.0, 50.0],
-                            # initial concentration at each surface (+X,-X,+Y,-Y,+Z,-Z) [units^2/s]. -1.0 means no condition assigned. All agents are assigned 0 by default.
+                            # initial concentration at each surface (+X,-X,+Y,-Y,+Z,-Z) [um^2/s]. -1.0 means no condition assigned. All agents are assigned 0 by default.
                             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
 
 BOUNDARY_CONC_FIXED_MULTI = [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -191,13 +191,13 @@ INCLUDE_CELL_ORIENTATION = True
 INCLUDE_CELL_CELL_INTERACTION = False
 INCLUDE_CELL_CYCLE = False
 PERIODIC_BOUNDARIES_FOR_CELLS = False
-CELL_ORIENTATION_RATE = 1.0  # [1/time] TODO: check whether cell reorient themselves faster than ECM
+CELL_ORIENTATION_RATE = 1.0  # [1/s] TODO: check whether cell reorient themselves faster than ECM
 N_CELLS = 1
-CELL_K_ELAST = 2.0  # [N/units/kg]
-CELL_D_DUMPING = 0.4  # [N*time/units/kg]
-CELL_RADIUS = 8.412 #ECM_ECM_EQUILIBRIUM_DISTANCE / 2 # [units]
-CELL_NUCLEUS_RADIUS = CELL_RADIUS / 2 # [units]
-CELL_SPEED_REF = ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / 10.0 # [units/time]
+CELL_K_ELAST = 2.0  # [nN/um]
+CELL_D_DUMPING = 0.4  # [nN·s/um]
+CELL_RADIUS = 8.412 #ECM_ECM_EQUILIBRIUM_DISTANCE / 2 # [um]
+CELL_NUCLEUS_RADIUS = CELL_RADIUS / 2 # [um]
+CELL_SPEED_REF = ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / 10.0 # [um/s]
 CYCLE_PHASE_G1_DURATION = 10.0 #[h]
 CYCLE_PHASE_S_DURATION = 8.0
 CYCLE_PHASE_G2_DURATION = 4.0
@@ -219,7 +219,7 @@ INIT_CELL_REACTION_RATES = [0.00018, 0.00018]  # metabolic reaction rates of eac
 # +====================================================================+
 INCLUDE_FOCAL_ADHESIONS = True
 INIT_N_FOCAD_PER_CELL = 10 # initial number of focal adhesions per cell. 
-N_ANCHOR_POINTS = 20 # number of anchor points to which focal adhesions can attach on the nucleus surface. Their positions change with nucleus deformation
+N_ANCHOR_POINTS = 100 # number of anchor points to which focal adhesions can attach on the nucleus surface. Their positions change with nucleus deformation
 MAX_SEARCH_RADIUS_FOCAD = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE# maximum distance at which focal adhesions can find fibre nodes to attach to. WARNING: this value strongly affects the number of bins and therefore the memory allocated for simulations (more bins -> more memory -> faster (in theory))
 MAX_FOCAD_ARM_LENGTH = 4 * CELL_RADIUS  # maximum length of the focal adhesion "arm" (distance between the focal adhesion and its anchor point on the nucleus). If the arm is stretched beyond this length, the focal adhesion moves back towards the anchor point. This is a simple way to represent the limited reach of cellular protrusions and avoid unrealistic stretching of focal adhesions. WARNING: make sure this value is consistent with CELL_RADIUS and MAX_SEARCH_RADIUS_FOCAD to avoid unrealistic behavior.
 # WARNING: rate values below assume global timestep ~ 1.0 s
@@ -233,6 +233,17 @@ FOCAD_K_OFF_0 = 0.003 # [1/s] Zero-force unbinding rate (baseline detachment). M
 FOCAD_F_C = 5.0 # [nN] Force scale controlling force sensitivity in koff(F) (catch/slip style). Typical range: ~2–10 nN. Sets how quickly detachment probability changes as traction builds.
 # Example (simple slip): koff(F)=K_OFF_0*exp(|F|/F_C) => faster turnover under high force.
 FOCAD_K_REINF = 0.001 # [1/s] Reinforcement rate for adhesion strengthening. Timescale ~1/K_REINF = 1000 s (~17 min). E.g. something like k_fa <- k_fa + K_REINF * g(|F|) * DT, adhesions gradually stiffen over tens of minutes when they carry load.
+# +====================================================================+
+# | NUCLEAR MECHANICS  (ONLY USED IF FOCAL ADHESIONS ARE INCLUDED)     |
+# +====================================================================+
+# Elasticity (small-strain linear)
+NUCLEUS_E = 2.0               # [nN/µm² = kPa] Young’s modulus of the nucleus (effective stiffness). Typical: 0.5–5.0 Pa depending on cell type/lamina.
+NUCLEUS_NU = 0.48             # [-] Poisson ratio. Nearly incompressible nucleus. Typical: 0.45–0.49. WARNING: must be < 0.5.
+# Viscoelastic relaxation
+NUCLEUS_TAU = 0.2            # [s] Relaxation time controlling how fast strain follows the instantaneous elastic strain. Typical: 10–100 s.
+NUCLEUS_EPS_CLAMP = 0.30      # [-] Clamp for each strain component to preserve small-strain assumptions and avoid numerical blow-up. Typical: 0.1–0.3.
+
+
 
 # +====================================================================+
 # | OTHER DERIVED PARAMETERS AND MODEL CHECKS                          |
@@ -520,6 +531,12 @@ env.newPropertyFloat("FOCAD_K_OFF_0", FOCAD_K_OFF_0)
 env.newPropertyFloat("FOCAD_F_C", FOCAD_F_C)
 env.newPropertyFloat("FOCAD_K_REINF", FOCAD_K_REINF)
 
+# Nucleus mechanical properties
+env.newPropertyFloat("NUCLEUS_E", NUCLEUS_E)
+env.newPropertyFloat("NUCLEUS_NU", NUCLEUS_NU)
+env.newPropertyFloat("NUCLEUS_TAU", NUCLEUS_TAU)
+env.newPropertyFloat("NUCLEUS_EPS_CLAMP", NUCLEUS_EPS_CLAMP)
+
 # ECM BEHAVIOUR 
 # ------------------------------------------------------
 # Equilibrium radius at which elastic force is 0.  TODO: add ECM_FIBRE elements
@@ -670,6 +687,7 @@ if INCLUDE_CELLS:
         FOCAD_bucket_location_message.newVariableFloat("fx")
         FOCAD_bucket_location_message.newVariableFloat("fy")
         FOCAD_bucket_location_message.newVariableFloat("fz")
+        FOCAD_bucket_location_message.newVariableInt("anchor_id") # to identify which anchor point of the cell this focal adhesion corresponds to
         FOCAD_bucket_location_message.newVariableFloat("x_i")
         FOCAD_bucket_location_message.newVariableFloat("y_i")
         FOCAD_bucket_location_message.newVariableFloat("z_i")
@@ -853,7 +871,22 @@ if INCLUDE_CELLS:
     CELL_agent.newRTCFunctionFile("cell_move", cell_move_file)
     CELL_agent.newVariableArrayFloat("x_i", N_ANCHOR_POINTS) # store the position of the anchor points on the cell. Unused if INCLUDE_FOCAL_ADHESIONS is False
     CELL_agent.newVariableArrayFloat("y_i", N_ANCHOR_POINTS) 
-    CELL_agent.newVariableArrayFloat("z_i", N_ANCHOR_POINTS) 
+    CELL_agent.newVariableArrayFloat("z_i", N_ANCHOR_POINTS)
+    CELL_agent.newVariableArrayFloat("u_ref_x_i", N_ANCHOR_POINTS) # unit direction vector from the cell center to the anchor point in the reference configuration (used for elastic force calculation). Unused if INCLUDE_FOCAL_ADHESIONS is False
+    CELL_agent.newVariableArrayFloat("u_ref_y_i", N_ANCHOR_POINTS)
+    CELL_agent.newVariableArrayFloat("u_ref_z_i", N_ANCHOR_POINTS)
+    CELL_agent.newVariableFloat("eps_xx", 0.0) # strain tensor
+    CELL_agent.newVariableFloat("eps_yy", 0.0)
+    CELL_agent.newVariableFloat("eps_zz", 0.0)
+    CELL_agent.newVariableFloat("eps_xy", 0.0)
+    CELL_agent.newVariableFloat("eps_xz", 0.0)
+    CELL_agent.newVariableFloat("eps_yz", 0.0)
+    CELL_agent.newVariableFloat("sig_xx", 0.0) # stress tensor
+    CELL_agent.newVariableFloat("sig_yy", 0.0)
+    CELL_agent.newVariableFloat("sig_zz", 0.0)
+    CELL_agent.newVariableFloat("sig_xy", 0.0)
+    CELL_agent.newVariableFloat("sig_xz", 0.0)
+    CELL_agent.newVariableFloat("sig_yz", 0.0)
     if INCLUDE_FOCAL_ADHESIONS:  
         CELL_agent.newRTCFunctionFile("cell_bucket_location_data", cell_bucket_location_data_file).setMessageOutput("cell_bucket_location_message")
         CELL_agent.newRTCFunctionFile("cell_update_stress", cell_update_stress_file).setMessageInput("focad_bucket_location_message")
@@ -865,7 +898,7 @@ if INCLUDE_FOCAL_ADHESIONS:
     FOCAD_agent = model.newAgent("FOCAD")
     FOCAD_agent.newVariableInt("id", 0)
     FOCAD_agent.newVariableInt("cell_id")
-    FOCAD_agent.newVariableInt("fnode_id")
+    FOCAD_agent.newVariableInt("fnode_id")    
     FOCAD_agent.newVariableFloat("x", 0.0)
     FOCAD_agent.newVariableFloat("y", 0.0)
     FOCAD_agent.newVariableFloat("z", 0.0)
@@ -875,6 +908,7 @@ if INCLUDE_FOCAL_ADHESIONS:
     FOCAD_agent.newVariableFloat("fx", 0.0)
     FOCAD_agent.newVariableFloat("fy", 0.0)
     FOCAD_agent.newVariableFloat("fz", 0.0)
+    FOCAD_agent.newVariableInt("anchor_id",-1)
     FOCAD_agent.newVariableFloat("x_i", 0.0)
     FOCAD_agent.newVariableFloat("y_i", 0.0)
     FOCAD_agent.newVariableFloat("z_i", 0.0)
@@ -1114,6 +1148,23 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableArrayFloat("x_i", anchor_pos[:, 0].tolist())
                 instance.setVariableArrayFloat("y_i", anchor_pos[:, 1].tolist())
                 instance.setVariableArrayFloat("z_i", anchor_pos[:, 2].tolist())
+                instance.setVariableFloat("eps_xx", 0.0)
+                instance.setVariableFloat("eps_yy", 0.0)
+                instance.setVariableFloat("eps_zz", 0.0)
+                instance.setVariableFloat("eps_xy", 0.0)
+                instance.setVariableFloat("eps_xz", 0.0)
+                instance.setVariableFloat("eps_yz", 0.0)
+                instance.setVariableFloat("sig_xx", 0.0)
+                instance.setVariableFloat("sig_yy", 0.0)
+                instance.setVariableFloat("sig_zz", 0.0)
+                instance.setVariableFloat("sig_xy", 0.0)
+                instance.setVariableFloat("sig_xz", 0.0)   
+                instance.setVariableFloat("sig_yz", 0.0)  
+                u_ref = compute_u_ref_from_anchor_pos(anchor_pos, cell_pos[i, :])
+                instance.setVariableArrayFloat("u_ref_x_i", u_ref[:, 0].tolist())
+                instance.setVariableArrayFloat("u_ref_y_i", u_ref[:, 1].tolist())
+                instance.setVariableArrayFloat("u_ref_z_i", u_ref[:, 2].tolist())
+
 
             FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
             
@@ -1140,6 +1191,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableFloat("fx", 0.0)
                     instance.setVariableFloat("fy", 0.0)
                     instance.setVariableFloat("fz", 0.0)
+                    instance.setVariableInt("anchor_id", -1) # initialized as not attached to any anchor point
                     instance.setVariableFloat("x_i", 0.0)
                     instance.setVariableFloat("y_i", 0.0)
                     instance.setVariableFloat("z_i", 0.0)
@@ -2206,7 +2258,8 @@ if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L7_FNODE_Network_Mechanics").addAgentFunction("FNODE", "fnode_fnode_bucket_interaction")
     if INCLUDE_FOCAL_ADHESIONS:
         model.newLayer("L7_FOCAD_Mechanics").addAgentFunction("FOCAD", "focad_fnode_interaction") 
-        model.newLayer("L7_FNODE_Force_Update").addAgentFunction("FNODE", "fnode_focad_interaction")  
+        model.newLayer("L7_FNODE_Force_Update").addAgentFunction("FNODE", "fnode_focad_interaction") 
+        model.newLayer("L7_CELL_Stress_Update").addAgentFunction("CELL", "cell_update_stress") 
 
 # L8_Agent_Movement
 if INCLUDE_CELLS:

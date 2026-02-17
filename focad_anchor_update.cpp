@@ -14,7 +14,7 @@
 //
 FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::MessageNone) {
   
-  const uint8_t N_ANCHOR_POINTS = 20; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  const uint8_t N_ANCHOR_POINTS = 100; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
   // -------------------------
   // Get FOCAD agent variables (agent calling the function)
   // -------------------------

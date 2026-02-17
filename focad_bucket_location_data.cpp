@@ -11,6 +11,7 @@ FLAMEGPU_AGENT_FUNCTION(focad_bucket_location_data, flamegpu::MessageNone, flame
   FLAMEGPU->message_out.setVariable<float>("fx", FLAMEGPU->getVariable<float>("fx"));
   FLAMEGPU->message_out.setVariable<float>("fy", FLAMEGPU->getVariable<float>("fy"));
   FLAMEGPU->message_out.setVariable<float>("fz", FLAMEGPU->getVariable<float>("fz"));
+  FLAMEGPU->message_out.setVariable<int>("anchor_id", FLAMEGPU->getVariable<int>("anchor_id"));
   FLAMEGPU->message_out.setVariable<float>("x_i", FLAMEGPU->getVariable<float>("x_i"));
   FLAMEGPU->message_out.setVariable<float>("y_i", FLAMEGPU->getVariable<float>("y_i"));
   FLAMEGPU->message_out.setVariable<float>("z_i", FLAMEGPU->getVariable<float>("z_i"));

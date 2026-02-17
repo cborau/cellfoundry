@@ -275,6 +275,45 @@ def getRandomCoordsAroundPoint(n, px, py, pz, radius, on_surface=False):
     return coords
 
 
+def compute_u_ref_from_anchor_pos(anchor_pos: np.ndarray,
+                                 cell_center: np.ndarray,
+                                 eps: float = 1e-12) -> np.ndarray:
+    """
+    Compute reference unit vectors u_ref for nucleus anchors.
+
+    Parameters
+    ----------
+    anchor_pos : (N, 3) np.ndarray
+        Anchor positions in world coordinates.
+    cell_center : (3,) np.ndarray
+        Nucleus center in world coordinates (cell_pos[i, :]).
+    eps : float
+        Small value to avoid division by zero.
+
+    Returns
+    -------
+    u_ref : (N, 3) np.ndarray
+        Unit vectors pointing from nucleus center to each anchor.
+    """
+    anchor_pos = np.asarray(anchor_pos, dtype=np.float64)
+    cell_center = np.asarray(cell_center, dtype=np.float64).reshape(3,)
+
+    if anchor_pos.ndim != 2 or anchor_pos.shape[1] != 3:
+        raise ValueError(f"anchor_pos must have shape (N, 3), got {anchor_pos.shape}")
+    if cell_center.shape != (3,):
+        raise ValueError(f"cell_center must have shape (3,), got {cell_center.shape}")
+
+    # Vectors from center to anchors
+    u = anchor_pos - cell_center[None, :]  # (N, 3)
+
+    # Normalize safely
+    norm = np.linalg.norm(u, axis=1)  # (N,)
+    norm = np.maximum(norm, eps)      # avoid divide by zero
+    u_ref = u / norm[:, None]
+
+    return u_ref
+
+
 class ModelParameterConfig:
     def __init__(
         self,
