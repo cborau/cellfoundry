@@ -48,7 +48,6 @@ FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::
   float best_yi = agent_y_i;
   float best_zi = agent_z_i;
   int best_anchor_id = agent_anchor_id;
-  printf("FOCAD agent %d: best_anchor_id %d\n", FLAMEGPU->getVariable<int>("id"), agent_anchor_id);
 
   for (const auto &message : FLAMEGPU->message_in(agent_cell_id)) {
     // Optional sanity check: you can ensure message id matches agent_cell_id
@@ -76,7 +75,6 @@ FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::
         const float dy = ay - agent_y;
         const float dz = az - agent_z;
         const float r2 = dx*dx + dy*dy + dz*dz;
-        printf("  Anchor %d: (ax,ay,az)=(%2.6f,%2.6f,%2.6f), r2=%2.6f \n", ai, ax, ay, az, r2);
 
         if (r2 < best_r2) {
           best_r2 = r2;
@@ -98,7 +96,6 @@ FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::
     agent_y_i = best_yi;
     agent_z_i = best_zi;
     agent_anchor_id = best_anchor_id;
-    printf("  Selected anchor %d with position (%2.6f,%2.6f,%2.6f) \n", best_anchor_id, best_xi, best_yi, best_zi);
   }
   // else: no message found in bucket (should not happen). Keep previous x_c/xi values.
 
@@ -113,7 +110,8 @@ FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::
   FLAMEGPU->setVariable<float>("y_i", agent_y_i);
   FLAMEGPU->setVariable<float>("z_i", agent_z_i);
 
-  FLAMEGPU->setVariable<int>("anchor_id", agent_anchor_id);
+  //FLAMEGPU->setVariable<int>("anchor_id", agent_anchor_id);
+  FLAMEGPU->setVariable<int>("anchor_id", -1); // Reset anchor_id to -1 to allow dynamic re-assignment at each step, or keep it fixed after first assignment.
 
   return flamegpu::ALIVE;
 }

@@ -314,6 +314,740 @@ def compute_u_ref_from_anchor_pos(anchor_pos: np.ndarray,
     return u_ref
 
 
+def build_save_data_context(ecm_agents_per_dir, include_fibre_network, n_nodes):
+    context = {}
+    context["header"] = [
+        "# vtk DataFile Version 3.0",
+        "ECM data",
+        "ASCII",
+        "DATASET POLYDATA",
+        "POINTS {} float".format(8 + ecm_agents_per_dir[0] * ecm_agents_per_dir[1] * ecm_agents_per_dir[2]),
+    ]
+
+    domaindata = ["POLYGONS 6 30"]
+    cube_conn = [
+        [4, 0, 3, 7, 4],
+        [4, 1, 2, 6, 5],
+        [4, 1, 0, 4, 5],
+        [4, 2, 3, 7, 6],
+        [4, 0, 1, 2, 3],
+        [4, 4, 5, 6, 7],
+    ]
+    for i in range(len(cube_conn)):
+        for j in range(len(cube_conn[i])):
+            if j > 0:
+                cube_conn[i][j] = cube_conn[i][j] + ecm_agents_per_dir[0] * ecm_agents_per_dir[1] * ecm_agents_per_dir[2]
+        domaindata.append(' '.join(str(x) for x in cube_conn[i]))
+
+    context["domaindata"] = domaindata
+
+    if include_fibre_network:
+        domaindata_network = []
+        cube_conn_network = [
+            [4, 0, 3, 7, 4],
+            [4, 1, 2, 6, 5],
+            [4, 1, 0, 4, 5],
+            [4, 2, 3, 7, 6],
+            [4, 0, 1, 2, 3],
+            [4, 4, 5, 6, 7],
+        ]
+        for i in range(len(cube_conn_network)):
+            for j in range(len(cube_conn_network[i])):
+                if j > 0:
+                    cube_conn_network[i][j] = cube_conn_network[i][j] + n_nodes
+            domaindata_network.append(' '.join(str(x) for x in cube_conn_network[i]))
+        context["domaindata_network"] = domaindata_network
+
+    context["domaindata"] += [
+        "CELL_DATA 6",
+        "SCALARS boundary_index int 1",
+        "LOOKUP_TABLE default",
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "NORMALS boundary_normals float",
+        "1 0 0",
+        "-1 0 0",
+        "0 1 0",
+        "0 -1 0",
+        "0 0 1",
+        "0 0 -1",
+    ]
+
+    context["vascularizationdata"] = [
+        "# vtk DataFile Version 3.0",
+        "Vascularization points",
+        "ASCII",
+        "DATASET UNSTRUCTURED_GRID",
+    ]
+    context["fibrenodedata"] = [
+        "# vtk DataFile Version 3.0",
+        "Fibre node agents",
+        "ASCII",
+        "DATASET UNSTRUCTURED_GRID",
+    ]
+    context["celldata"] = [
+        "# vtk DataFile Version 3.0",
+        "Cell agents",
+        "ASCII",
+        "DATASET UNSTRUCTURED_GRID",
+    ]
+    context["focaladhesionsdata"] = [
+        "# vtk DataFile Version 3.0",
+        "Focal adhesions",
+        "ASCII",
+        "DATASET UNSTRUCTURED_GRID",
+    ]
+
+    return context
+
+
+def save_data_to_file_step(FLAMEGPU, save_context, config):
+    save_data_to_file = config["SAVE_DATA_TO_FILE"]
+    save_every_n_steps = config["SAVE_EVERY_N_STEPS"]
+    n_species = config["N_SPECIES"]
+    res_path = config["RES_PATH"]
+    include_fibre_network = config["INCLUDE_FIBRE_NETWORK"]
+    heterogeneous_diffusion = config["HETEROGENEOUS_DIFFUSION"]
+    initial_network_connectivity = config["INITIAL_NETWORK_CONNECTIVITY"]
+    n_nodes = config["N_NODES"]
+    include_cells = config["INCLUDE_CELLS"]
+    ecm_population_size = config["ECM_POPULATION_SIZE"]
+    include_focal_adhesions = config["INCLUDE_FOCAL_ADHESIONS"]
+    pyflamegpu = config["pyflamegpu"]
+
+    stepCounter = FLAMEGPU.getStepCounter() + 1
+    coord_boundary = list(FLAMEGPU.environment.getPropertyArrayFloat("COORDS_BOUNDARIES"))
+
+    if not save_data_to_file:
+        return
+    if stepCounter % save_every_n_steps != 0 and stepCounter != 1:
+        return
+
+    if include_fibre_network:
+        file_name = 'fibre_network_data_t{:04d}.vtk'.format(stepCounter)
+        file_path = res_path / file_name
+
+        agent = FLAMEGPU.agent("FNODE")
+        sum_bx_pos = -agent.sumFloat("f_bx_pos")
+        sum_bx_neg = -agent.sumFloat("f_bx_neg")
+        sum_by_pos = -agent.sumFloat("f_by_pos")
+        sum_by_neg = -agent.sumFloat("f_by_neg")
+        sum_bz_pos = -agent.sumFloat("f_bz_pos")
+        sum_bz_neg = -agent.sumFloat("f_bz_neg")
+        sum_bx_pos_y = -agent.sumFloat("f_bx_pos_y")
+        sum_bx_pos_z = -agent.sumFloat("f_bx_pos_z")
+        sum_bx_neg_y = -agent.sumFloat("f_bx_neg_y")
+        sum_bx_neg_z = -agent.sumFloat("f_bx_neg_z")
+        sum_by_pos_x = -agent.sumFloat("f_by_pos_x")
+        sum_by_pos_z = -agent.sumFloat("f_by_pos_z")
+        sum_by_neg_x = -agent.sumFloat("f_by_neg_x")
+        sum_by_neg_z = -agent.sumFloat("f_by_neg_z")
+        sum_bz_pos_x = -agent.sumFloat("f_bz_pos_x")
+        sum_bz_pos_y = -agent.sumFloat("f_bz_pos_y")
+        sum_bz_neg_x = -agent.sumFloat("f_bz_neg_x")
+        sum_bz_neg_y = -agent.sumFloat("f_bz_neg_y")
+
+        ids = list()
+        coords = list()
+        velocity = list()
+        force = list()
+        elastic_energy = list()
+
+        av = agent.getPopulationData()
+        for ai in av:
+            id_ai = ai.getVariableInt("id") - 9
+            coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
+            velocity_ai = (ai.getVariableFloat("vx"), ai.getVariableFloat("vy"), ai.getVariableFloat("vz"))
+            force_ai = (ai.getVariableFloat("fx"), ai.getVariableFloat("fy"), ai.getVariableFloat("fz"))
+            ids.append(id_ai)
+            coords.append(coords_ai)
+            velocity.append(velocity_ai)
+            force.append(force_ai)
+            elastic_energy.append(ai.getVariableFloat("elastic_energy"))
+
+        sorted_indices = np.argsort(ids)
+        ids = [ids[i] for i in sorted_indices]
+        coords = [coords[i] for i in sorted_indices]
+        velocity = [velocity[i] for i in sorted_indices]
+        force = [force[i] for i in sorted_indices]
+        elastic_energy = [elastic_energy[i] for i in sorted_indices]
+
+        added_lines = set()
+        cell_connectivity = []
+        for node_index, connections in initial_network_connectivity.items():
+            for connected_node_index in connections:
+                if connected_node_index != -1:
+                    line = tuple(sorted((node_index, connected_node_index)))
+                    if line not in added_lines:
+                        added_lines.add(line)
+                        cell_connectivity.append(line)
+
+        num_cells = len(cell_connectivity)
+
+        with open(str(file_path), 'w') as file:
+            for line in save_context["fibrenodedata"]:
+                file.write(line + '\n')
+
+            file.write("POINTS {} float \n".format(8 + n_nodes))
+            for coords_ai in coords:
+                file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
+
+            file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[2], coord_boundary[4]))
+            file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[2], coord_boundary[4]))
+            file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[3], coord_boundary[4]))
+            file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[3], coord_boundary[4]))
+            file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[2], coord_boundary[5]))
+            file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[2], coord_boundary[5]))
+            file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[3], coord_boundary[5]))
+            file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[3], coord_boundary[5]))
+
+            file.write(f"CELLS {num_cells + 6} {num_cells * 3 + 6 * 5}\n")
+            for conn in cell_connectivity:
+                file.write(f"2 {conn[0]} {conn[1]}\n")
+            for line in save_context["domaindata_network"]:
+                file.write(line + '\n')
+
+            file.write(f"CELL_TYPES {num_cells + 6}\n")
+            for _ in range(num_cells):
+                file.write("3\n")
+            for _ in range(6):
+                file.write("7\n")
+
+            file.write(f"CELL_DATA {num_cells + 6}\n")
+            file.write("SCALARS boundary_idx int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for _ in range(num_cells):
+                file.write("0\n")
+            for bidx in range(6):
+                file.write(f"{bidx + 1}\n")
+
+            file.write("SCALARS boundary_normal_forces float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for _ in range(num_cells):
+                file.write("0.0\n")
+            file.write(str(sum_bx_pos) + '\n')
+            file.write(str(sum_bx_neg) + '\n')
+            file.write(str(sum_by_pos) + '\n')
+            file.write(str(sum_by_neg) + '\n')
+            file.write(str(sum_bz_pos) + '\n')
+            file.write(str(sum_bz_neg) + '\n')
+
+            file.write("SCALARS boundary_normal_force_scaling float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for _ in range(num_cells):
+                file.write("0.0\n")
+            file.write(str(abs(sum_bx_pos)) + '\n')
+            file.write(str(abs(sum_bx_neg)) + '\n')
+            file.write(str(abs(sum_by_pos)) + '\n')
+            file.write(str(abs(sum_by_neg)) + '\n')
+            file.write(str(abs(sum_bz_pos)) + '\n')
+            file.write(str(abs(sum_bz_neg)) + '\n')
+
+            file.write("SCALARS boundary_shear_forces_pos float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for _ in range(num_cells):
+                file.write("0.0\n")
+            file.write(str(sum_bx_pos_y) + '\n')
+            file.write(str(sum_bx_pos_z) + '\n')
+            file.write(str(sum_by_pos_x) + '\n')
+            file.write(str(sum_by_pos_z) + '\n')
+            file.write(str(sum_bz_pos_x) + '\n')
+            file.write(str(sum_bz_pos_y) + '\n')
+
+            file.write("SCALARS boundary_shear_forces_neg float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for _ in range(num_cells):
+                file.write("0.0\n")
+            file.write(str(sum_bx_neg_y) + '\n')
+            file.write(str(sum_bx_neg_z) + '\n')
+            file.write(str(sum_by_neg_x) + '\n')
+            file.write(str(sum_by_neg_z) + '\n')
+            file.write(str(sum_bz_neg_x) + '\n')
+            file.write(str(sum_bz_neg_y) + '\n')
+
+            file.write("POINT_DATA {} \n".format(8 + n_nodes))
+            file.write("SCALARS is_corner int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for _ in elastic_energy:
+                file.write("0 \n")
+            for _ in range(8):
+                file.write("1 \n")
+
+            file.write("SCALARS elastic_energy float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for ee_ai in elastic_energy:
+                file.write("{:.4f} \n".format(ee_ai))
+            for _ in range(8):
+                file.write("0.0 \n")
+
+            file.write("VECTORS velocity float\n")
+            for v_ai in velocity:
+                file.write("{:.4f} {:.4f} {:.4f} \n".format(v_ai[0], v_ai[1], v_ai[2]))
+            for _ in range(8):
+                file.write("0.0 0.0 0.0 \n")
+
+            file.write("VECTORS force float\n")
+            for f_ai in force:
+                file.write("{:.4f} {:.4f} {:.4f} \n".format(f_ai[0], f_ai[1], f_ai[2]))
+            for _ in range(8):
+                file.write("0.0 0.0 0.0 \n")
+
+    if include_cells:
+        cell_coords = list()
+        cell_velocity = list()
+        cell_orientation = list()
+        cell_alignment = list()
+        cell_radius = list()
+        cell_clock = list()
+        cell_cycle_phase = list()
+        cell_anchor_points_x = list()
+        cell_anchor_points_y = list()
+        cell_anchor_points_z = list()
+        c_sp_multi = list()
+        file_name = 'cells_t{:04d}.vtk'.format(stepCounter)
+        file_path = res_path / file_name
+        cell_agent = FLAMEGPU.agent("CELL")
+        cell_agent.sortInt("id", pyflamegpu.HostAgentAPI.Asc)
+        av = cell_agent.getPopulationData()
+        for ai in av:
+            coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
+            velocity_ai = (ai.getVariableFloat("vx"), ai.getVariableFloat("vy"), ai.getVariableFloat("vz"))
+            orientation_ai = (ai.getVariableFloat("orx"), ai.getVariableFloat("ory"), ai.getVariableFloat("orz"))
+            alignment_ai = ai.getVariableFloat("alignment")
+            radius_ai = ai.getVariableFloat("radius")
+            clock_ai = ai.getVariableFloat("clock")
+            cycle_phase_ai = ai.getVariableInt("cycle_phase")
+            cell_anchor_points_x.append(ai.getVariableArrayFloat("x_i"))
+            cell_anchor_points_y.append(ai.getVariableArrayFloat("y_i"))
+            cell_anchor_points_z.append(ai.getVariableArrayFloat("z_i"))
+            c_sp_multi.append(ai.getVariableArrayFloat("C_sp"))
+            cell_coords.append(coords_ai)
+            cell_velocity.append(velocity_ai)
+            cell_orientation.append(orientation_ai)
+            cell_alignment.append(alignment_ai)
+            cell_radius.append(radius_ai)
+            cell_clock.append(clock_ai)
+            cell_cycle_phase.append(cycle_phase_ai)
+
+        with open(str(file_path), 'w') as file:
+            for line in save_context["celldata"]:
+                file.write(line + '\n')
+            num_cells = FLAMEGPU.environment.getPropertyUInt("N_CELLS")
+            num_anchor_points = FLAMEGPU.environment.getPropertyUInt("N_ANCHOR_POINTS")
+            num_total_anchor_points = num_cells * num_anchor_points
+            file.write("POINTS {} float \n".format(num_cells + num_total_anchor_points))
+            for coords_ai in cell_coords:
+                file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
+            for i in range(num_cells):
+                for j in range(num_anchor_points):
+                    file.write("{} {} {} \n".format(cell_anchor_points_x[i][j], cell_anchor_points_y[i][j], cell_anchor_points_z[i][j]))
+            file.write("POINT_DATA {} \n".format(num_cells + num_total_anchor_points))
+
+            file.write("SCALARS alignment float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for a_ai in cell_alignment:
+                file.write("{:.4f} \n".format(a_ai))
+            for i in range(num_cells):
+                for _ in range(num_anchor_points):
+                    file.write("{:.4f} \n".format(cell_alignment[i]))
+
+            file.write("SCALARS radius float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for r_ai in cell_radius:
+                file.write("{:.4f} \n".format(r_ai))
+            for i in range(num_cells):
+                for _ in range(num_anchor_points):
+                    file.write("{:.4f} \n".format(cell_radius[i] / 10.0))
+
+            file.write("SCALARS clock float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for c_ai in cell_clock:
+                file.write("{:.4f} \n".format(c_ai))
+            for i in range(num_cells):
+                for _ in range(num_anchor_points):
+                    file.write("{:.4f} \n".format(cell_clock[i]))
+
+            file.write("SCALARS cycle_phase int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for ccp_ai in cell_cycle_phase:
+                file.write("{} \n".format(ccp_ai))
+            for i in range(num_cells):
+                for _ in range(num_anchor_points):
+                    file.write("{} \n".format(cell_cycle_phase[i]))
+
+            for s in range(n_species):
+                file.write("SCALARS concentration_species_{0} float 1 \n".format(s))
+                file.write("LOOKUP_TABLE default\n")
+                for c_ai in c_sp_multi:
+                    file.write("{:.4f} \n".format(c_ai[s]))
+                for i in range(num_cells):
+                    for _ in range(num_anchor_points):
+                        file.write("{:.4f} \n".format(c_sp_multi[i][s]))
+
+            file.write("VECTORS velocity float\n")
+            for v_ai in cell_velocity:
+                file.write("{:.4f} {:.4f} {:.4f} \n".format(v_ai[0], v_ai[1], v_ai[2]))
+            for _ in range(num_total_anchor_points):
+                file.write("0.0 0.0 0.0 \n")
+
+            file.write("VECTORS orientation float\n")
+            for o_ai in cell_orientation:
+                file.write("{:.4f} {:.4f} {:.4f} \n".format(o_ai[0], o_ai[1], o_ai[2]))
+            for _ in range(num_total_anchor_points):
+                file.write("0.0 0.0 0.0 \n")
+
+    if include_focal_adhesions:
+        focad_coords = list()
+        focad_velocity = list()
+        focad_force = list()
+        focad_ori = list()
+        focad_cell_id = list()
+        focad_rest_length = list()
+        focad_k_fa = list()
+        focad_f_max = list()
+        focad_attached = list()
+        focad_active = list()
+        focad_v_c = list()
+        focad_fa_state = list()
+        focad_age = list()
+        focad_k_on = list()
+        focad_k_off_0 = list()
+        focad_f_c = list()
+        focad_k_reinf = list()
+        focad_x_i = list()
+        focad_y_i = list()
+        focad_z_i = list()
+
+        file_name = 'focad_t{:04d}.vtk'.format(stepCounter)
+        file_path = res_path / file_name
+
+        focad_agent = FLAMEGPU.agent("FOCAD")
+        focad_agent.sortInt("id", pyflamegpu.HostAgentAPI.Asc)
+        av = focad_agent.getPopulationData()
+        num_focad = len(av)
+
+        for ai in av:
+            x = ai.getVariableFloat("x")
+            y = ai.getVariableFloat("y")
+            z = ai.getVariableFloat("z")
+            vx = ai.getVariableFloat("vx")
+            vy = ai.getVariableFloat("vy")
+            vz = ai.getVariableFloat("vz")
+            fx = ai.getVariableFloat("fx")
+            fy = ai.getVariableFloat("fy")
+            fz = ai.getVariableFloat("fz")
+            x_i = ai.getVariableFloat("x_i")
+            y_i = ai.getVariableFloat("y_i")
+            z_i = ai.getVariableFloat("z_i")
+            ox = x_i - x
+            oy = y_i - y
+            oz = z_i - z
+
+            focad_coords.append((x, y, z))
+            focad_velocity.append((vx, vy, vz))
+            focad_force.append((fx, fy, fz))
+            focad_ori.append((ox, oy, oz))
+            focad_x_i.append(x_i)
+            focad_y_i.append(y_i)
+            focad_z_i.append(z_i)
+            focad_cell_id.append(ai.getVariableInt("cell_id"))
+            focad_rest_length.append(ai.getVariableFloat("rest_length"))
+            focad_k_fa.append(ai.getVariableFloat("k_fa"))
+            focad_f_max.append(ai.getVariableFloat("f_max"))
+            focad_attached.append(ai.getVariableUInt8("attached"))
+            focad_active.append(ai.getVariableUInt8("active"))
+            focad_v_c.append(ai.getVariableFloat("v_c"))
+            focad_fa_state.append(ai.getVariableUInt8("fa_state"))
+            focad_age.append(ai.getVariableFloat("age"))
+            focad_k_on.append(ai.getVariableFloat("k_on"))
+            focad_k_off_0.append(ai.getVariableFloat("k_off_0"))
+            focad_f_c.append(ai.getVariableFloat("f_c"))
+            focad_k_reinf.append(ai.getVariableFloat("k_reinf"))
+
+        with open(str(file_path), 'w') as file:
+            for line in save_context["focaladhesionsdata"]:
+                file.write(line + '\n')
+
+            file.write("POINTS {} float \n".format(num_focad))
+            for coords_ai in focad_coords:
+                file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
+
+            file.write("POINT_DATA {} \n".format(num_focad))
+
+            file.write("SCALARS cell_id int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_cell_id:
+                file.write("{} \n".format(v))
+
+            file.write("SCALARS attached int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_attached:
+                file.write("{} \n".format(int(v)))
+
+            file.write("SCALARS active int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_active:
+                file.write("{} \n".format(int(v)))
+
+            file.write("SCALARS fa_state int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_fa_state:
+                file.write("{} \n".format(int(v)))
+
+            file.write("SCALARS rest_length float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_rest_length:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS k_fa float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_k_fa:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS f_max float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_f_max:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS v_c float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_v_c:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS age float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_age:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS k_on float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_k_on:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS k_off_0 float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_k_off_0:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS f_c float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_f_c:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS k_reinf float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_k_reinf:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS x_i float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_x_i:
+                file.write("{:.6f} \n".format(v))
+
+            file.write("SCALARS y_i float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_y_i:
+                file.write("{:.6f} \n".format(v))
+
+            file.write("SCALARS z_i float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_z_i:
+                file.write("{:.6f} \n".format(v))
+
+            file.write("VECTORS velocity float\n")
+            for v_ai in focad_velocity:
+                file.write("{:.6f} {:.6f} {:.6f} \n".format(v_ai[0], v_ai[1], v_ai[2]))
+
+            file.write("VECTORS force float\n")
+            for f_ai in focad_force:
+                file.write("{:.6f} {:.6f} {:.6f} \n".format(f_ai[0], f_ai[1], f_ai[2]))
+
+            file.write("VECTORS ori float\n")
+            for o_ai in focad_ori:
+                file.write("{:.6f} {:.6f} {:.6f} \n".format(o_ai[0], o_ai[1], o_ai[2]))
+
+    file_name = 'ecm_data_t{:04d}.vtk'.format(stepCounter)
+    file_path = res_path / file_name
+    agent = FLAMEGPU.agent("ECM")
+
+    sum_bx_pos = 0.0
+    sum_bx_neg = 0.0
+    sum_by_pos = 0.0
+    sum_by_neg = 0.0
+    sum_bz_pos = 0.0
+    sum_bz_neg = 0.0
+    sum_bx_pos_y = 0.0
+    sum_bx_pos_z = 0.0
+    sum_bx_neg_y = 0.0
+    sum_bx_neg_z = 0.0
+    sum_by_pos_x = 0.0
+    sum_by_pos_z = 0.0
+    sum_by_neg_x = 0.0
+    sum_by_neg_z = 0.0
+    sum_bz_pos_x = 0.0
+    sum_bz_pos_y = 0.0
+    sum_bz_neg_x = 0.0
+    sum_bz_neg_y = 0.0
+
+    coords = list()
+    velocity = list()
+    force = list()
+    c_sp_multi = list()
+    if heterogeneous_diffusion:
+        d_sp_multi = list()
+    av = agent.getPopulationData()
+    for ai in av:
+        coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
+        velocity_ai = (ai.getVariableFloat("vx"), ai.getVariableFloat("vy"), ai.getVariableFloat("vz"))
+        force_ai = (ai.getVariableFloat("fx"), ai.getVariableFloat("fy"), ai.getVariableFloat("fz"))
+        coords.append(coords_ai)
+        velocity.append(velocity_ai)
+        force.append(force_ai)
+        c_sp_multi.append(ai.getVariableArrayFloat("C_sp"))
+        if heterogeneous_diffusion:
+            d_sp_multi.append(ai.getVariableArrayFloat("D_sp"))
+
+    print("====== SAVING DATA FROM Step {:03d} TO FILE ======".format(stepCounter))
+    with open(str(file_path), 'w') as file:
+        for line in save_context["header"]:
+            file.write(line + '\n')
+        for coords_ai in coords:
+            file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
+
+        file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[2], coord_boundary[4]))
+        file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[2], coord_boundary[4]))
+        file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[3], coord_boundary[4]))
+        file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[3], coord_boundary[4]))
+        file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[2], coord_boundary[5]))
+        file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[2], coord_boundary[5]))
+        file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[3], coord_boundary[5]))
+        file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[3], coord_boundary[5]))
+        for line in save_context["domaindata"]:
+            file.write(line + '\n')
+
+        file.write("SCALARS boundary_normal_forces float 1\n")
+        file.write("LOOKUP_TABLE default\n")
+        file.write(str(sum_bx_pos) + '\n')
+        file.write(str(sum_bx_neg) + '\n')
+        file.write(str(sum_by_pos) + '\n')
+        file.write(str(sum_by_neg) + '\n')
+        file.write(str(sum_bz_pos) + '\n')
+        file.write(str(sum_bz_neg) + '\n')
+
+        file.write("SCALARS boundary_normal_force_scaling float 1\n")
+        file.write("LOOKUP_TABLE default\n")
+        file.write(str(abs(sum_bx_pos)) + '\n')
+        file.write(str(abs(sum_bx_neg)) + '\n')
+        file.write(str(abs(sum_by_pos)) + '\n')
+        file.write(str(abs(sum_by_neg)) + '\n')
+        file.write(str(abs(sum_bz_pos)) + '\n')
+        file.write(str(abs(sum_bz_neg)) + '\n')
+
+        file.write("VECTORS boundary_normal_force_dir float\n")
+        file.write("1 0 0 \n" if sum_bx_pos > 0 else "-1 0 0 \n")
+        file.write("1 0 0 \n" if sum_bx_neg > 0 else "-1 0 0 \n")
+        file.write("0 1 0 \n" if sum_by_pos > 0 else "0 -1 0 \n")
+        file.write("0 1 0 \n" if sum_by_neg > 0 else "0 -1 0 \n")
+        file.write("0 0 1 \n" if sum_bz_pos > 0 else "0 0 -1 \n")
+        file.write("0 0 1 \n" if sum_bz_neg > 0 else "0 0 -1 \n")
+
+        file.write("SCALARS boundary_shear_forces_pos float 1\n")
+        file.write("LOOKUP_TABLE default\n")
+        file.write(str(sum_bx_pos_y) + '\n')
+        file.write(str(sum_bx_pos_z) + '\n')
+        file.write(str(sum_by_pos_x) + '\n')
+        file.write(str(sum_by_pos_z) + '\n')
+        file.write(str(sum_bz_pos_x) + '\n')
+        file.write(str(sum_bz_pos_y) + '\n')
+
+        file.write("SCALARS boundary_shear_forces_neg float 1\n")
+        file.write("LOOKUP_TABLE default\n")
+        file.write(str(sum_bx_neg_y) + '\n')
+        file.write(str(sum_bx_neg_z) + '\n')
+        file.write(str(sum_by_neg_x) + '\n')
+        file.write(str(sum_by_neg_z) + '\n')
+        file.write(str(sum_bz_neg_x) + '\n')
+        file.write(str(sum_bz_neg_y) + '\n')
+
+        file.write("SCALARS boundary_shear_force_scaling_pos float 1\n")
+        file.write("LOOKUP_TABLE default\n")
+        file.write(str(abs(sum_bx_pos_y)) + '\n')
+        file.write(str(abs(sum_bx_pos_z)) + '\n')
+        file.write(str(abs(sum_by_pos_x)) + '\n')
+        file.write(str(abs(sum_by_pos_z)) + '\n')
+        file.write(str(abs(sum_bz_pos_x)) + '\n')
+        file.write(str(abs(sum_bz_pos_y)) + '\n')
+
+        file.write("SCALARS boundary_shear_force_scaling_neg float 1\n")
+        file.write("LOOKUP_TABLE default\n")
+        file.write(str(abs(sum_bx_neg_y)) + '\n')
+        file.write(str(abs(sum_bx_neg_z)) + '\n')
+        file.write(str(abs(sum_by_neg_x)) + '\n')
+        file.write(str(abs(sum_by_neg_z)) + '\n')
+        file.write(str(abs(sum_bz_neg_x)) + '\n')
+        file.write(str(abs(sum_bz_neg_y)) + '\n')
+
+        file.write("VECTORS boundary_shear_force_dir_pos float\n")
+        file.write("0 1 0 \n" if sum_bx_pos_y > 0 else "0 -1 0 \n")
+        file.write("0 0 1 \n" if sum_bx_pos_z > 0 else "0 0 -1 \n")
+        file.write("1 0 0 \n" if sum_by_pos_x > 0 else "-1 0 0 \n")
+        file.write("0 0 1 \n" if sum_by_pos_z > 0 else "0 0 -1 \n")
+        file.write("1 0 0 \n" if sum_bz_pos_x > 0 else "-1 0 0 \n")
+        file.write("0 1 0 \n" if sum_bz_pos_y > 0 else "0 -1 0 \n")
+
+        file.write("VECTORS boundary_shear_force_dir_neg float\n")
+        file.write("0 1 0 \n" if sum_bx_neg_y > 0 else "0 -1 0 \n")
+        file.write("0 0 1 \n" if sum_bx_neg_z > 0 else "0 0 -1 \n")
+        file.write("1 0 0 \n" if sum_by_neg_x > 0 else "-1 0 0 \n")
+        file.write("0 0 1 \n" if sum_by_neg_z > 0 else "0 0 -1 \n")
+        file.write("1 0 0 \n" if sum_bz_neg_x > 0 else "-1 0 0 \n")
+        file.write("0 1 0 \n" if sum_bz_neg_y > 0 else "0 -1 0 \n")
+
+        file.write("POINT_DATA {} \n".format(8 + ecm_population_size))
+        file.write("SCALARS is_corner int 1\n")
+        file.write("LOOKUP_TABLE default\n")
+        for _ in range(ecm_population_size):
+            file.write("0 \n")
+        for _ in range(8):
+            file.write("1 \n")
+
+        for s in range(n_species):
+            file.write("SCALARS concentration_species_{0} float 1 \n".format(s))
+            file.write("LOOKUP_TABLE default\n")
+            for c_ai in c_sp_multi:
+                file.write("{:.4f} \n".format(c_ai[s]))
+            for _ in range(8):
+                file.write("0.0 \n")
+
+        if heterogeneous_diffusion:
+            for s in range(n_species):
+                file.write("SCALARS diffusion_coeff_{0} float 1 \n".format(s))
+                file.write("LOOKUP_TABLE default\n")
+                for d_ai in d_sp_multi:
+                    file.write("{:.4f} \n".format(d_ai[s]))
+                for _ in range(8):
+                    file.write("0.0 \n")
+
+        file.write("VECTORS velocity float\n")
+        for v_ai in velocity:
+            file.write("{:.4f} {:.4f} {:.4f} \n".format(v_ai[0], v_ai[1], v_ai[2]))
+        for _ in range(8):
+            file.write("0.0 0.0 0.0 \n")
+
+        file.write("VECTORS force float\n")
+        for f_ai in force:
+            file.write("{:.4f} {:.4f} {:.4f} \n".format(f_ai[0], f_ai[1], f_ai[2]))
+        for _ in range(8):
+            file.write("0.0 0.0 0.0 \n")
+
+    print("... succesful save ")
+    print("=================================")
+
+
 class ModelParameterConfig:
     def __init__(
         self,

@@ -116,6 +116,40 @@ FLAMEGPU_AGENT_FUNCTION(focad_move, flamegpu::MessageBucket, flamegpu::MessageNo
   agent_y += agent_vy * TIME_STEP;
   agent_z += agent_vz * TIME_STEP;
 
+  // Make sure the agent does not move outside the environment boundaries. If it does, set its position to the boundary 
+  const float COORD_BOUNDARY_X_POS = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES",0);
+  const float COORD_BOUNDARY_X_NEG = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES",1);
+  const float COORD_BOUNDARY_Y_POS = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES",2);
+  const float COORD_BOUNDARY_Y_NEG = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES",3);
+  const float COORD_BOUNDARY_Z_POS = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES",4);
+  const float COORD_BOUNDARY_Z_NEG = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES",5);
+  if (agent_x > COORD_BOUNDARY_X_POS) {
+    agent_x = COORD_BOUNDARY_X_POS;
+    agent_vx = 0.0;
+  }
+  else if (agent_x < COORD_BOUNDARY_X_NEG) {
+    agent_x = COORD_BOUNDARY_X_NEG;
+    agent_vx = 0.0;
+  }
+
+  if (agent_y > COORD_BOUNDARY_Y_POS) {
+    agent_y = COORD_BOUNDARY_Y_POS;
+    agent_vy = 0.0;
+  }
+  else if (agent_y < COORD_BOUNDARY_Y_NEG) {
+    agent_y = COORD_BOUNDARY_Y_NEG;
+    agent_vy = 0.0;
+  }
+
+  if (agent_z > COORD_BOUNDARY_Z_POS) {
+    agent_z = COORD_BOUNDARY_Z_POS;
+    agent_vz = 0.0;
+  }
+  else if (agent_z < COORD_BOUNDARY_Z_NEG) {
+    agent_z = COORD_BOUNDARY_Z_NEG;
+    agent_vz = 0.0;
+  }
+
   //Set agent variables
   FLAMEGPU->setVariable<float>("x", agent_x);
   FLAMEGPU->setVariable<float>("y", agent_y);
