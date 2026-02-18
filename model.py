@@ -19,7 +19,6 @@ import matplotlib.pyplot as plt
 from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step
 
 # TODO LIST:
-# Add Cell mechanical variables visualization.
 # Add cell-fnode repulsion
 # Add FOCAD interaction with other FOCADs from other cells?
 # Include new FOCAD agent generation? (e.g. when a cell starts migrating, it generates new FOCAD agents at its leading edge, which then try to find fibres to attach to. When a FOCAD agent detaches, it can be removed from the simulation or moved back to the cell center to be reused later)
@@ -168,17 +167,17 @@ MAX_SEARCH_RADIUS_FNODES = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / 10.0 # must me s
 # +====================================================================+
 # | DIFFUSION PARAMETERS                                               |
 # +====================================================================+
-INCLUDE_DIFFUSION = False
+INCLUDE_DIFFUSION = True
 N_SPECIES = 2  # number of diffusing species.WARNING: make sure that the value coincides with the one declared in TODO
 DIFFUSION_COEFF_MULTI = [300.0, 300.0]  # diffusion coefficient in [um^2/s] per specie
-BOUNDARY_CONC_INIT_MULTI = [[50.0,50.0, 50.0, 50.0, 50.0, 50.0],
+BOUNDARY_CONC_INIT_MULTI = [[50.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                             # initial concentration at each surface (+X,-X,+Y,-Y,+Z,-Z) [um^2/s]. -1.0 means no condition assigned. All agents are assigned 0 by default.
                             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
 
-BOUNDARY_CONC_FIXED_MULTI = [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+BOUNDARY_CONC_FIXED_MULTI = [[50.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                              # concentration boundary conditions at each surface. WARNING: -1.0 means initial condition prevails. Don't use 0.0 as initial condition if that value is not fixed. Use -1.0 instead
                              [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
-HETEROGENEOUS_DIFFUSION = True  # if True, diffusion coefficient is multiplied by (1 - local ECM density) to simulate hindered diffusion through the ECM. WARNING: this is a very simple approximation of the phenomenon and highly depends on grid density (N). 
+HETEROGENEOUS_DIFFUSION = False  # if True, diffusion coefficient is multiplied by (1 - local ECM density) to simulate hindered diffusion through the ECM. WARNING: this is a very simple approximation of the phenomenon and highly depends on grid density (N). 
 # +====================================================================+
 # | CELL PARAMETERS                                                    |
 # +====================================================================+
@@ -194,6 +193,9 @@ CELL_D_DUMPING = 0.4  # [nN·s/um]
 CELL_RADIUS = 8.412 #ECM_ECM_EQUILIBRIUM_DISTANCE / 2 # [um]
 CELL_NUCLEUS_RADIUS = CELL_RADIUS / 2 # [um]
 CELL_SPEED_REF = ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / 10.0 # [um/s]
+BROWNIAN_MOTION_STRENGTH = CELL_SPEED_REF / 50.0 # [um/s] Strength of random movement added to cell velocity to represent Brownian motion and other non-directed motility.
+print(f'Initial cell speed reference: {CELL_SPEED_REF} um/s')   
+print(f'Initial Brownian motion strength: {BROWNIAN_MOTION_STRENGTH} um/s')
 CYCLE_PHASE_G1_DURATION = 10.0 #[h]
 CYCLE_PHASE_S_DURATION = 8.0
 CYCLE_PHASE_G2_DURATION = 4.0
@@ -203,7 +205,7 @@ CYCLE_PHASE_S_START = CYCLE_PHASE_G1_DURATION
 CYCLE_PHASE_G2_START = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION
 CYCLE_PHASE_M_START = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION + CYCLE_PHASE_G2_DURATION
 CELL_CYCLE_DURATION = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION + CYCLE_PHASE_G2_DURATION + CYCLE_PHASE_M_DURATION # typically 24h [h]
-INIT_ECM_CONCENTRATION_VALS = [50.0, 0.0]  # initial concentration of each species on the ECM agents
+INIT_ECM_CONCENTRATION_VALS = [0.0, 0.0]  # initial concentration of each species on the ECM agents
 INIT_CELL_CONCENTRATION_VALS = [15.0, 0.0]  # initial concentration of each species on the CELL agents
 INIT_CELL_CONC_MASS_VALS = [x * (4/3 * 3.1415926 * CELL_RADIUS**3) for x in INIT_CELL_CONCENTRATION_VALS]  # initial mass of each species on the CELL agents
 INIT_ECM_SAT_CONCENTRATION_VALS = [0.0, 10.0]  # initial saturation concentration of each species on the ECM agents
@@ -238,8 +240,13 @@ NUCLEUS_NU = 0.48             # [-] Poisson ratio. Nearly incompressible nucleus
 # Viscoelastic relaxation
 NUCLEUS_TAU = 0.2            # [s] Relaxation time controlling how fast strain follows the instantaneous elastic strain. Typical: 10–100 s.
 NUCLEUS_EPS_CLAMP = 0.30      # [-] Clamp for each strain component to preserve small-strain assumptions and avoid numerical blow-up. Typical: 0.1–0.3.
-
-
+# +====================================================================+
+# | CHEMOTAXIS                                                         |
+# +====================================================================+
+INCLUDE_CHEMOTAXIS = True
+CHEMOTAXIS_SENSITIVITY = [1.0, 0.0] # [-1.0 to +1.0] Chemotactic sensitivity for each species. Positive: attraction, Negative: repulsion towards higher concentrations.
+CHEMOTAXIS_ONLY_DIR = True # if True, chemotaxis only affects cell orientation, not speed. If False, chemotaxis affects both orientation and speed (e.g. by making cells move faster when they are oriented towards higher concentration gradient)
+CHEMOTAXIS_CHI = 10.0 # [um^2/s] Chemotactic coefficient (χ) used to compute chemotactic velocity as v_chem = χ * ∇C. Typical range: 0.1–10 µm²/s depending on cell type and chemoattractant. Only used if CHEMOTAXIS_ONLY_DIR is False.
 
 # +====================================================================+
 # | OTHER DERIVED PARAMETERS AND MODEL CHECKS                          |
@@ -488,7 +495,7 @@ env.newPropertyFloat("MAX_SEARCH_RADIUS_FNODES",MAX_SEARCH_RADIUS_FNODES)
 env.newPropertyFloat("FIBRE_SEGMENT_K_ELAST",FIBRE_SEGMENT_K_ELAST)
 env.newPropertyFloat("FIBRE_SEGMENT_D_DUMPING",FIBRE_SEGMENT_D_DUMPING)
 
-# Cell properties
+# Cell properties TODO: MOVE SOME OF THESE PROPERTIES TO THE CELL AGENT 
 env.newPropertyUInt("INCLUDE_CELL_ORIENTATION", INCLUDE_CELL_ORIENTATION)
 env.newPropertyUInt("INCLUDE_CELL_CELL_INTERACTION", INCLUDE_CELL_CELL_INTERACTION)
 env.newPropertyUInt("PERIODIC_BOUNDARIES_FOR_CELLS", PERIODIC_BOUNDARIES_FOR_CELLS)
@@ -498,6 +505,7 @@ env.newPropertyFloat("CELL_D_DUMPING", CELL_D_DUMPING)
 env.newPropertyFloat("CELL_RADIUS", CELL_RADIUS)
 env.newPropertyFloat("CELL_NUCLEUS_RADIUS", CELL_NUCLEUS_RADIUS)
 env.newPropertyFloat("CELL_SPEED_REF", CELL_SPEED_REF)
+env.newPropertyFloat("BROWNIAN_MOTION_STRENGTH", BROWNIAN_MOTION_STRENGTH)
 env.newPropertyFloat("CELL_ORIENTATION_RATE", CELL_ORIENTATION_RATE)
 env.newPropertyFloat("MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION", MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION)
 env.newPropertyFloat("MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION", MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION)
@@ -532,6 +540,12 @@ env.newPropertyFloat("NUCLEUS_E", NUCLEUS_E)
 env.newPropertyFloat("NUCLEUS_NU", NUCLEUS_NU)
 env.newPropertyFloat("NUCLEUS_TAU", NUCLEUS_TAU)
 env.newPropertyFloat("NUCLEUS_EPS_CLAMP", NUCLEUS_EPS_CLAMP)
+
+# Chemotaxis properties
+env.newPropertyUInt("INCLUDE_CHEMOTAXIS", INCLUDE_CHEMOTAXIS)
+env.newPropertyFloat("CHEMOTAXIS_CHI", CHEMOTAXIS_CHI)
+env.newPropertyUInt("CHEMOTAXIS_ONLY_DIR", CHEMOTAXIS_ONLY_DIR)
+
 
 # ECM BEHAVIOUR 
 # ------------------------------------------------------
@@ -857,7 +871,8 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableArrayFloat("k_production", N_SPECIES) 
     CELL_agent.newVariableArrayFloat("k_reaction", N_SPECIES) 
     CELL_agent.newVariableArrayFloat("C_sp", N_SPECIES) 
-    CELL_agent.newVariableArrayFloat("M_sp", N_SPECIES)    
+    CELL_agent.newVariableArrayFloat("M_sp", N_SPECIES) 
+    CELL_agent.newVariableFloat("speed_ref", CELL_SPEED_REF)   
     CELL_agent.newVariableFloat("radius", CELL_RADIUS)
     CELL_agent.newVariableFloat("nucleus_radius", CELL_NUCLEUS_RADIUS)
     CELL_agent.newVariableInt("cycle_phase", 1) # [1:G1] [2:S] [3:G2] [4:M]
@@ -884,6 +899,7 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableFloat("sig_xy", 0.0)
     CELL_agent.newVariableFloat("sig_xz", 0.0)
     CELL_agent.newVariableFloat("sig_yz", 0.0)
+    CELL_agent.newVariableArrayFloat("chemotaxis_sensitivity", N_SPECIES)
     if INCLUDE_FOCAL_ADHESIONS:  
         CELL_agent.newRTCFunctionFile("cell_bucket_location_data", cell_bucket_location_data_file).setMessageOutput("cell_bucket_location_message")
         CELL_agent.newRTCFunctionFile("cell_update_stress", cell_update_stress_file).setMessageInput("focad_bucket_location_message")
@@ -1124,6 +1140,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableArrayFloat("k_reaction", INIT_CELL_REACTION_RATES)
                 instance.setVariableFloat("radius", CELL_RADIUS)
                 instance.setVariableFloat("nucleus_radius", CELL_NUCLEUS_RADIUS)
+                instance.setVariableFloat("speed_ref", CELL_SPEED_REF)
                 cycle_phase = random.randint(1, 4) # [1:G1] [2:S] [3:G2] [4:M]
                 instance.setVariableInt("cycle_phase", cycle_phase)
                 cycle_clock = 0.0
@@ -1162,6 +1179,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableArrayFloat("u_ref_x_i", u_ref[:, 0].tolist())
                 instance.setVariableArrayFloat("u_ref_y_i", u_ref[:, 1].tolist())
                 instance.setVariableArrayFloat("u_ref_z_i", u_ref[:, 2].tolist())
+                instance.setVariableArrayFloat("chemotaxis_sensitivity", CHEMOTAXIS_SENSITIVITY) 
 
 
             FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
@@ -1531,8 +1549,8 @@ if INCLUDE_DIFFUSION:
     model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_grid_location_data")
 if INCLUDE_CELLS:
     model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_spatial_location_data")
-    model.newLayer("L1_CELL_Locations_2").addAgentFunction("CELL", "cell_bucket_location_data")  # these functions share data of the same agent, so must be in separate layers
     if INCLUDE_FOCAL_ADHESIONS:
+        model.newLayer("L1_CELL_Locations_2").addAgentFunction("CELL", "cell_bucket_location_data")  # these functions share data of the same agent, so must be in separate layers
         model.newLayer("L1_FOCAD_Update_Anchors").addAgentFunction("FOCAD", "focad_anchor_update")
         model.newLayer("L1_FOCAD_Locations_1").addAgentFunction("FOCAD", "focad_spatial_location_data")
         model.newLayer("L1_FOCAD_Locations_2").addAgentFunction("FOCAD", "focad_bucket_location_data")         

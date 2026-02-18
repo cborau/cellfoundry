@@ -85,9 +85,6 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket,
   float equilibrium_distance[MAX_CONNECTIVITY] = {};
   for (int i = 0; i < MAX_CONNECTIVITY; i++) {
     equilibrium_distance[i] = FLAMEGPU->getVariable<float, MAX_CONNECTIVITY>("equilibrium_distance", i);
-    if (id == 9 && CURRENT_STEP < 2) {
-      printf("DEBUG: id=%d step=%u equilibrium_distance[%d]=%f\n", id, CURRENT_STEP, i, equilibrium_distance[i]);
-    }
   }
 
 
