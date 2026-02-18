@@ -395,6 +395,12 @@ def build_save_data_context(ecm_agents_per_dir, include_fibre_network, n_nodes):
         "ASCII",
         "DATASET UNSTRUCTURED_GRID",
     ]
+    context["nucleusdata"] = [
+        "# vtk DataFile Version 3.0",
+        "Cell agents - nucleus data",
+        "ASCII",
+        "DATASET UNSTRUCTURED_GRID",
+    ]
     context["focaladhesionsdata"] = [
         "# vtk DataFile Version 3.0",
         "Focal adhesions",
@@ -869,6 +875,263 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             file.write("VECTORS ori float\n")
             for o_ai in focad_ori:
                 file.write("{:.6f} {:.6f} {:.6f} \n".format(o_ai[0], o_ai[1], o_ai[2]))
+                
+                
+            # Write nucleus data in a separate file. For these files:
+            #   - Apply 'Tensor Glyph' and choose tensor 'U' (or 'eps') to render ellipsoids.
+            #   - Set Glyph scale factor to nucleus radius (or use 'nucleus_radius' scalar as Scale Array).
+            file_name = "nucleus_t{:04d}.vtk".format(stepCounter)
+            file_path = res_path / file_name
+            # -----------------------------
+            # Collect CELL data
+            # -----------------------------
+            cell_coords = list()
+            cell_id = list()
+            cell_radius = list()
+            nucleus_radius = list()
+
+            # raw components
+            eps = list()   # (xx, yy, zz, xy, xz, yz)
+            sig = list()   # (xx, yy, zz, xy, xz, yz)
+
+            cell_agent = FLAMEGPU.agent("CELL")
+            cell_agent.sortInt("id", pyflamegpu.HostAgentAPI.Asc)  # keep ids ordered for viz
+            av = cell_agent.getPopulationData()
+            num_cells = len(av)
+
+            for ai in av:
+                x = ai.getVariableFloat("x")
+                y = ai.getVariableFloat("y")
+                z = ai.getVariableFloat("z")
+                r = ai.getVariableFloat("radius")
+                nr = ai.getVariableFloat("nucleus_radius")
+
+                exx = ai.getVariableFloat("eps_xx")
+                eyy = ai.getVariableFloat("eps_yy")
+                ezz = ai.getVariableFloat("eps_zz")
+                exy = ai.getVariableFloat("eps_xy")
+                exz = ai.getVariableFloat("eps_xz")
+                eyz = ai.getVariableFloat("eps_yz")
+
+                sxx = ai.getVariableFloat("sig_xx")
+                syy = ai.getVariableFloat("sig_yy")
+                szz = ai.getVariableFloat("sig_zz")
+                sxy = ai.getVariableFloat("sig_xy")
+                sxz = ai.getVariableFloat("sig_xz")
+                syz = ai.getVariableFloat("sig_yz")
+
+                cell_coords.append((x, y, z))
+                cell_id.append(ai.getVariableInt("id"))
+                cell_radius.append(r)
+                nucleus_radius.append(nr)
+
+                eps.append((exx, eyy, ezz, exy, exz, eyz))
+                sig.append((sxx, syy, szz, sxy, sxz, syz))
+
+            eps = np.asarray(eps, dtype=np.float64)  # (N,6)
+            sig = np.asarray(sig, dtype=np.float64)  # (N,6)
+            cell_radius = np.asarray(cell_radius, dtype=np.float64)
+            nucleus_radius = np.asarray(nucleus_radius, dtype=np.float64)
+
+            # -----------------------------
+            # Build full 3x3 symmetric tensors
+            # -----------------------------
+            def voigt6_to_sym33(v6):
+                """v6 = (xx,yy,zz,xy,xz,yz) -> 3x3 symmetric"""
+                xx, yy, zz, xy, xz, yz = v6
+                return np.array([[xx, xy, xz],
+                                [xy, yy, yz],
+                                [xz, yz, zz]], dtype=np.float64)
+
+            eps33 = np.zeros((num_cells, 3, 3), dtype=np.float64)
+            sig33 = np.zeros((num_cells, 3, 3), dtype=np.float64)
+            U33   = np.zeros((num_cells, 3, 3), dtype=np.float64)
+
+            for i in range(num_cells):
+                eps33[i] = voigt6_to_sym33(eps[i])
+                sig33[i] = voigt6_to_sym33(sig[i])
+                U33[i]   = np.eye(3, dtype=np.float64) + eps33[i]  # U = I + eps
+
+            # -----------------------------
+            # Derived scalars and vectors for mechanical interpretation
+            # -----------------------------
+            #
+            # eps33  : symmetric small-strain tensor (dimensionless)
+            # sig33  : Cauchy stress tensor (units: nN/um^2 = kPa)
+            #
+            # The following derived quantities provide compact,
+            # orientation-independent mechanical metrics suitable
+            # for visualization and quantitative analysis.
+            #
+
+            # Frobenius norm of strain tensor:
+            #   ||eps|| = sqrt(sum_ij eps_ij^2)
+            # Measures total magnitude of nucleus deformation,
+            # independent of coordinate system.
+            # 0 corresponds to a perfect sphere (no deformation).
+            eps_norm = np.sqrt(np.sum(eps33 * eps33, axis=(1, 2)))
+
+            # Frobenius norm of stress tensor:
+            #   ||sigma|| = sqrt(sum_ij sigma_ij^2)
+            # Represents overall stress intensity inside the nucleus.
+            # Units are kPa under the nN/um^2 unit convention.
+            sig_norm = np.sqrt(np.sum(sig33 * sig33, axis=(1, 2)))
+
+            # Hydrostatic stress:
+            #   sigma_hydro = (1/3) tr(sigma)
+            # Mean normal stress component.
+            # Positive values indicate net tension,
+            # negative values indicate net compression.
+            sig_hydro = (sig33[:, 0, 0] + sig33[:, 1, 1] + sig33[:, 2, 2]) / 3.0
+
+            # Deviatoric stress tensor:
+            #   sigma' = sigma - sigma_hydro * I
+            # Captures the anisotropic (shape-changing) component of stress.
+            # This component is responsible for distortional deformation.
+            I = np.eye(3, dtype=np.float64)
+            sig_dev = sig33 - sig_hydro[:, None, None] * I[None, :, :]
+
+            # Frobenius norm of deviatoric stress:
+            # Measures magnitude of anisotropic loading.
+            # High values indicate strong directional traction imbalance.
+            sig_dev_norm = np.sqrt(np.sum(sig_dev * sig_dev, axis=(1, 2)))
+
+            # Principal strain decomposition:
+            # Since eps33 is symmetric, eigen-decomposition is stable.
+            # Eigenvalues correspond to principal strains.
+            # Eigenvectors correspond to principal deformation directions.
+            eps_evals = np.zeros((num_cells, 3), dtype=np.float64)
+            eps_evecs = np.zeros((num_cells, 3, 3), dtype=np.float64)
+
+            for i in range(num_cells):
+                w, v = np.linalg.eigh(eps33[i])  # ascending order
+                eps_evals[i] = w
+                eps_evecs[i] = v
+
+            # Largest principal strain:
+            # Represents maximum extension (if positive)
+            # or strongest compression (if negative).
+            idx_max = 2  # eigenvalues sorted ascending
+            eps_max = eps_evals[:, idx_max]
+
+            # Corresponding principal direction:
+            # Orientation of maximum extension.
+            # Useful for analyzing nucleus elongation alignment.
+            dir_max = eps_evecs[:, :, idx_max]  # (N,3)
+
+            # Aspect ratio proxy derived from principal stretches:
+            #
+            # Under small-strain mapping:
+            #   U = I + eps
+            # Principal stretches approx:
+            #   lambda_i = 1 + e_i
+            #
+            # Aspect ratio proxy:
+            #   AR = max(lambda_i) / min(lambda_i)
+            #
+            # AR = 1  -> spherical nucleus
+            # AR > 1  -> ellipsoidal deformation
+            lam = 1.0 + eps_evals
+            lam_min = np.minimum(np.minimum(lam[:, 0], lam[:, 1]), lam[:, 2])
+            lam_max = np.maximum(np.maximum(lam[:, 0], lam[:, 1]), lam[:, 2])
+
+            # Numerical safeguard against division by zero or negative stretch
+            lam_min = np.maximum(lam_min, 1e-6)
+            ar_proxy = lam_max / lam_min
+
+            # Principal direction scaled by nucleus radius:
+            # Useful for glyph-based visualization of elongation axes.
+            # Scaling improves visual clarity in ParaView.
+            dir_max_scaled = dir_max * nucleus_radius[:, None]
+
+
+
+            with open(str(file_path), "w") as file:
+                for line in save_context["nucleusdata"]:
+                    file.write(line + "\n")
+
+                # Points: nucleus centers
+                file.write("POINTS {} float \n".format(num_cells))
+                for x, y, z in cell_coords:
+                    file.write("{:.6f} {:.6f} {:.6f}\n".format(x, y, z))
+
+                file.write("POINT_DATA {} \n".format(num_cells))
+
+                # ---- Scalars ----
+                file.write("SCALARS id int 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in cell_id:
+                    file.write("{}\n".format(v))
+
+                file.write("SCALARS radius float 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in cell_radius:
+                    file.write("{:.6f}\n".format(v))
+                    
+                file.write("SCALARS nucleus_radius float 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in nucleus_radius:
+                    file.write("{:.6f}\n".format(v))
+
+                file.write("SCALARS eps_norm float 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in eps_norm:
+                    file.write("{:.6e}\n".format(v))
+
+                file.write("SCALARS sig_norm float 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in sig_norm:
+                    file.write("{:.6e}\n".format(v))
+
+                file.write("SCALARS sig_hydro float 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in sig_hydro:
+                    file.write("{:.6e}\n".format(v))
+
+                file.write("SCALARS sig_dev_norm float 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in sig_dev_norm:
+                    file.write("{:.6e}\n".format(v))
+
+                file.write("SCALARS eps_max float 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in eps_max:
+                    file.write("{:.6e}\n".format(v))
+
+                file.write("SCALARS ar_proxy float 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in ar_proxy:
+                    file.write("{:.6f}\n".format(v))
+
+                # ---- Vectors ----
+                file.write("VECTORS eps_dir_max float\n")
+                for vx, vy, vz in dir_max_scaled:
+                    file.write("{:.6f} {:.6f} {:.6f}\n".format(vx, vy, vz))
+
+                # ---- Tensors ----
+                # 3 rows per tensor per point.
+
+                file.write("TENSORS eps float\n")
+                for i in range(num_cells):
+                    M = eps33[i]
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[0, 0], M[0, 1], M[0, 2]))
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[1, 0], M[1, 1], M[1, 2]))
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[2, 0], M[2, 1], M[2, 2]))
+
+                file.write("TENSORS sigma float\n")
+                for i in range(num_cells):
+                    M = sig33[i]
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[0, 0], M[0, 1], M[0, 2]))
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[1, 0], M[1, 1], M[1, 2]))
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[2, 0], M[2, 1], M[2, 2]))
+
+                # U = I + eps (dimensionless). Use nucelus radius as scale factor in ParaView.
+                file.write("TENSORS U float\n")
+                for i in range(num_cells):
+                    M = U33[i]
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[0, 0], M[0, 1], M[0, 2]))
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[1, 0], M[1, 1], M[1, 2]))
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[2, 0], M[2, 1], M[2, 2]))
 
     file_name = 'ecm_data_t{:04d}.vtk'.format(stepCounter)
     file_path = res_path / file_name

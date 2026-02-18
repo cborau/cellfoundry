@@ -859,6 +859,7 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableArrayFloat("C_sp", N_SPECIES) 
     CELL_agent.newVariableArrayFloat("M_sp", N_SPECIES)    
     CELL_agent.newVariableFloat("radius", CELL_RADIUS)
+    CELL_agent.newVariableFloat("nucleus_radius", CELL_NUCLEUS_RADIUS)
     CELL_agent.newVariableInt("cycle_phase", 1) # [1:G1] [2:S] [3:G2] [4:M]
     CELL_agent.newVariableFloat("clock", 0.0) # internal clock of the cell to switch phases
     CELL_agent.newVariableInt("completed_cycles", 0)
@@ -1122,6 +1123,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableArrayFloat("k_production", INIT_CELL_PRODUCTION_RATES)
                 instance.setVariableArrayFloat("k_reaction", INIT_CELL_REACTION_RATES)
                 instance.setVariableFloat("radius", CELL_RADIUS)
+                instance.setVariableFloat("nucleus_radius", CELL_NUCLEUS_RADIUS)
                 cycle_phase = random.randint(1, 4) # [1:G1] [2:S] [3:G2] [4:M]
                 instance.setVariableInt("cycle_phase", cycle_phase)
                 cycle_clock = 0.0
