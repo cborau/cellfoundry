@@ -34,6 +34,8 @@ FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::
   float agent_y_i = FLAMEGPU->getVariable<float>("y_i");
   float agent_z_i = FLAMEGPU->getVariable<float>("z_i");
 
+  int agent_anchor_id = FLAMEGPU->getVariable<int>("anchor_id"); 
+
   // -------------------------
   // Read CELL bucket: index = cell_id
   // -------------------------
@@ -45,6 +47,8 @@ FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::
   float best_xi = agent_x_i;
   float best_yi = agent_y_i;
   float best_zi = agent_z_i;
+  int best_anchor_id = agent_anchor_id;
+  printf("FOCAD agent %d: best_anchor_id %d\n", FLAMEGPU->getVariable<int>("id"), agent_anchor_id);
 
   for (const auto &message : FLAMEGPU->message_in(agent_cell_id)) {
     // Optional sanity check: you can ensure message id matches agent_cell_id
@@ -55,28 +59,37 @@ FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::
     agent_y_c = message.getVariable<float>("y");
     agent_z_c = message.getVariable<float>("z");
 
-    // Loop anchors in message arrays and find closest to FOCAD (x,y,z)
-    for (unsigned int ai = 0; ai < N_ANCHOR_POINTS; ++ai) {
-      const float ax = message.getVariable<float, N_ANCHOR_POINTS>("x_i", ai);
-      const float ay = message.getVariable<float, N_ANCHOR_POINTS>("y_i", ai);
-      const float az = message.getVariable<float, N_ANCHOR_POINTS>("z_i", ai);
+    if (agent_anchor_id >= 0) {
+      // Anchor already assigned, skip the search
+      best_xi = message.getVariable<float, N_ANCHOR_POINTS>("x_i", agent_anchor_id);
+      best_yi = message.getVariable<float, N_ANCHOR_POINTS>("y_i", agent_anchor_id);
+      best_zi = message.getVariable<float, N_ANCHOR_POINTS>("z_i", agent_anchor_id);
+      found_cell = 1;
+    } else {
+      // Loop anchors in message arrays and find closest to FOCAD (x,y,z)
+      for (unsigned int ai = 0; ai < N_ANCHOR_POINTS; ++ai) {
+        const float ax = message.getVariable<float, N_ANCHOR_POINTS>("x_i", ai);
+        const float ay = message.getVariable<float, N_ANCHOR_POINTS>("y_i", ai);
+        const float az = message.getVariable<float, N_ANCHOR_POINTS>("z_i", ai);
 
-      const float dx = ax - agent_x;
-      const float dy = ay - agent_y;
-      const float dz = az - agent_z;
-      const float r2 = dx*dx + dy*dy + dz*dz;
+        const float dx = ax - agent_x;
+        const float dy = ay - agent_y;
+        const float dz = az - agent_z;
+        const float r2 = dx*dx + dy*dy + dz*dz;
+        printf("  Anchor %d: (ax,ay,az)=(%2.6f,%2.6f,%2.6f), r2=%2.6f \n", ai, ax, ay, az, r2);
 
-      if (r2 < best_r2) {
-        best_r2 = r2;
-        best_xi = ax;
-        best_yi = ay;
-        best_zi = az;
+        if (r2 < best_r2) {
+          best_r2 = r2;
+          best_xi = ax;
+          best_yi = ay;
+          best_zi = az;
+          best_anchor_id = ai;
+        }
       }
+      found_cell = 1;
+      // There should only be one CELL message in the bucket;
+      break;
     }
-
-    found_cell = 1;
-    // There should only be one CELL message in the bucket;
-    break;
   }
 
   // If we found the cell message, update the chosen anchor
@@ -84,6 +97,8 @@ FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::
     agent_x_i = best_xi;
     agent_y_i = best_yi;
     agent_z_i = best_zi;
+    agent_anchor_id = best_anchor_id;
+    printf("  Selected anchor %d with position (%2.6f,%2.6f,%2.6f) \n", best_anchor_id, best_xi, best_yi, best_zi);
   }
   // else: no message found in bucket (should not happen). Keep previous x_c/xi values.
 
@@ -97,6 +112,8 @@ FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::
   FLAMEGPU->setVariable<float>("x_i", agent_x_i);
   FLAMEGPU->setVariable<float>("y_i", agent_y_i);
   FLAMEGPU->setVariable<float>("z_i", agent_z_i);
+
+  FLAMEGPU->setVariable<int>("anchor_id", agent_anchor_id);
 
   return flamegpu::ALIVE;
 }

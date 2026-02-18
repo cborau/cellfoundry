@@ -19,14 +19,10 @@ import matplotlib.pyplot as plt
 from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos
 
 # TODO LIST:
-# Review functions (name, caller agent, input agent, message type, description)
-# - focad_anchor_update    FOCAD   CELL   bucket   Updates x_i, x_c values (DONE)
-# - focad_fnode_interaction  FOCAD  FNODE  Spatial  If it's close, it attaches to an FNODE and computes adhesion force (DONE)
-# - fnode_focad_interaction  FNODE  FOCAD  Spatial  Updates the force on the FNODE (DONE)
-# - focad_move  FOCAD  FNODE  Bucket  Updates FOCAD position. If attached to an FNODE, it follows it; otherwise, it moves randomly away from the cell (DONE: but tweak values)
 # Add Cell mechanical variables visualization.
 # Add cell-fnode repulsion
-# Add FOCAD interaction with other FOCADs from other cells.
+# Add FOCAD interaction with other FOCADs from other cells?
+# Include new FOCAD agent generation? (e.g. when a cell starts migrating, it generates new FOCAD agents at its leading edge, which then try to find fibres to attach to. When a FOCAD agent detaches, it can be removed from the simulation or moved back to the cell center to be reused later)
 # Add FOCAD growth and disassembly dynamics (e.g. increase k_fa with time when attached to a fibre, decrease it when not attached, add max lifetime, etc.)
 # Add chemotaxis (cells prefer to move towards higher concentration of a certain species, which could be implemented by making them prefer to move towards areas with higher concentration on the ECM agents)
 # Add durotaxis (cells prefer to move towards stiffer regions, which could be implemented by making them prefer to move towards areas with higher fibre density or stronger fibre connections)
