@@ -252,6 +252,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
     const float message_fy  = message.getVariable<float>("fy");  // [nN]
     const float message_fz  = message.getVariable<float>("fz");  // [nN]
 
+    //printf("cell_update_stress -- FOCAD message for CELL %d: anchor=(%.4f, %.4f, %.4f) um, force=(%.4f, %.4f, %.4f) nN\n", agent_id, message_x_i, message_y_i, message_z_i, message_fx, message_fy, message_fz);
+
     // Lever arm from nucleus center to adhesion location
     const float agent_rx = message_x_i - agent_x; // [um]
     const float agent_ry = message_y_i - agent_y; // [um]
@@ -264,6 +266,15 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
     agent_S_xy += 0.5f * (agent_rx * message_fy + agent_ry * message_fx); 
     agent_S_xz += 0.5f * (agent_rx * message_fz + agent_rz * message_fx);
     agent_S_yz += 0.5f * (agent_ry * message_fz + agent_rz * message_fy);
+    // printf("cell_update_stress -- message: r=(%.3f, %.3f, %.3f) f=(%.3f, %.3f, %.3f) S_contrib=(%.3f, %.3f, %.3f, %.3f, %.3f, %.3f)\n", 
+    //        agent_rx, agent_ry, agent_rz, message_fx, message_fy, message_fz,
+    //        agent_S_xx,
+    //        agent_S_yy,
+    //        agent_S_zz,
+    //        agent_S_xy,
+    //        agent_S_xz,
+    //        agent_S_yz);
+
   }
 
   // -------------------------
@@ -272,7 +283,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
   // Stress units: nN/um^2 (kPa)
   // -------------------------
   const float PI = 3.14159265358979323846f;
-  const float agent_V = (4.0f / 3.0f) * PI * CELL_RADIUS * CELL_RADIUS * CELL_RADIUS; // [um^3]
+  const float agent_V = (4.0f / 3.0f) * PI * CELL_NUCLEUS_RADIUS * CELL_NUCLEUS_RADIUS * CELL_NUCLEUS_RADIUS; // [um^3]
   const float invV = safeInv(agent_V, 1e-20f);
 
   const float agent_sig_xx = invV * agent_S_xx;
@@ -281,6 +292,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
   const float agent_sig_xy = invV * agent_S_xy;
   const float agent_sig_xz = invV * agent_S_xz;
   const float agent_sig_yz = invV * agent_S_yz;
+
+  printf("cell_update_stress -- agent_sig = (%.3e, %.3e, %.3e, %.3e, %.3e, %.3e) nN/um^2\n", agent_sig_xx, agent_sig_yy, agent_sig_zz, agent_sig_xy, agent_sig_xz, agent_sig_yz);
 
   // -------------------------
   // Isotropic compliance inversion:
@@ -343,6 +356,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
   const float tau_s = fmaxf(NUCLEUS_TAU, 1e-6f);
   const float rel_raw = TIME_STEP / tau_s;
   const float rel = fminf(rel_raw, 1.0f); // rel = 1 
+  printf("cell_update_stress -- agent_eps = (%.3e, %.3e, %.3e, %.3e, %.3e, %.3e) eps_tilde=(%.3e, %.3e, %.3e, %.3e, %.3e, %.3e) rel=%.3f\n", agent_eps_xx, agent_eps_yy, agent_eps_zz, agent_eps_xy, agent_eps_xz, agent_eps_yz,
+                                                                                                                        agent_eps_tilde_xx, agent_eps_tilde_yy, agent_eps_tilde_zz, agent_eps_tilde_xy, agent_eps_tilde_xz, agent_eps_tilde_yz, rel);
 
   agent_eps_xx += rel * (agent_eps_tilde_xx - agent_eps_xx);
   agent_eps_yy += rel * (agent_eps_tilde_yy - agent_eps_yy);

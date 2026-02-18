@@ -156,6 +156,115 @@ def load_fibre_network(
     return nodes, connectivity, n_fiber, fibre_segment_equilibrium_distance, critical_error
 
 
+import math
+
+def print_fibre_calibration_summary(
+    fibre_segment_k_elast,
+    fibre_segment_d_dumping,
+    fibre_segment_equilibrium_distance,
+    dt,
+    reference_modulus_mpa=(1.5, 100.0, 700.0),
+    reference_diameter_nm=(20.0, 60.0, 120.0),
+    tau_multipliers=(10.0, 50.0, 100.0),
+):
+    """
+    FNODE-FNODE Kelvin-Voigt link:
+
+        F = k_pair * (d - d0) + d_pair * d_dot
+
+    Model structure:
+      - Two identical springs in series:
+            k_pair = k_node / 2
+      - One dashpot in parallel at link level:
+            d_pair = fibre_segment_d_dumping
+
+    Relaxation time:
+            tau = d_pair / k_pair
+
+    Units:
+      k in nN/um
+      d in nN*s/um
+      L in um
+      dt in s
+      1 MPa = 1000 nN/um^2
+    """
+
+    eps = 1e-20
+
+    k_node = float(fibre_segment_k_elast)        # per spring
+    d_pair = float(fibre_segment_d_dumping)      # dashpot at link level
+    L = float(fibre_segment_equilibrium_distance)
+    dt = float(dt)
+
+    # Two springs in series
+    k_pair = 0.5 * k_node
+
+    # Kelvin-Voigt relaxation time
+    tau = d_pair / max(k_pair, eps)
+    tau_steps = tau / max(dt, eps)
+
+    print("\n--- Fibre calibration summary ---")
+    print(f"k_node = {k_node:.4g} nN/um")
+    print(f"k_pair = {k_pair:.4g} nN/um  (2 springs in series)")
+    print(f"d_dumping = {d_pair:.4g} nN*s/um  (dashpot in parallel)")
+    print(f"L0 = {L:.4g} um, dt = {dt:.4g} s")
+    print(f"Relaxation time tau = d_pair/k_pair = {tau:.4g} s")
+    print(f"That is about {tau_steps:.3g} timesteps if Δt = {dt:.4g} s")
+
+    # Suggested damping values for stable explicit integration
+    print("\nSuggested stabilization targets (tau ≈ 10–100 timesteps):")
+    for m in tau_multipliers:
+        tau_target = m * dt
+        d_suggest = tau_target * k_pair
+        print(f"  tau = {m:.0f}*dt = {tau_target:.4g} s  ->  d_dumping ≈ {d_suggest:.4g} nN*s/um")
+
+    print("\nTuning guideline:")
+    print("  - Too jittery or oscillatory: increase τ (increase d_dumping)")
+    print("  - Too sluggish / takes forever to settle: decrease τ (decrease d_dumping)")
+
+    # Forward mapping: modulus -> implied diameter
+    print("\nForward mapping (given E -> implied fibre diameter):")
+    for E_mpa in reference_modulus_mpa:
+        E = E_mpa * 1000.0  # MPa -> nN/um^2
+        area = (k_pair * L) / max(E, eps)
+        r = math.sqrt(max(area, 0.0) / math.pi)
+        d_nm = 2.0 * r * 1000.0
+        print(f"  E = {E_mpa:.4g} MPa -> diameter ≈ {d_nm:.3f} nm")
+
+    # Inverse mapping: target diameter -> required stiffness and damping
+    print("\nInverse mapping (target E, diameter -> required k_node and d_dumping):")
+    for E_mpa in reference_modulus_mpa:
+        E = E_mpa * 1000.0
+        for diam_nm in reference_diameter_nm:
+            diam_um = diam_nm / 1000.0
+            r = 0.5 * diam_um
+            area = math.pi * r * r
+
+            k_pair_req = E * area / max(L, eps)
+            k_node_req = 2.0 * k_pair_req
+
+            # keep same relaxation time tau
+            d_req = tau * k_pair_req
+            tau_req_steps = tau / max(dt, eps)
+
+            print(
+                f"  E={E_mpa:.4g} MPa, d={diam_nm:.4g} nm -> "
+                f"k_node≈{k_node_req:.4g} nN/um, "
+                f"d_dumping≈{d_req:.4g} nN*s/um "
+                f"(tau≈{tau:.4g} s ≈ {tau_req_steps:.3g} steps)"
+            )
+            print()
+
+    return {
+        "k_node": k_node,
+        "k_pair": k_pair,
+        "d_pair": d_pair,
+        "tau_s": tau,
+        "tau_steps": tau_steps,
+    }
+
+
+
 #Helper functions for agent initialization
 # +--------------------------------------------------------------------+
 def getRandomCoords3D(n, minx, maxx, miny, maxy, minz, maxz):

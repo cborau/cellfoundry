@@ -16,7 +16,7 @@ import random
 import os
 import pickle
 import matplotlib.pyplot as plt
-from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step
+from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary
 
 # TODO LIST:
 # make the durotaxis strength use A = (l1 - l3) / (|l1| + |l2| + |l3| + eps) so it is unitless and easier to tune across scenarios
@@ -71,7 +71,7 @@ STEPS = 50
 # ----------------------------------------------------------------------
 ECM_K_ELAST = 0.2  # [nN/um]
 ECM_D_DUMPING = 0.04  # [nN·s/um]
-ECM_ETA = 1  # [nN·s/µm]
+ECM_ETA = 2.0  # [nN·s/µm] Effective drag for overdamped FNODE motion (calibration parameter)
 
 #BOUNDARY_COORDS = [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]  # +X,-X,+Y,-Y,+Z,-Z
 BOUNDARY_COORDS = [100.0, -100.0, 100.0, -100.0, 100.0, -100.0]# microdevice dimensions in um
@@ -158,8 +158,10 @@ if OSCILLATORY_SHEAR_ASSAY:
 INCLUDE_FIBRE_NETWORK = True
 
 MAX_CONNECTIVITY = 8 # must match hard-coded C++ values
-FIBRE_SEGMENT_K_ELAST = 0.2  # [N/units/kg]
-FIBRE_SEGMENT_D_DUMPING = 0.04  # [N*s/units/kg]
+# NOTE: These are calibrated model parameters (effective segment-level mechanics), not universal material constants.
+# They depend on collagen type/concentration, crosslinking, architecture and coarse-graining choices.
+FIBRE_SEGMENT_K_ELAST = 0.5  # [nN/um] Effective fibre-segment stiffness (baseline for tuning)
+FIBRE_SEGMENT_D_DUMPING = 0.2  # [nN*s/um] Effective fibre-segment damping (baseline for tuning)
 FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE = 15 # WARNING: must match the value used in network generation
 FIBRE_NODE_BOUNDARY_INTERACTION_RADIUS = 0.05
 FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE = 0.0
@@ -340,7 +342,7 @@ if INCLUDE_DIFFUSION:
         # print('Fi_x value: {0} for species {1}'.format(Fi_x, i + 1))
         if Fi_x > 0.5:
             print(
-                'WARNING: diffusion problem is ill conditioned (Fi_x should be < 0.5), check parameters and consider decreasing time step\nSemi-implicit diffusion will be used instead')
+                f'WARNING: diffusion problem is ill conditioned (Fi_x {Fi_x} should be < 0.5), check parameters and consider decreasing time step\nSemi-implicit diffusion will be used instead')
             UNSTABLE_DIFFUSION = True
     dy = L0_y / (ECM_AGENTS_PER_DIR[1] - 1)
     for i in range(N_SPECIES):
@@ -348,7 +350,7 @@ if INCLUDE_DIFFUSION:
         # print('Fi_y value: {0} for species {1}'.format(Fi_y, i + 1))
         if Fi_y > 0.5:
             print(
-                'WARNING: diffusion problem is ill conditioned (Fi_y should be < 0.5), check parameters and consider decreasing time step\nSemi-implicit diffusion will be used instead')
+                f'WARNING: diffusion problem is ill conditioned (Fi_y {Fi_y} should be < 0.5), check parameters and consider decreasing time step\nSemi-implicit diffusion will be used instead')
             UNSTABLE_DIFFUSION = True
     dz = L0_z / (ECM_AGENTS_PER_DIR[2] - 1)
     for i in range(N_SPECIES):
@@ -356,7 +358,7 @@ if INCLUDE_DIFFUSION:
         # print('Fi_z value: {0} for species {1}'.format(Fi_z, i + 1))
         if Fi_z > 0.5:
             print(
-                'WARNING: diffusion problem is ill conditioned (Fi_z should be < 0.5), check parameters and consider decreasing time step\nSemi-implicit diffusion will be used instead')
+                f'WARNING: diffusion problem is ill conditioned (Fi_z {Fi_z} should be < 0.5), check parameters and consider decreasing time step\nSemi-implicit diffusion will be used instead')
             UNSTABLE_DIFFUSION = True
     if not INCLUDE_FIBRE_NETWORK and HETEROGENEOUS_DIFFUSION:
         print(f'WARNING: HETEROGENEOUS_DIFFUSION is set to True but no fibre network is included, default D values ({DIFFUSION_COEFF_MULTI}) will be used instead')
@@ -374,6 +376,14 @@ if INCLUDE_CELLS:
 elif INCLUDE_FOCAL_ADHESIONS:
     print('ERROR: focal adhesions cannot be included if there are no cells to form them')
     critical_error= True
+
+if INCLUDE_FIBRE_NETWORK:
+    print_fibre_calibration_summary(
+        fibre_segment_k_elast=FIBRE_SEGMENT_K_ELAST,
+        fibre_segment_d_dumping=FIBRE_SEGMENT_D_DUMPING,
+        fibre_segment_equilibrium_distance=FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE,
+        dt = TIME_STEP,
+    )
 
 
 if critical_error:
@@ -1626,8 +1636,6 @@ if INCLUDE_CELLS:
     if INCLUDE_FOCAL_ADHESIONS:
         model.newLayer("L1_CELL_Locations_2").addAgentFunction("CELL", "cell_bucket_location_data")  # these functions share data of the same agent, so must be in separate layers
         model.newLayer("L1_FOCAD_Update_Anchors").addAgentFunction("FOCAD", "focad_anchor_update")
-        model.newLayer("L1_FOCAD_Locations_1").addAgentFunction("FOCAD", "focad_spatial_location_data")
-        model.newLayer("L1_FOCAD_Locations_2").addAgentFunction("FOCAD", "focad_bucket_location_data")         
 if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L1_FNODE_Locations_1").addAgentFunction("FNODE", "fnode_spatial_location_data")
     # These functions share data of the same agent, so must be in separate layers
@@ -1657,7 +1665,10 @@ if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L7_FNODE_Repulsion").addAgentFunction("FNODE", "fnode_fnode_spatial_interaction")
     model.newLayer("L7_FNODE_Network_Mechanics").addAgentFunction("FNODE", "fnode_fnode_bucket_interaction")
     if INCLUDE_FOCAL_ADHESIONS:
-        model.newLayer("L7_FOCAD_Mechanics").addAgentFunction("FOCAD", "focad_fnode_interaction") 
+        model.newLayer("L7_FOCAD_Mechanics").addAgentFunction("FOCAD", "focad_fnode_interaction")
+        # These FOCAD location functions are placed here because they require updated force information to be broadcasted to  FNODE and CELL update functions
+        model.newLayer("L7_FOCAD_Locations_1").addAgentFunction("FOCAD", "focad_spatial_location_data")
+        model.newLayer("L7_FOCAD_Locations_2").addAgentFunction("FOCAD", "focad_bucket_location_data")
         model.newLayer("L7_FNODE_Force_Update").addAgentFunction("FNODE", "fnode_focad_interaction") 
         model.newLayer("L7_CELL_Stress_Update").addAgentFunction("CELL", "cell_update_stress") 
 
