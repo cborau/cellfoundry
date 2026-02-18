@@ -20,6 +20,7 @@ from helper_module import compute_expected_boundary_pos_from_corners, getRandomV
 
 # TODO LIST:
 # make the durotaxis strength use A = (l1 - l3) / (|l1| + |l2| + |l3| + eps) so it is unitless and easier to tune across scenarios
+# write docs
 # Add cell-fnode repulsion
 # Add FOCAD interaction with other FOCADs from other cells?
 # Include new FOCAD agent generation? (e.g. when a cell starts migrating, it generates new FOCAD agents at its leading edge, which then try to find fibres to attach to. When a FOCAD agent detaches, it can be removed from the simulation or moved back to the cell center to be reused later)
