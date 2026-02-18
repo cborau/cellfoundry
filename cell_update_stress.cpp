@@ -1,9 +1,176 @@
+/**
+ * clampf
+ *
+ * Clamps a scalar to the closed interval [lo, hi].
+ */
 FLAMEGPU_DEVICE_FUNCTION float clampf(const float x, const float lo, const float hi) {
   return fminf(hi, fmaxf(lo, x));
 }
 
+/**
+ * safeInv
+ *
+ * Returns 1/x when |x| > eps, otherwise returns 0.
+ * Used to avoid division by near-zero values in device code.
+ */
 FLAMEGPU_DEVICE_FUNCTION float safeInv(const float x, const float eps) {
   return (fabsf(x) > eps) ? (1.0f / x) : 0.0f;
+}
+
+/**
+ * normalize3
+ *
+ * Normalizes a 3D vector in-place; if near-zero, sets a default unit vector.
+ */
+FLAMEGPU_DEVICE_FUNCTION void normalize3(float &x, float &y, float &z) {
+  const float n2 = x*x + y*y + z*z;
+  if (n2 > 1e-20f) {
+    const float inv = rsqrtf(n2);
+    x *= inv;
+    y *= inv;
+    z *= inv;
+  } else {
+    x = 1.0f;
+    y = 0.0f;
+    z = 0.0f;
+  }
+}
+
+/**
+ * swapf
+ *
+ * Swaps two floats by reference.
+ */
+FLAMEGPU_DEVICE_FUNCTION void swapf(float &a, float &b) {
+  const float t = a;
+  a = b;
+  b = t;
+}
+
+/**
+ * swap_col3
+ *
+ * Swaps two columns of a 3x3 matrix (used for eigenvector column reordering).
+ */
+FLAMEGPU_DEVICE_FUNCTION void swap_col3(float V[3][3], const int c1, const int c2) {
+  swapf(V[0][c1], V[0][c2]);
+  swapf(V[1][c1], V[1][c2]);
+  swapf(V[2][c1], V[2][c2]);
+}
+
+/**
+ * eig_sym_3x3
+ *
+ * Jacobi eigendecomposition for a real symmetric 3x3 matrix:
+ *   [a00 a01 a02]
+ *   [a01 a11 a12]
+ *   [a02 a12 a22]
+ *
+ * Outputs:
+ *   - Eigenvalues l1, l2, l3
+ *   - Corresponding eigenvectors (v1, v2, v3)
+ *
+ * Ordering contract:
+ *   Eigenpairs are sorted in descending eigenvalue order:
+ *     l1 >= l2 >= l3
+ *   and vector i corresponds to li.
+ */
+FLAMEGPU_DEVICE_FUNCTION void eig_sym_3x3(
+  const float a00, const float a01, const float a02,
+  const float a11, const float a12, const float a22,
+  float &l1, float &l2, float &l3,
+  float &v1x, float &v1y, float &v1z,
+  float &v2x, float &v2y, float &v2z,
+  float &v3x, float &v3y, float &v3z) {
+
+  float A[3][3] = {
+    {a00, a01, a02},
+    {a01, a11, a12},
+    {a02, a12, a22}
+  };
+
+  float V[3][3] = {
+    {1.0f, 0.0f, 0.0f},
+    {0.0f, 1.0f, 0.0f},
+    {0.0f, 0.0f, 1.0f}
+  };
+
+  const int MAX_ITERS = 10;
+  for (int it = 0; it < MAX_ITERS; ++it) {
+    int p = 0, q = 1;
+    float max_off = fabsf(A[0][1]);
+
+    const float a02_abs = fabsf(A[0][2]);
+    if (a02_abs > max_off) {
+      max_off = a02_abs;
+      p = 0; q = 2;
+    }
+    const float a12_abs = fabsf(A[1][2]);
+    if (a12_abs > max_off) {
+      max_off = a12_abs;
+      p = 1; q = 2;
+    }
+
+    if (max_off < 1e-10f) {
+      break;
+    }
+
+    const float app = A[p][p];
+    const float aqq = A[q][q];
+    const float apq = A[p][q];
+
+    const float tau = (aqq - app) / (2.0f * apq);
+    const float t = (tau >= 0.0f)
+      ? (1.0f / (tau + sqrtf(1.0f + tau * tau)))
+      : (-1.0f / (-tau + sqrtf(1.0f + tau * tau)));
+    const float c = 1.0f / sqrtf(1.0f + t * t);
+    const float s = t * c;
+
+    A[p][p] = app - t * apq;
+    A[q][q] = aqq + t * apq;
+    A[p][q] = 0.0f;
+    A[q][p] = 0.0f;
+
+    for (int r = 0; r < 3; ++r) {
+      if (r == p || r == q) continue;
+      const float arp = A[r][p];
+      const float arq = A[r][q];
+      A[r][p] = c * arp - s * arq;
+      A[p][r] = A[r][p];
+      A[r][q] = s * arp + c * arq;
+      A[q][r] = A[r][q];
+    }
+
+    for (int r = 0; r < 3; ++r) {
+      const float vrp = V[r][p];
+      const float vrq = V[r][q];
+      V[r][p] = c * vrp - s * vrq;
+      V[r][q] = s * vrp + c * vrq;
+    }
+  }
+
+  float eval[3] = {A[0][0], A[1][1], A[2][2]};
+
+  if (eval[0] < eval[1]) {
+    swapf(eval[0], eval[1]);
+    swap_col3(V, 0, 1);
+  }
+  if (eval[0] < eval[2]) {
+    swapf(eval[0], eval[2]);
+    swap_col3(V, 0, 2);
+  }
+  if (eval[1] < eval[2]) {
+    swapf(eval[1], eval[2]);
+    swap_col3(V, 1, 2);
+  }
+
+  l1 = eval[0];
+  l2 = eval[1];
+  l3 = eval[2];
+
+  v1x = V[0][0]; v1y = V[1][0]; v1z = V[2][0];
+  v2x = V[0][1]; v2y = V[1][1]; v2z = V[2][1];
+  v3x = V[0][2]; v3y = V[1][2]; v3z = V[2][2];
 }
 
 /**
@@ -37,6 +204,9 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
   const float agent_x = FLAMEGPU->getVariable<float>("x");
   const float agent_y = FLAMEGPU->getVariable<float>("y");
   const float agent_z = FLAMEGPU->getVariable<float>("z");
+  float agent_orx = FLAMEGPU->getVariable<float>("orx");
+  float agent_ory = FLAMEGPU->getVariable<float>("ory");
+  float agent_orz = FLAMEGPU->getVariable<float>("orz");
 
   const float CELL_RADIUS = FLAMEGPU->getVariable<float>("radius");
   const float CELL_NUCLEUS_RADIUS = FLAMEGPU->environment.getProperty<float>("CELL_NUCLEUS_RADIUS");
@@ -58,6 +228,9 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
   const float NUCLEUS_TAU       = FLAMEGPU->environment.getProperty<float>("NUCLEUS_TAU");       // [s]
   const float NUCLEUS_EPS_CLAMP = FLAMEGPU->environment.getProperty<float>("NUCLEUS_EPS_CLAMP"); // [-]
   const float TIME_STEP         = FLAMEGPU->environment.getProperty<float>("TIME_STEP");         // [s]
+  const int INCLUDE_ORIENTATION_ALIGN = FLAMEGPU->environment.getProperty<int>("INCLUDE_ORIENTATION_ALIGN");
+  const float ORIENTATION_ALIGN_RATE = FLAMEGPU->environment.getProperty<float>("ORIENTATION_ALIGN_RATE");
+  const int ORIENTATION_ALIGN_USE_STRESS = FLAMEGPU->environment.getProperty<int>("ORIENTATION_ALIGN_USE_STRESS");
 
   const uint8_t N_ANCHOR_POINTS = 100; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
 
@@ -205,6 +378,90 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
   FLAMEGPU->setVariable<float>("sig_xy", agent_sig_xy);
   FLAMEGPU->setVariable<float>("sig_xz", agent_sig_xz);
   FLAMEGPU->setVariable<float>("sig_yz", agent_sig_yz);
+
+  // Principal values/vectors (stress tensor)
+  float sig_l1, sig_l2, sig_l3;
+  float sig_v1x, sig_v1y, sig_v1z;
+  float sig_v2x, sig_v2y, sig_v2z;
+  float sig_v3x, sig_v3y, sig_v3z;
+  eig_sym_3x3(
+    agent_sig_xx, agent_sig_xy, agent_sig_xz,
+    agent_sig_yy, agent_sig_yz, agent_sig_zz,
+    sig_l1, sig_l2, sig_l3,
+    sig_v1x, sig_v1y, sig_v1z,
+    sig_v2x, sig_v2y, sig_v2z,
+    sig_v3x, sig_v3y, sig_v3z);
+
+  FLAMEGPU->setVariable<float>("sig_eig_1", sig_l1);
+  FLAMEGPU->setVariable<float>("sig_eig_2", sig_l2);
+  FLAMEGPU->setVariable<float>("sig_eig_3", sig_l3);
+  FLAMEGPU->setVariable<float>("sig_eigvec1_x", sig_v1x);
+  FLAMEGPU->setVariable<float>("sig_eigvec1_y", sig_v1y);
+  FLAMEGPU->setVariable<float>("sig_eigvec1_z", sig_v1z);
+  FLAMEGPU->setVariable<float>("sig_eigvec2_x", sig_v2x);
+  FLAMEGPU->setVariable<float>("sig_eigvec2_y", sig_v2y);
+  FLAMEGPU->setVariable<float>("sig_eigvec2_z", sig_v2z);
+  FLAMEGPU->setVariable<float>("sig_eigvec3_x", sig_v3x);
+  FLAMEGPU->setVariable<float>("sig_eigvec3_y", sig_v3y);
+  FLAMEGPU->setVariable<float>("sig_eigvec3_z", sig_v3z);
+
+  // Principal values/vectors (strain tensor)
+  float eps_l1, eps_l2, eps_l3;
+  float eps_v1x, eps_v1y, eps_v1z;
+  float eps_v2x, eps_v2y, eps_v2z;
+  float eps_v3x, eps_v3y, eps_v3z;
+  eig_sym_3x3(
+    agent_eps_xx, agent_eps_xy, agent_eps_xz,
+    agent_eps_yy, agent_eps_yz, agent_eps_zz,
+    eps_l1, eps_l2, eps_l3,
+    eps_v1x, eps_v1y, eps_v1z,
+    eps_v2x, eps_v2y, eps_v2z,
+    eps_v3x, eps_v3y, eps_v3z);
+
+  FLAMEGPU->setVariable<float>("eps_eig_1", eps_l1);
+  FLAMEGPU->setVariable<float>("eps_eig_2", eps_l2);
+  FLAMEGPU->setVariable<float>("eps_eig_3", eps_l3);
+  FLAMEGPU->setVariable<float>("eps_eigvec1_x", eps_v1x);
+  FLAMEGPU->setVariable<float>("eps_eigvec1_y", eps_v1y);
+  FLAMEGPU->setVariable<float>("eps_eigvec1_z", eps_v1z);
+  FLAMEGPU->setVariable<float>("eps_eigvec2_x", eps_v2x);
+  FLAMEGPU->setVariable<float>("eps_eigvec2_y", eps_v2y);
+  FLAMEGPU->setVariable<float>("eps_eigvec2_z", eps_v2z);
+  FLAMEGPU->setVariable<float>("eps_eigvec3_x", eps_v3x);
+  FLAMEGPU->setVariable<float>("eps_eigvec3_y", eps_v3y);
+  FLAMEGPU->setVariable<float>("eps_eigvec3_z", eps_v3z);
+
+  // ---------------------------------------------------------------------------
+  // Update orientation toward max principal direction (stress or strain)
+  // ---------------------------------------------------------------------------
+  if (INCLUDE_ORIENTATION_ALIGN) {
+    float target_x = sig_v1x;
+    float target_y = sig_v1y;
+    float target_z = sig_v1z;
+    if (ORIENTATION_ALIGN_USE_STRESS == 0) {
+      target_x = eps_v1x;
+      target_y = eps_v1y;
+      target_z = eps_v1z;
+    }
+
+    // Avoid sign flips: choose target with positive dot to current orientation
+    const float dot = agent_orx*target_x + agent_ory*target_y + agent_orz*target_z;
+    if (dot < 0.0f) {
+      target_x = -target_x;
+      target_y = -target_y;
+      target_z = -target_z;
+    }
+
+    const float alpha = clampf(ORIENTATION_ALIGN_RATE * TIME_STEP, 0.0f, 1.0f);
+
+    agent_orx = (1.0f - alpha) * agent_orx + alpha * target_x;
+    agent_ory = (1.0f - alpha) * agent_ory + alpha * target_y;
+    agent_orz = (1.0f - alpha) * agent_orz + alpha * target_z;
+    normalize3(agent_orx, agent_ory, agent_orz);
+  }
+  FLAMEGPU->setVariable<float>("orx", agent_orx);
+  FLAMEGPU->setVariable<float>("ory", agent_ory);
+  FLAMEGPU->setVariable<float>("orz", agent_orz);
 
   // -------------------------
   // Update nucleus anchors:

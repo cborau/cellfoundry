@@ -100,7 +100,7 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
       agent_rest_length_0 = ell0;
       agent_rest_length   = ell0;
       agent_age = 0.0f;  // reset age on attachment
-      printf("FOCAD %d (cell %d) attached to FNODE %d at distance %.4f um with initial rest length %.4f um\n", agent_focad_id, agent_cell_id, agent_fnode_id, sqrtf(best_r2), ell0);
+      //printf("focad_fnode -- FOCAD %d (cell %d) attached to FNODE %d at distance %.4f um with initial rest length %.4f um\n", agent_focad_id, agent_cell_id, agent_fnode_id, sqrtf(best_r2), ell0);
     } else {
       // Not attached and no node found, keep force = 0 and exit early
       FLAMEGPU->setVariable<uint8_t>("attached", agent_attached);

@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step
 
 # TODO LIST:
+# make the durotaxis strength use A = (l1 - l3) / (|l1| + |l2| + |l3| + eps) so it is unitless and easier to tune across scenarios
 # Add cell-fnode repulsion
 # Add FOCAD interaction with other FOCADs from other cells?
 # Include new FOCAD agent generation? (e.g. when a cell starts migrating, it generates new FOCAD agents at its leading edge, which then try to find fibres to attach to. When a FOCAD agent detaches, it can be removed from the simulation or moved back to the cell center to be reused later)
@@ -187,13 +188,13 @@ INCLUDE_CELL_CELL_INTERACTION = False
 INCLUDE_CELL_CYCLE = False
 PERIODIC_BOUNDARIES_FOR_CELLS = False
 CELL_ORIENTATION_RATE = 1.0  # [1/s] TODO: check whether cell reorient themselves faster than ECM
-N_CELLS = 5
+N_CELLS = 1
 CELL_K_ELAST = 2.0  # [nN/um]
 CELL_D_DUMPING = 0.4  # [nN·s/um]
 CELL_RADIUS = 8.412 #ECM_ECM_EQUILIBRIUM_DISTANCE / 2 # [um]
 CELL_NUCLEUS_RADIUS = CELL_RADIUS / 2 # [um]
-CELL_SPEED_REF = ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / 10.0 # [um/s]
-BROWNIAN_MOTION_STRENGTH = CELL_SPEED_REF / 50.0 # [um/s] Strength of random movement added to cell velocity to represent Brownian motion and other non-directed motility.
+CELL_SPEED_REF = 0.75 # [um/s] Another option is to define it according to grid distance ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / X -> e.g. in how many steps a cell would move the distance between ECM agents. This is important to avoid missing interactions with ECM agents due to large jumps. WARNING: if cell speed is too high, consider increasing the number of ECM agents (N) or reducing the time step (TIME_STEP) to avoid missing interactions.
+BROWNIAN_MOTION_STRENGTH = CELL_SPEED_REF / 10.0 # [um/s] Strength of random movement added to cell velocity to represent Brownian motion and other non-directed motility.
 print(f'Initial cell speed reference: {CELL_SPEED_REF} um/s')   
 print(f'Initial Brownian motion strength: {BROWNIAN_MOTION_STRENGTH} um/s')
 CYCLE_PHASE_G1_DURATION = 10.0 #[h]
@@ -231,6 +232,7 @@ FOCAD_K_OFF_0 = 0.003 # [1/s] Zero-force unbinding rate (baseline detachment). M
 FOCAD_F_C = 5.0 # [nN] Force scale controlling force sensitivity in koff(F) (catch/slip style). Typical range: ~2–10 nN. Sets how quickly detachment probability changes as traction builds.
 # Example (simple slip): koff(F)=K_OFF_0*exp(|F|/F_C) => faster turnover under high force.
 FOCAD_K_REINF = 0.001 # [1/s] Reinforcement rate for adhesion strengthening. Timescale ~1/K_REINF = 1000 s (~17 min). E.g. something like k_fa <- k_fa + K_REINF * g(|F|) * DT, adhesions gradually stiffen over tens of minutes when they carry load.
+
 # +====================================================================+
 # | NUCLEAR MECHANICS  (ONLY USED IF FOCAL ADHESIONS ARE INCLUDED)     |
 # +====================================================================+
@@ -247,6 +249,18 @@ INCLUDE_CHEMOTAXIS = True
 CHEMOTAXIS_SENSITIVITY = [1.0, 0.0] # [-1.0 to +1.0] Chemotactic sensitivity for each species. Positive: attraction, Negative: repulsion towards higher concentrations.
 CHEMOTAXIS_ONLY_DIR = True # if True, chemotaxis only affects cell orientation, not speed. If False, chemotaxis affects both orientation and speed (e.g. by making cells move faster when they are oriented towards higher concentration gradient)
 CHEMOTAXIS_CHI = 10.0 # [um^2/s] Chemotactic coefficient (χ) used to compute chemotactic velocity as v_chem = χ * ∇C. Typical range: 0.1–10 µm²/s depending on cell type and chemoattractant. Only used if CHEMOTAXIS_ONLY_DIR is False.
+# +====================================================================+
+# | CELL MIGRATION RELATED PARAMETERS                                  |
+# +====================================================================+
+INCLUDE_DUROTAXIS = True   # if True, cells prefer to move towards stiffer regions, which is implemented by making them prefer to move in the direction of maximum stress/strain. 
+DUROTAXIS_ONLY_DIR = True  # if True, stress/strain direction changes movement vector (keeps speed), False: changes speed too
+FOCAD_MOBILITY_MU  = 1e-4   # Mobility scaling for stress contribution (start small)
+INCLUDE_ORIENTATION_ALIGN = True  # True: enable gradual alignment to principal direction
+ORIENTATION_ALIGN_RATE  = 1.0  # Alignment rate [1/time] -> ~ ORIENTATION_ALIGN_RATE/TIME_STEP steps to achive full aligment
+ORIENTATION_ALIGN_USE_STRESS = True  # True: align to stress eigvec1, False: align to strain eigvec1
+DUROTAXIS_BLEND_BETA = 0.5   # 0: traction only, 1: principal direction only
+DUROTAXIS_USE_STRESS = True   # True: use stress eigenpair, False: use strain eigenpair
+
 
 # +====================================================================+
 # | OTHER DERIVED PARAMETERS AND MODEL CHECKS                          |
@@ -545,6 +559,16 @@ env.newPropertyFloat("NUCLEUS_EPS_CLAMP", NUCLEUS_EPS_CLAMP)
 env.newPropertyUInt("INCLUDE_CHEMOTAXIS", INCLUDE_CHEMOTAXIS)
 env.newPropertyFloat("CHEMOTAXIS_CHI", CHEMOTAXIS_CHI)
 env.newPropertyUInt("CHEMOTAXIS_ONLY_DIR", CHEMOTAXIS_ONLY_DIR)
+
+# Cell migration (durotaxis/orientation alignment) properties
+env.newPropertyUInt("INCLUDE_DUROTAXIS", INCLUDE_DUROTAXIS)
+env.newPropertyUInt("DUROTAXIS_ONLY_DIR", DUROTAXIS_ONLY_DIR)
+env.newPropertyFloat("FOCAD_MOBILITY_MU", FOCAD_MOBILITY_MU)
+env.newPropertyUInt("INCLUDE_ORIENTATION_ALIGN", INCLUDE_ORIENTATION_ALIGN)
+env.newPropertyFloat("ORIENTATION_ALIGN_RATE", ORIENTATION_ALIGN_RATE)
+env.newPropertyUInt("ORIENTATION_ALIGN_USE_STRESS", ORIENTATION_ALIGN_USE_STRESS)
+env.newPropertyFloat("DUROTAXIS_BLEND_BETA", DUROTAXIS_BLEND_BETA)
+env.newPropertyUInt("DUROTAXIS_USE_STRESS", DUROTAXIS_USE_STRESS)
 
 
 # ECM BEHAVIOUR 
@@ -899,6 +923,30 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableFloat("sig_xy", 0.0)
     CELL_agent.newVariableFloat("sig_xz", 0.0)
     CELL_agent.newVariableFloat("sig_yz", 0.0)
+    CELL_agent.newVariableFloat("sig_eig_1", 0.0)
+    CELL_agent.newVariableFloat("sig_eig_2", 0.0)
+    CELL_agent.newVariableFloat("sig_eig_3", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec1_x", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec1_y", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec1_z", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec2_x", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec2_y", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec2_z", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec3_x", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec3_y", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec3_z", 0.0)
+    CELL_agent.newVariableFloat("eps_eig_1", 0.0)
+    CELL_agent.newVariableFloat("eps_eig_2", 0.0)
+    CELL_agent.newVariableFloat("eps_eig_3", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec1_x", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec1_y", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec1_z", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec2_x", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec2_y", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec2_z", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec3_x", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec3_y", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec3_z", 0.0)
     CELL_agent.newVariableArrayFloat("chemotaxis_sensitivity", N_SPECIES)
     if INCLUDE_FOCAL_ADHESIONS:  
         CELL_agent.newRTCFunctionFile("cell_bucket_location_data", cell_bucket_location_data_file).setMessageOutput("cell_bucket_location_message")
@@ -1111,7 +1159,8 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                                         coord_boundary[0], coord_boundary[1],
                                         coord_boundary[2], coord_boundary[3],
                                         coord_boundary[4], coord_boundary[5])
-            # cell_pos = np.array([[0.0, 0.0, 0.0]], dtype=float) # for testing with 1 cell. 
+            if N_CELLS == 1: # DEBUGGING. FIX CELL POSITION TO 0,0,0
+                cell_pos = np.array([[0.0, 0.0, 0.0]], dtype=float) # for testing with 1 cell. 
             cell_orientations = getRandomVectors3D(N_CELLS)
             k_elast = FLAMEGPU.environment.getPropertyFloat("CELL_K_ELAST")
             d_dumping = FLAMEGPU.environment.getPropertyFloat("CELL_D_DUMPING")
@@ -1175,6 +1224,30 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableFloat("sig_xy", 0.0)
                 instance.setVariableFloat("sig_xz", 0.0)   
                 instance.setVariableFloat("sig_yz", 0.0)  
+                instance.setVariableFloat("sig_eig_1", 0.0)
+                instance.setVariableFloat("sig_eig_2", 0.0)
+                instance.setVariableFloat("sig_eig_3", 0.0)
+                instance.setVariableFloat("sig_eigvec1_x", 0.0)
+                instance.setVariableFloat("sig_eigvec1_y", 0.0)
+                instance.setVariableFloat("sig_eigvec1_z", 0.0)
+                instance.setVariableFloat("sig_eigvec2_x", 0.0)
+                instance.setVariableFloat("sig_eigvec2_y", 0.0)
+                instance.setVariableFloat("sig_eigvec2_z", 0.0)
+                instance.setVariableFloat("sig_eigvec3_x", 0.0)
+                instance.setVariableFloat("sig_eigvec3_y", 0.0)
+                instance.setVariableFloat("sig_eigvec3_z", 0.0)
+                instance.setVariableFloat("eps_eig_1", 0.0)
+                instance.setVariableFloat("eps_eig_2", 0.0)
+                instance.setVariableFloat("eps_eig_3", 0.0)
+                instance.setVariableFloat("eps_eigvec1_x", 0.0)
+                instance.setVariableFloat("eps_eigvec1_y", 0.0)
+                instance.setVariableFloat("eps_eigvec1_z", 0.0)
+                instance.setVariableFloat("eps_eigvec2_x", 0.0)
+                instance.setVariableFloat("eps_eigvec2_y", 0.0)
+                instance.setVariableFloat("eps_eigvec2_z", 0.0)
+                instance.setVariableFloat("eps_eigvec3_x", 0.0)
+                instance.setVariableFloat("eps_eigvec3_y", 0.0)
+                instance.setVariableFloat("eps_eigvec3_z", 0.0)
                 u_ref = compute_u_ref_from_anchor_pos(anchor_pos, cell_pos[i, :])
                 instance.setVariableArrayFloat("u_ref_x_i", u_ref[:, 0].tolist())
                 instance.setVariableArrayFloat("u_ref_y_i", u_ref[:, 1].tolist())
