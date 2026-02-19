@@ -19,14 +19,10 @@ import matplotlib.pyplot as plt
 from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary
 
 # TODO LIST:
-# make the durotaxis strength use A = (l1 - l3) / (|l1| + |l2| + |l3| + eps) so it is unitless and easier to tune across scenarios
-# write docs
 # Add cell-fnode repulsion
 # Add FOCAD interaction with other FOCADs from other cells?
 # Include new FOCAD agent generation? (e.g. when a cell starts migrating, it generates new FOCAD agents at its leading edge, which then try to find fibres to attach to. When a FOCAD agent detaches, it can be removed from the simulation or moved back to the cell center to be reused later)
 # Add FOCAD growth and disassembly dynamics (e.g. increase k_fa with time when attached to a fibre, decrease it when not attached, add max lifetime, etc.)
-# Add chemotaxis (cells prefer to move towards higher concentration of a certain species, which could be implemented by making them prefer to move towards areas with higher concentration on the ECM agents)
-# Add durotaxis (cells prefer to move towards stiffer regions, which could be implemented by making them prefer to move towards areas with higher fibre density or stronger fibre connections)
 # Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
 # Add matrix degradation / deposition. Easy: Modifying FNODE properties, Complex: removing / adding FNODE agents (which would require updating the connectivity matrix)
 
@@ -61,7 +57,7 @@ N = 21
 # Time simulation parameters
 # ----------------------------------------------------------------------
 TIME_STEP = 0.1 # s. WARNING: diffusion and cell migration events might need different scales
-STEPS = 50
+STEPS = 60
 
 # +====================================================================+
 # | BOUNDARY CONDITIONS                                                |

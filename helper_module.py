@@ -253,7 +253,7 @@ def print_fibre_calibration_summary(
                 f"d_dumping≈{d_req:.4g} nN*s/um "
                 f"(tau≈{tau:.4g} s ≈ {tau_req_steps:.3g} steps)"
             )
-            print()
+    print()
 
     return {
         "k_node": k_node,
@@ -754,12 +754,28 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             num_cells = FLAMEGPU.environment.getPropertyUInt("N_CELLS")
             num_anchor_points = FLAMEGPU.environment.getPropertyUInt("N_ANCHOR_POINTS")
             num_total_anchor_points = num_cells * num_anchor_points
+            num_points = num_cells + num_total_anchor_points
+
             file.write("POINTS {} float \n".format(num_cells + num_total_anchor_points))
             for coords_ai in cell_coords:
                 file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
             for i in range(num_cells):
                 for j in range(num_anchor_points):
                     file.write("{} {} {} \n".format(cell_anchor_points_x[i][j], cell_anchor_points_y[i][j], cell_anchor_points_z[i][j]))
+            
+            # Vertex cells (one cell per point), needed for thresholding filters
+            # VTK legacy format: CELLS <ncells> <size>
+            # Each vertex cell line is: "1 <pointId>"
+            # So size = ncells * (1 + 1) = 2 * num_points
+            file.write(f"CELLS {num_points} {2 * num_points}\n")
+            for pid in range(num_points):
+                file.write(f"1 {pid}\n")
+
+            # CELL_TYPES: VTK_VERTEX = 1
+            file.write(f"CELL_TYPES {num_points}\n")
+            for _ in range(num_points):
+                file.write("1\n")
+            
             file.write("POINT_DATA {} \n".format(num_cells + num_total_anchor_points))
 
             file.write("SCALARS alignment float 1\n")
