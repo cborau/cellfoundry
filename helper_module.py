@@ -889,7 +889,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             focad_rest_length.append(ai.getVariableFloat("rest_length"))
             focad_k_fa.append(ai.getVariableFloat("k_fa"))
             focad_f_max.append(ai.getVariableFloat("f_max"))
-            focad_attached.append(ai.getVariableUInt8("attached"))
+            focad_attached.append(ai.getVariableInt("attached"))
             focad_active.append(ai.getVariableUInt8("active"))
             focad_v_c.append(ai.getVariableFloat("v_c"))
             focad_fa_state.append(ai.getVariableUInt8("fa_state"))

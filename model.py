@@ -39,7 +39,7 @@ DEBUG_PRINTING = False
 PAUSE_EVERY_STEP = False  # If True, the visualization stops every step until P is pressed
 SAVE_PICKLE = True  # If True, dumps model configuration into a pickle file for post-processing
 SHOW_PLOTS = False  # Show plots at the end of the simulation
-SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
+SAVE_DATA_TO_FILE = False  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
 SAVE_EVERY_N_STEPS = 1 # Affects both the .vtk files and the Dataframes storing boundary data
 
 CURR_PATH = pathlib.Path().absolute()
@@ -57,7 +57,7 @@ N = 21
 # Time simulation parameters
 # ----------------------------------------------------------------------
 TIME_STEP = 0.1 # s. WARNING: diffusion and cell migration events might need different scales
-STEPS = 60
+STEPS = 50
 
 # +====================================================================+
 # | BOUNDARY CONDITIONS                                                |
@@ -219,7 +219,7 @@ INIT_CELL_REACTION_RATES = [0.00018, 0.00018]  # metabolic reaction rates of eac
 INCLUDE_FOCAL_ADHESIONS = True
 INIT_N_FOCAD_PER_CELL = 10 # initial number of focal adhesions per cell. 
 N_ANCHOR_POINTS = 100 # number of anchor points to which focal adhesions can attach on the nucleus surface. Their positions change with nucleus deformation
-MAX_SEARCH_RADIUS_FOCAD = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE# maximum distance at which focal adhesions can find fibre nodes to attach to. WARNING: this value strongly affects the number of bins and therefore the memory allocated for simulations (more bins -> more memory -> faster (in theory))
+MAX_SEARCH_RADIUS_FOCAD = 3.0 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE  # TEMP(debug attach): increased to strongly favor FA-node encounters. Reasonable baseline: 1.0 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
 MAX_FOCAD_ARM_LENGTH = 4 * CELL_RADIUS  # maximum length of the focal adhesion "arm" (distance between the focal adhesion and its anchor point on the nucleus). If the arm is stretched beyond this length, the focal adhesion moves back towards the anchor point. This is a simple way to represent the limited reach of cellular protrusions and avoid unrealistic stretching of focal adhesions. WARNING: make sure this value is consistent with CELL_RADIUS and MAX_SEARCH_RADIUS_FOCAD to avoid unrealistic behavior.
 # WARNING: rate values below assume global timestep ~ 1.0 s
 FOCAD_REST_LENGTH_0 = CELL_RADIUS - CELL_NUCLEUS_RADIUS # [um] Initial rest/target length at creation time.
@@ -227,11 +227,14 @@ FOCAD_MIN_REST_LENGTH = FOCAD_REST_LENGTH_0 / 10.0 # [um] Minimum rest length to
 FOCAD_K_FA = 10.0 # [nN/um] Adhesion stiffness (effective spring constant). Typical range: ~0.1–10 nN/um; 
 FOCAD_F_MAX= 0.0 # [nN] Maximum force per adhesion (cap to avoid runaway and represent myosin/structural limits).Typical range: ~5–50 nN. WARNING: 0 means "no cap" 
 FOCAD_V_C = 0.2 # [um/s] Contractile shortening speed of L(t) (actomyosin-driven).
-FOCAD_K_ON = 0.01 # [1/s] Binding rate (for stochastic attachment). Mean waiting time ~1/K_ON .
-FOCAD_K_OFF_0 = 0.003 # [1/s] Zero-force unbinding rate (baseline detachment). Mean lifetime ~1/K_OFF_0 = 333 s (~5.5 min) at very low force.
+FOCAD_K_ON = 5.0 # [1/s] TEMP(debug attach): high binding rate to force attachments. Reasonable baseline: 0.01 [1/s]
+FOCAD_K_OFF_0 = 0.0002 # [1/s] TEMP(debug attach): low baseline detachment to retain attachments. Reasonable baseline: 0.003 [1/s]
 FOCAD_F_C = 5.0 # [nN] Force scale controlling force sensitivity in koff(F) (catch/slip style). Typical range: ~2–10 nN. Sets how quickly detachment probability changes as traction builds.
 # Example (simple slip): koff(F)=K_OFF_0*exp(|F|/F_C) => faster turnover under high force.
 FOCAD_K_REINF = 0.001 # [1/s] Reinforcement rate for adhesion strengthening. Timescale ~1/K_REINF = 1000 s (~17 min). E.g. something like k_fa <- k_fa + K_REINF * g(|F|) * DT, adhesions gradually stiffen over tens of minutes when they carry load.
+FOCAD_POLARITY_KON_FRONT_GAIN = 2.0  # [-] Frontness gain for attachment probability (k_on).
+FOCAD_POLARITY_KOFF_FRONT_REDUCTION = 0.5  # [-] Fractional reduction of k_off_0 at the front.
+FOCAD_POLARITY_KOFF_REAR_GAIN = 1.0  # [-] Fractional increase of k_off_0 at the rear.
 
 # +====================================================================+
 # | NUCLEAR MECHANICS  (ONLY USED IF FOCAL ADHESIONS ARE INCLUDED)     |
@@ -557,6 +560,9 @@ env.newPropertyFloat("FOCAD_K_ON", FOCAD_K_ON)
 env.newPropertyFloat("FOCAD_K_OFF_0", FOCAD_K_OFF_0)
 env.newPropertyFloat("FOCAD_F_C", FOCAD_F_C)
 env.newPropertyFloat("FOCAD_K_REINF", FOCAD_K_REINF)
+env.newPropertyFloat("FOCAD_POLARITY_KON_FRONT_GAIN", FOCAD_POLARITY_KON_FRONT_GAIN)
+env.newPropertyFloat("FOCAD_POLARITY_KOFF_FRONT_REDUCTION", FOCAD_POLARITY_KOFF_FRONT_REDUCTION)
+env.newPropertyFloat("FOCAD_POLARITY_KOFF_REAR_GAIN", FOCAD_POLARITY_KOFF_REAR_GAIN)
 
 # Nucleus mechanical properties
 env.newPropertyFloat("NUCLEUS_E", NUCLEUS_E)
@@ -712,6 +718,9 @@ if INCLUDE_CELLS:
         CELL_bucket_location_message.newVariableFloat("x")
         CELL_bucket_location_message.newVariableFloat("y")
         CELL_bucket_location_message.newVariableFloat("z")
+        CELL_bucket_location_message.newVariableFloat("orx")
+        CELL_bucket_location_message.newVariableFloat("ory")
+        CELL_bucket_location_message.newVariableFloat("orz")
         CELL_bucket_location_message.newVariableArrayFloat("x_i", N_ANCHOR_POINTS)
         CELL_bucket_location_message.newVariableArrayFloat("y_i", N_ANCHOR_POINTS)
         CELL_bucket_location_message.newVariableArrayFloat("z_i", N_ANCHOR_POINTS)
@@ -741,7 +750,7 @@ if INCLUDE_CELLS:
         FOCAD_bucket_location_message.newVariableFloat("rest_length")
         FOCAD_bucket_location_message.newVariableFloat("k_fa")
         FOCAD_bucket_location_message.newVariableFloat("f_max")
-        FOCAD_bucket_location_message.newVariableUInt8("attached")
+        FOCAD_bucket_location_message.newVariableInt("attached")
         FOCAD_bucket_location_message.newVariableUInt8("active")
         FOCAD_bucket_location_message.newVariableFloat("v_c")
         FOCAD_bucket_location_message.newVariableUInt8("fa_state")
@@ -761,7 +770,7 @@ if INCLUDE_CELLS:
         FOCAD_spatial_location_message.newVariableFloat("fy")
         FOCAD_spatial_location_message.newVariableFloat("fz")
         FOCAD_spatial_location_message.newVariableInt("fnode_id")
-        FOCAD_spatial_location_message.newVariableUInt8("attached")
+        FOCAD_spatial_location_message.newVariableInt("attached")
         FOCAD_spatial_location_message.newVariableUInt8("active")
 
 # ++==================================================================++
@@ -985,11 +994,14 @@ if INCLUDE_FOCAL_ADHESIONS:
     FOCAD_agent.newVariableFloat("x_c", 0.0)
     FOCAD_agent.newVariableFloat("y_c", 0.0)
     FOCAD_agent.newVariableFloat("z_c", 0.0)
+    FOCAD_agent.newVariableFloat("orx", 1.0)
+    FOCAD_agent.newVariableFloat("ory", 0.0)
+    FOCAD_agent.newVariableFloat("orz", 0.0)
     FOCAD_agent.newVariableFloat("rest_length_0")
     FOCAD_agent.newVariableFloat("rest_length")
     FOCAD_agent.newVariableFloat("k_fa")
     FOCAD_agent.newVariableFloat("f_max")
-    FOCAD_agent.newVariableUInt8("attached")
+    FOCAD_agent.newVariableInt("attached")
     FOCAD_agent.newVariableUInt8("active")
     FOCAD_agent.newVariableFloat("v_c")
     FOCAD_agent.newVariableUInt8("fa_state")
@@ -998,6 +1010,7 @@ if INCLUDE_FOCAL_ADHESIONS:
     FOCAD_agent.newVariableFloat("k_off_0")
     FOCAD_agent.newVariableFloat("f_c")
     FOCAD_agent.newVariableFloat("k_reinf")
+    FOCAD_agent.newVariableFloat("f_mag", 0.0)
 
 
     FOCAD_agent.newRTCFunctionFile("focad_bucket_location_data", focad_bucket_location_data_file).setMessageOutput("focad_bucket_location_message")
@@ -1298,11 +1311,14 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableFloat("x_c", cell_pos[i, 0])
                     instance.setVariableFloat("y_c", cell_pos[i, 1])
                     instance.setVariableFloat("z_c", cell_pos[i, 2])
+                    instance.setVariableFloat("orx", cell_orientations[i, 0])
+                    instance.setVariableFloat("ory", cell_orientations[i, 1])
+                    instance.setVariableFloat("orz", cell_orientations[i, 2])
                     instance.setVariableFloat("rest_length_0", FOCAD_REST_LENGTH_0)
                     instance.setVariableFloat("rest_length", FOCAD_REST_LENGTH_0) # initialized at rest length, can be updated during the simulation if needed
                     instance.setVariableFloat("k_fa", FOCAD_K_FA)
                     instance.setVariableFloat("f_max", FOCAD_F_MAX) # WARNING: 0 means "no cap" 
-                    instance.setVariableUInt8("attached", 0) # initialized as not attached
+                    instance.setVariableInt("attached", 0) # initialized as not attached
                     instance.setVariableUInt8("active", 1) # initialized as active (can form new attachments)
                     instance.setVariableFloat("v_c", FOCAD_V_C)
                     instance.setVariableUInt8("fa_state", 1) # [1: nascent] [2: mature] [3: disassembling]
@@ -1311,6 +1327,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableFloat("k_off_0", FOCAD_K_OFF_0)
                     instance.setVariableFloat("f_c", FOCAD_F_C)
                     instance.setVariableFloat("k_reinf", FOCAD_K_REINF)
+                    instance.setVariableFloat("f_mag", 0.0)
             
             FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
 
@@ -1572,6 +1589,38 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                 "pyflamegpu": pyflamegpu,
             },
         )
+
+
+class ReportFAMetrics(pyflamegpu.HostFunction):
+    def __init__(self):
+        super().__init__()
+
+    def run(self, FLAMEGPU):
+        global INCLUDE_FOCAL_ADHESIONS, SAVE_EVERY_N_STEPS
+        if not INCLUDE_FOCAL_ADHESIONS:
+            return
+
+        stepCounter = FLAMEGPU.getStepCounter() + 1
+        if not (stepCounter % SAVE_EVERY_N_STEPS == 0 or stepCounter == 1):
+            return
+
+        focad_agent = FLAMEGPU.agent("FOCAD")
+        n_focad = focad_agent.count()
+        if n_focad <= 0:
+            print(f"FA metrics (step {stepCounter:04d}) -> no FOCAD agents")
+            return
+
+        attached_count = focad_agent.sumInt("attached")
+        total_force_mag = focad_agent.sumFloat("f_mag")
+        attached_ratio = attached_count / float(n_focad)
+        mean_force_mag = total_force_mag / float(n_focad)
+
+        print(
+            f"FA metrics (step {stepCounter:04d}) -> attached={int(attached_count)}/{n_focad} "
+            f"(ratio={attached_ratio:.3f}), mean|F|={mean_force_mag:.4f} nN"
+        )
+
+
                           
 
 class UpdateBoundaryConcentrationMulti(pyflamegpu.HostFunction):
@@ -1612,7 +1661,12 @@ if MOVING_BOUNDARIES:
     model.addStepFunction(mb)
 
 sdf = SaveDataToFile()
+# SaveDataToFile host function; behavior is controlled by SAVE_DATA_TO_FILE flag.
 model.addStepFunction(sdf)
+
+if INCLUDE_FOCAL_ADHESIONS:
+    fam = ReportFAMetrics()
+    model.addStepFunction(fam)
 
 
 """
@@ -1728,6 +1782,12 @@ if INCLUDE_FIBRE_NETWORK:
     fnode_agent_log.logStandardDevFloat("f_by_neg")
     fnode_agent_log.logStandardDevFloat("f_bz_pos")
     fnode_agent_log.logStandardDevFloat("f_bz_neg")
+
+if INCLUDE_FOCAL_ADHESIONS:
+    focad_agent_log = logging_config.agent("FOCAD")
+    focad_agent_log.logCount()
+    focad_agent_log.logSumInt("attached")
+    focad_agent_log.logSumFloat("f_mag")
 
 step_log = pyflamegpu.StepLoggingConfig(logging_config)
 step_log.setFrequency(1) # if 1, data will be logged every step
@@ -1894,6 +1954,7 @@ def manageLogs(steps, is_ensemble, idx):
                                    ("fzpos_x", float), ("fzpos_y", float), ("fzneg_x", float), ("fzneg_y", float)])
     BFORCE_OVER_TIME = []
     BFORCE_SHEAR_OVER_TIME = []
+    FOCAD_METRICS_OVER_TIME = []
 
     if INCLUDE_FIBRE_NETWORK:
         for step in steps:
@@ -1934,6 +1995,23 @@ def manageLogs(steps, is_ensemble, idx):
                     # BFORCE_SHEAR_OVER_TIME = BFORCE_SHEAR_OVER_TIME.append(step_bforce_shear, ignore_index=True) # deprecated
                     BFORCE_SHEAR_OVER_TIME = pd.concat([BFORCE_SHEAR_OVER_TIME, step_bforce_shear], ignore_index=True)
                 counter += 1
+
+    if INCLUDE_FOCAL_ADHESIONS:
+        FMET = make_dataclass("FMET", [("attached", float), ("total", float), ("attached_ratio", float), ("mean_f_mag", float)])
+        for step in steps:
+            stepcount = step.getStepCount()
+            if stepcount % SAVE_EVERY_N_STEPS == 0 or stepcount == 1:
+                focad_agents = step.getAgent("FOCAD")
+                n_focad = focad_agents.getCount()
+                attached = focad_agents.getSumInt("attached")
+                total_f_mag = focad_agents.getSumFloat("f_mag")
+                ratio = (attached / n_focad) if n_focad > 0 else 0.0
+                mean_f_mag = (total_f_mag / n_focad) if n_focad > 0 else 0.0
+                step_fmet = pd.DataFrame([FMET(attached, n_focad, ratio, mean_f_mag)])
+                if len(FOCAD_METRICS_OVER_TIME) == 0:
+                    FOCAD_METRICS_OVER_TIME = step_fmet
+                else:
+                    FOCAD_METRICS_OVER_TIME = pd.concat([FOCAD_METRICS_OVER_TIME, step_fmet], ignore_index=True)
     if not is_ensemble:
         print()
         print("============================")
@@ -1956,6 +2034,11 @@ def manageLogs(steps, is_ensemble, idx):
         print("STRAIN OVER TIME")
         print(OSCILLATORY_STRAIN_OVER_TIME)
         print()
+        if INCLUDE_FOCAL_ADHESIONS and len(FOCAD_METRICS_OVER_TIME) > 0:
+            print("============================")
+            print("FA METRICS OVER TIME")
+            print(FOCAD_METRICS_OVER_TIME)
+            print()
     # Saving pickle
     if SAVE_PICKLE:
         file_name = f'output_data_{idx}.pickle'
@@ -1964,6 +2047,7 @@ def manageLogs(steps, is_ensemble, idx):
             pickle.dump({'BPOS_OVER_TIME': BPOS_OVER_TIME,
                          'BFORCE_OVER_TIME': BFORCE_OVER_TIME,
                          'BFORCE_SHEAR_OVER_TIME': BFORCE_SHEAR_OVER_TIME,
+                         'FOCAD_METRICS_OVER_TIME': FOCAD_METRICS_OVER_TIME,
                          'POISSON_RATIO_OVER_TIME': POISSON_RATIO_OVER_TIME,
                          'OSCILLATORY_STRAIN_OVER_TIME': OSCILLATORY_STRAIN_OVER_TIME,
                          'MODEL_CONFIG': MODEL_CONFIG,

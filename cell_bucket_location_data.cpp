@@ -3,6 +3,9 @@ FLAMEGPU_AGENT_FUNCTION(cell_bucket_location_data, flamegpu::MessageNone, flameg
   FLAMEGPU->message_out.setVariable<float>("x", FLAMEGPU->getVariable<float>("x"));
   FLAMEGPU->message_out.setVariable<float>("y", FLAMEGPU->getVariable<float>("y"));
   FLAMEGPU->message_out.setVariable<float>("z", FLAMEGPU->getVariable<float>("z"));
+  FLAMEGPU->message_out.setVariable<float>("orx", FLAMEGPU->getVariable<float>("orx"));
+  FLAMEGPU->message_out.setVariable<float>("ory", FLAMEGPU->getVariable<float>("ory"));
+  FLAMEGPU->message_out.setVariable<float>("orz", FLAMEGPU->getVariable<float>("orz"));
 
   const uint8_t N_ANCHOR_POINTS = 100; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
 

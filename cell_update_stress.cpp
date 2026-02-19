@@ -293,7 +293,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
   const float agent_sig_xz = invV * agent_S_xz;
   const float agent_sig_yz = invV * agent_S_yz;
 
-  printf("cell_update_stress -- agent_sig = (%.3e, %.3e, %.3e, %.3e, %.3e, %.3e) nN/um^2\n", agent_sig_xx, agent_sig_yy, agent_sig_zz, agent_sig_xy, agent_sig_xz, agent_sig_yz);
+  //printf("cell_update_stress -- agent_sig = (%.3e, %.3e, %.3e, %.3e, %.3e, %.3e) nN/um^2\n", agent_sig_xx, agent_sig_yy, agent_sig_zz, agent_sig_xy, agent_sig_xz, agent_sig_yz);
 
   // -------------------------
   // Isotropic compliance inversion:
@@ -356,8 +356,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
   const float tau_s = fmaxf(NUCLEUS_TAU, 1e-6f);
   const float rel_raw = TIME_STEP / tau_s;
   const float rel = fminf(rel_raw, 1.0f); // rel = 1 
-  printf("cell_update_stress -- agent_eps = (%.3e, %.3e, %.3e, %.3e, %.3e, %.3e) eps_tilde=(%.3e, %.3e, %.3e, %.3e, %.3e, %.3e) rel=%.3f\n", agent_eps_xx, agent_eps_yy, agent_eps_zz, agent_eps_xy, agent_eps_xz, agent_eps_yz,
-                                                                                                                        agent_eps_tilde_xx, agent_eps_tilde_yy, agent_eps_tilde_zz, agent_eps_tilde_xy, agent_eps_tilde_xz, agent_eps_tilde_yz, rel);
+  // printf("cell_update_stress -- agent_eps = (%.3e, %.3e, %.3e, %.3e, %.3e, %.3e) eps_tilde=(%.3e, %.3e, %.3e, %.3e, %.3e, %.3e) rel=%.3f\n", agent_eps_xx, agent_eps_yy, agent_eps_zz, agent_eps_xy, agent_eps_xz, agent_eps_yz,
+  //                                                                                                                       agent_eps_tilde_xx, agent_eps_tilde_yy, agent_eps_tilde_zz, agent_eps_tilde_xy, agent_eps_tilde_xz, agent_eps_tilde_yz, rel);
 
   agent_eps_xx += rel * (agent_eps_tilde_xx - agent_eps_xx);
   agent_eps_yy += rel * (agent_eps_tilde_yy - agent_eps_yy);

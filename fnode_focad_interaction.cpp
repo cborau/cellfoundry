@@ -49,7 +49,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_focad_interaction, flamegpu::MessageSpatial3D, fla
 
     // Filter: only adhesions that belong to this node and are active/attached
     const int     message_fnode_id = message.getVariable<int>("fnode_id");
-    const uint8_t message_attached = message.getVariable<uint8_t>("attached");
+    const int message_attached = message.getVariable<int>("attached");
     const uint8_t message_active   = message.getVariable<uint8_t>("active");
 
     if (message_fnode_id != agent_id) continue;
@@ -70,7 +70,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_focad_interaction, flamegpu::MessageSpatial3D, fla
     agent_fx += best_fx;
     agent_fy += best_fy;
     agent_fz += best_fz;
-    printf("fnode_focad_interaction -- FNODE %d found relevant FOCAD with force (%.4f, %.4f, %.4f)\n", agent_id, best_fx, best_fy, best_fz);
+    // printf("fnode_focad_interaction -- FNODE %d found relevant FOCAD with force (%.4f, %.4f, %.4f)\n", agent_id, best_fx, best_fy, best_fz);
   }
 
   FLAMEGPU->setVariable<float>("fx", agent_fx);

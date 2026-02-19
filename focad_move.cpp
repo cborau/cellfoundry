@@ -13,7 +13,7 @@ FLAMEGPU_AGENT_FUNCTION(focad_move, flamegpu::MessageBucket, flamegpu::MessageNo
 
   uint8_t agent_active = FLAMEGPU->getVariable<uint8_t>("active");
   int agent_fnode_id = FLAMEGPU->getVariable<int>("fnode_id");
-  uint8_t agent_attached = FLAMEGPU->getVariable<uint8_t>("attached");
+  int agent_attached = FLAMEGPU->getVariable<int>("attached");
 
   const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
   const float MAX_SEARCH_RADIUS_FOCAD = FLAMEGPU->environment.getProperty<float>("MAX_SEARCH_RADIUS_FOCAD");

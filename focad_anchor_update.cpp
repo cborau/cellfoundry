@@ -29,6 +29,9 @@ FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::
   float agent_x_c = FLAMEGPU->getVariable<float>("x_c");
   float agent_y_c = FLAMEGPU->getVariable<float>("y_c");
   float agent_z_c = FLAMEGPU->getVariable<float>("z_c");
+  float agent_orx = FLAMEGPU->getVariable<float>("orx");
+  float agent_ory = FLAMEGPU->getVariable<float>("ory");
+  float agent_orz = FLAMEGPU->getVariable<float>("orz");
 
   float agent_x_i = FLAMEGPU->getVariable<float>("x_i");
   float agent_y_i = FLAMEGPU->getVariable<float>("y_i");
@@ -57,6 +60,9 @@ FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::
     agent_x_c = message.getVariable<float>("x");
     agent_y_c = message.getVariable<float>("y");
     agent_z_c = message.getVariable<float>("z");
+    agent_orx = message.getVariable<float>("orx");
+    agent_ory = message.getVariable<float>("ory");
+    agent_orz = message.getVariable<float>("orz");
 
     if (agent_anchor_id >= 0) {
       // Anchor already assigned, skip the search
@@ -105,6 +111,9 @@ FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::
   FLAMEGPU->setVariable<float>("x_c", agent_x_c);
   FLAMEGPU->setVariable<float>("y_c", agent_y_c);
   FLAMEGPU->setVariable<float>("z_c", agent_z_c);
+  FLAMEGPU->setVariable<float>("orx", agent_orx);
+  FLAMEGPU->setVariable<float>("ory", agent_ory);
+  FLAMEGPU->setVariable<float>("orz", agent_orz);
 
   FLAMEGPU->setVariable<float>("x_i", agent_x_i);
   FLAMEGPU->setVariable<float>("y_i", agent_y_i);

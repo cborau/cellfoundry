@@ -229,12 +229,12 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
         steer_x += CHEMOTAXIS_CHI * chemo_dir_x;
         steer_y += CHEMOTAXIS_CHI * chemo_dir_y;
         steer_z += CHEMOTAXIS_CHI * chemo_dir_z;
-        printf("Agent %d: chemotaxis steer=(%.3f, %.3f, %.3f)\n", agent_id, CHEMOTAXIS_CHI * chemo_dir_x, CHEMOTAXIS_CHI * chemo_dir_y, CHEMOTAXIS_CHI * chemo_dir_z);
+        //printf("Agent %d: chemotaxis steer=(%.3f, %.3f, %.3f)\n", agent_id, CHEMOTAXIS_CHI * chemo_dir_x, CHEMOTAXIS_CHI * chemo_dir_y, CHEMOTAXIS_CHI * chemo_dir_z);
       } else {
         dv_x += CHEMOTAXIS_CHI * chemo_dir_x;
         dv_y += CHEMOTAXIS_CHI * chemo_dir_y;
         dv_z += CHEMOTAXIS_CHI * chemo_dir_z;
-        printf("Agent %d: chemotaxis dv=(%.3f, %.3f, %.3f)\n", agent_id, CHEMOTAXIS_CHI * chemo_dir_x, CHEMOTAXIS_CHI * chemo_dir_y, CHEMOTAXIS_CHI * chemo_dir_z);
+        //printf("Agent %d: chemotaxis dv=(%.3f, %.3f, %.3f)\n", agent_id, CHEMOTAXIS_CHI * chemo_dir_x, CHEMOTAXIS_CHI * chemo_dir_y, CHEMOTAXIS_CHI * chemo_dir_z);
       }
     }
   }
@@ -274,8 +274,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
     normalize3(duro_dir_x, duro_dir_y, duro_dir_z);
 
     // Strength scaling
-    printf("agent_sig=(%.3f, %.3f, %.3f, %.3f, %.3f, %.3f) eps=(%.3f, %.3f, %.3f, %.3f, %.3f, %.3f)\n", agent_sig_xx, agent_sig_yy, agent_sig_zz, agent_sig_xy, agent_sig_xz, agent_sig_yz,
-                                                                                                                        agent_eps_xx, agent_eps_yy, agent_eps_zz, agent_eps_xy, agent_eps_xz, agent_eps_yz);
+    //printf("agent_sig=(%.3f, %.3f, %.3f, %.3f, %.3f, %.3f) eps=(%.3f, %.3f, %.3f, %.3f, %.3f, %.3f)\n", agent_sig_xx, agent_sig_yy, agent_sig_zz, agent_sig_xy, agent_sig_xz, agent_sig_yz,
+    //                                                                                                                    agent_eps_xx, agent_eps_yy, agent_eps_zz, agent_eps_xy, agent_eps_xz, agent_eps_yz);
     float scale_energy = agent_sig_xx*agent_eps_xx + agent_sig_yy*agent_eps_yy + agent_sig_zz*agent_eps_zz
                        + 2.0f*(agent_sig_xy*agent_eps_xy + agent_sig_xz*agent_eps_xz + agent_sig_yz*agent_eps_yz);
     if (scale_energy < 0.0f) scale_energy = 0.0f;
@@ -285,7 +285,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
     float A = (l1 - l3) / aniso_den; // unitless, 0..1, vanishes when l1~l2~l3, increases as l1>>l2,l3; 
 
     // Final durotaxis strength
-    printf("Agent %d: durotaxis scale_energy=%.3f A=%.3f\n", agent_id, scale_energy, A);
+    //printf("Agent %d: durotaxis scale_energy=%.3f A=%.3f\n", agent_id, scale_energy, A);
     float duro_strength = FOCAD_MOBILITY_MU * (scale_energy + A);
     // If both are tiny, keep a minimal fallback based on |l1|
     if (duro_strength < 1e-12f) {
@@ -296,12 +296,12 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
       steer_x += duro_strength * duro_dir_x;
       steer_y += duro_strength * duro_dir_y;
       steer_z += duro_strength * duro_dir_z;
-      printf("Agent %d: durotaxis steer=(%.3f, %.3f, %.3f)\n", agent_id, duro_strength * duro_dir_x, duro_strength * duro_dir_y, duro_strength * duro_dir_z);
+      //printf("Agent %d: durotaxis steer=(%.3f, %.3f, %.3f)\n", agent_id, duro_strength * duro_dir_x, duro_strength * duro_dir_y, duro_strength * duro_dir_z);
     } else {
       dv_x += duro_strength * duro_dir_x;
       dv_y += duro_strength * duro_dir_y;
       dv_z += duro_strength * duro_dir_z;
-      printf("Agent %d: durotaxis dv=(%.3f, %.3f, %.3f)\n", agent_id, duro_strength * duro_dir_x, duro_strength * duro_dir_y, duro_strength * duro_dir_z);
+      //printf("Agent %d: durotaxis dv=(%.3f, %.3f, %.3f)\n", agent_id, duro_strength * duro_dir_x, duro_strength * duro_dir_y, duro_strength * duro_dir_z);
     }
   }
 
@@ -343,7 +343,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
     agent_vx = vmag * ndir_x;
     agent_vy = vmag * ndir_y;
     agent_vz = vmag * ndir_z;
-    printf("Agent %d: steer=(%.3f, %.3f, %.3f) v=(%.3f, %.3f, %.3f)\n", agent_id, steer_x, steer_y, steer_z, agent_vx, agent_vy, agent_vz);
+    //printf("Agent %d: steer=(%.3f, %.3f, %.3f) v=(%.3f, %.3f, %.3f)\n", agent_id, steer_x, steer_y, steer_z, agent_vx, agent_vy, agent_vz);
   }
 
   // Add speed-changing contributions

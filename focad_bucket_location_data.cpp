@@ -22,7 +22,7 @@ FLAMEGPU_AGENT_FUNCTION(focad_bucket_location_data, flamegpu::MessageNone, flame
   FLAMEGPU->message_out.setVariable<float>("rest_length", FLAMEGPU->getVariable<float>("rest_length"));
   FLAMEGPU->message_out.setVariable<float>("k_fa", FLAMEGPU->getVariable<float>("k_fa"));
   FLAMEGPU->message_out.setVariable<float>("f_max", FLAMEGPU->getVariable<float>("f_max"));
-  FLAMEGPU->message_out.setVariable<uint8_t>("attached", FLAMEGPU->getVariable<uint8_t>("attached"));
+  FLAMEGPU->message_out.setVariable<int>("attached", FLAMEGPU->getVariable<int>("attached"));
   FLAMEGPU->message_out.setVariable<uint8_t>("active", FLAMEGPU->getVariable<uint8_t>("active"));
   FLAMEGPU->message_out.setVariable<float>("v_c", FLAMEGPU->getVariable<float>("v_c"));
   FLAMEGPU->message_out.setVariable<uint8_t>("fa_state", FLAMEGPU->getVariable<uint8_t>("fa_state"));
