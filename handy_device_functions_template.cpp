@@ -1,4 +1,17 @@
-// Handy device functions for 3D vector operations. Copy-paste into other function files as needed.
+/**
+ * handy_device_functions_template
+ *
+ * Purpose:
+ *   Provide reusable device-side vector algebra helpers for interaction kernels.
+ *
+ * Notes:
+ *   This file is a template/reference module and is intended for copy-paste use
+ *   inside runtime-compiled FLAMEGPU agent function files.
+ */
+
+/**
+ * vec3CrossProd: compute cross product (x1,y1,z1) x (x2,y2,z2).
+ */
 FLAMEGPU_DEVICE_FUNCTION void vec3CrossProd(float &x, float &y, float &z, float x1, float y1, float z1, float x2, float y2, float z2) {
   x = (y1 * z2 - z1 * y2);
   y = (z1 * x2 - x1 * z2);

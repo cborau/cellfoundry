@@ -1,3 +1,16 @@
+/**
+ * fnode_bucket_location_data
+ *
+ * Purpose:
+ *   Export FNODE state and connectivity arrays into a bucket message keyed by node id.
+ *
+ * Inputs:
+ *   - FNODE kinematics and material parameters
+ *   - Connectivity arrays: linked_nodes, equilibrium_distance
+ *
+ * Outputs:
+ *   - MessageBucket record for direct id-based neighbor access
+ */
 FLAMEGPU_AGENT_FUNCTION(fnode_bucket_location_data, flamegpu::MessageNone, flamegpu::MessageBucket) {
   FLAMEGPU->message_out.setVariable<int>("id", FLAMEGPU->getVariable<int>("id"));
   FLAMEGPU->message_out.setVariable<float>("x", FLAMEGPU->getVariable<float>("x"));

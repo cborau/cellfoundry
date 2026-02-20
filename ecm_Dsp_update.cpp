@@ -16,8 +16,20 @@ FLAMEGPU_DEVICE_FUNCTION void vec3Normalize(float &x, float &y, float &z) {
   vec3Div(x, y, z, length);
 }
 
-// This function computes the distance and number of fnode agent neighbours of each ECM agent. 
-// This is used to compute an heterogeneous diffusion constant for each point of the ECM  
+/**
+ * ecm_Dsp_update
+ *
+ * Purpose:
+ *   Compute local FNODE crowding around each ECM voxel and downscale diffusion
+ *   coefficients to represent heterogeneous transport in dense regions.
+ *
+ * Inputs:
+ *   - Spatial FNODE messages around each ECM position
+ *   - Environment controls: equilibrium distance, average voxel density
+ *
+ * Outputs:
+ *   - Updated D_sp array per ECM agent
+ */
 FLAMEGPU_AGENT_FUNCTION(ecm_Dsp_update, flamegpu::MessageSpatial3D, flamegpu::MessageNone) {
   // Agent properties in local register
   int id = FLAMEGPU->getVariable<int>("id");

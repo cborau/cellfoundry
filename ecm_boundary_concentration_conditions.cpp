@@ -1,4 +1,16 @@
-// interacts with the boundaries in there is external diffusion
+/**
+ * ecm_boundary_concentration_conditions
+ *
+ * Purpose:
+ *   Apply boundary concentration conditions to ECM agents located near domain faces.
+ *
+ * Inputs:
+ *   - ECM position and current species concentrations
+ *   - Boundary positions and boundary concentration macro properties
+ *
+ * Outputs:
+ *   - Updated agent C_sp and synchronized C_SP_MACRO values for touched boundaries
+ */
 FLAMEGPU_AGENT_FUNCTION(ecm_boundary_concentration_conditions, flamegpu::MessageNone, flamegpu::MessageNone) {
   //Get agent variables (agent calling the function)
   int agent_id = FLAMEGPU->getVariable<int>("id");

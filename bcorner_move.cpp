@@ -1,3 +1,19 @@
+/**
+ * bcorner_move
+ *
+ * Purpose:
+ *   Synchronize each BCORNER agent position with the current domain boundary coordinates.
+ *
+ * Inputs:
+ *   - Agent variable: id
+ *   - Environment properties: COORDS_BOUNDARIES[6]
+ *
+ * Outputs:
+ *   - Updated BCORNER position (x, y, z)
+ *
+ * Notes:
+ *   BCORNER ids 1..8 map to the eight corners of the simulation box.
+ */
 FLAMEGPU_AGENT_FUNCTION(bcorner_move, flamegpu::MessageNone, flamegpu::MessageNone) {
   //Agent position vector
   float agent_x = FLAMEGPU->getVariable<float>("x");

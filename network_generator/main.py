@@ -3,14 +3,18 @@ import numpy as np
 from initial_network_generation import initial_network_generation
 from network_optimization import network_optimization
 from branch_optimization import branch_optimization
-from helper_functions_network_gen import plot_network_3d, add_intermediate_nodes, compute_node_connectivity, scale_to_unit_cube, snap_to_boundaries, remove_boundary_connectivity, add_intermediate_nodes_to_plot, get_valency_and_pore_size, save_network_to_vtk, generate_random_vars, get_node_median_distance
+from helper_functions_network_gen import plot_network_3d, add_intermediate_nodes, compute_node_connectivity, scale_to_unit_cube, snap_to_boundaries, remove_boundary_connectivity, add_intermediate_nodes_to_plot, get_valency_and_pore_size, save_network_to_vtk, generate_random_vars, get_node_median_distance, merge_duplicate_nodes, check_duplicates
 import matplotlib.pyplot as plt
 import pickle
 
 def generate_network(lx, ly, lz, l_fiber,rho, enforce_bounds=False, bound_mode="reject"):
 
     # Initial Network Generation
+    # nodes: (N, 3) float array, fibers: (M, 2) int array of node indices.
+    # fiberenergy/fiberlengths: (M,) float arrays, N1/N2: (M, 3) endpoint coords.
     nodes, fibers, fiberenergy, total_energy, N1, N2, N_boundary_nodes, fiberlengths, valencycheck = initial_network_generation(rho, lx, ly, lz, l_fiber, 100)
+
+    check_duplicates(nodes, fibers, "after_initial_generation", edge_kind="fibers")
 
     N = len(nodes)
     N_fibers = len(fibers)
@@ -54,6 +58,7 @@ def generate_network(lx, ly, lz, l_fiber,rho, enforce_bounds=False, bound_mode="
         N_branching_optimize, nodes, fibers, N, enforce_bounds=enforce_bounds, bounds=bounds, bound_mode=bound_mode
     )
 
+    # bounds: list of (min, max) per axis, used for snapping and connectivity pruning.
     return nodes, fibers, bounds
   
 
@@ -93,9 +98,12 @@ if __name__ == "__main__":
         # Load from the pickle file
         with open(file_name, 'rb') as f:
             data = pickle.load(f)
+            # nodes: (N, 3) float array, connectivity: {node_index: [neighbors...]}
             nodes = data['node_coords']
             connectivity = data['connectivity']
+            nodes, connectivity = merge_duplicate_nodes(nodes, connectivity)
     else: 
+        # nodes: (N, 3) float array, fibers: (M, 2) int array, bounds: [(xmin,xmax), ...]
         nodes, fibers, bounds = generate_network(LX, LY, LZ, L_FIBER, RHO, enforce_bounds=ENFORCE_BOUNDS, bound_mode=BOUND_MODE)
         #nodes = scale_to_unit_cube(nodes)
         nodes = snap_to_boundaries(
@@ -111,13 +119,19 @@ if __name__ == "__main__":
         # Plot the network
         
         num_nodes = nodes.shape[0]
+        # connectivity: {node_index: [neighbors...]} with fixed list length MAX_CONNECTIVITY.
         node_connectivity = compute_node_connectivity(fibers, num_nodes, MAX_CONNECTIVITY)
         #plot_network_3d(nodes, node_connectivity, title ='before fix')
 
         nodes, node_connectivity = remove_boundary_connectivity(nodes, node_connectivity, bounds=bounds)
+        nodes, node_connectivity = merge_duplicate_nodes(nodes, node_connectivity)
         # fig, ax = plot_network_3d(nodes, node_connectivity, title ='after fix')
 
+        # new_nodes: (N', 3) float array, new_connectivity: updated connectivity dict.
         new_nodes, new_connectivity = add_intermediate_nodes(nodes, node_connectivity, EDGE_LENGTH, MAX_CONNECTIVITY)
+        check_duplicates(new_nodes, new_connectivity, "after_add_intermediate_nodes", edge_kind="connectivity")
+        # new_nodes = nodes.copy()
+        # new_connectivity = node_connectivity.copy()
         # add_intermediate_nodes_to_plot(ax, new_nodes)
 
         #plt.show()
@@ -132,6 +146,7 @@ if __name__ == "__main__":
                         'LX': LX,
                         'LY': LY,
                         'LZ': LZ,
+                        'N_FIBER': len(fibers),
                         'L_FIBER': L_FIBER,
                         'RHO': RHO,
                         'EDGE_LENGTH': EDGE_LENGTH,

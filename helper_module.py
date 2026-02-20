@@ -74,6 +74,7 @@ def load_fibre_network(
     critical_error = False
     nodes = None
     connectivity = None
+    n_fiber = None
 
     if os.path.exists(file_name):
         # print(f'Loading network from {file_name}')
@@ -95,6 +96,7 @@ def load_fibre_network(
             expected_ly = network_parameters.get('LY')
             expected_lz = network_parameters.get('LZ')
             expected_edge_length = network_parameters.get('EDGE_LENGTH')
+            n_fiber = network_parameters.get('N_FIBER')
 
             if expected_lx is not None and not math.isclose(domain_lx, expected_lx, rel_tol=0.0, abs_tol=epsilon):
                 print('ERROR: Network LX does not match domain size.')
@@ -122,7 +124,7 @@ def load_fibre_network(
     else:
         print(f"ERROR: file {file_name} containing network nodes and connectivity was not found")
         critical_error = True
-        return nodes, connectivity, fibre_segment_equilibrium_distance, critical_error
+        return nodes, connectivity, n_fiber, fibre_segment_equilibrium_distance, critical_error
 
     msg_wrong_network_dimensions = (
         "WARNING: Fibre network nodes do not coincide with boundary faces on at least two axes. "
@@ -151,7 +153,116 @@ def load_fibre_network(
         print(msg_wrong_network_dimensions)
         critical_error = True
 
-    return nodes, connectivity, fibre_segment_equilibrium_distance, critical_error
+    return nodes, connectivity, n_fiber, fibre_segment_equilibrium_distance, critical_error
+
+
+import math
+
+def print_fibre_calibration_summary(
+    fibre_segment_k_elast,
+    fibre_segment_d_dumping,
+    fibre_segment_equilibrium_distance,
+    dt,
+    reference_modulus_mpa=(1.5, 100.0, 700.0),
+    reference_diameter_nm=(20.0, 60.0, 120.0),
+    tau_multipliers=(10.0, 50.0, 100.0),
+):
+    """
+    FNODE-FNODE Kelvin-Voigt link:
+
+        F = k_pair * (d - d0) + d_pair * d_dot
+
+    Model structure:
+      - Two identical springs in series:
+            k_pair = k_node / 2
+      - One dashpot in parallel at link level:
+            d_pair = fibre_segment_d_dumping
+
+    Relaxation time:
+            tau = d_pair / k_pair
+
+    Units:
+      k in nN/um
+      d in nN*s/um
+      L in um
+      dt in s
+      1 MPa = 1000 nN/um^2
+    """
+
+    eps = 1e-20
+
+    k_node = float(fibre_segment_k_elast)        # per spring
+    d_pair = float(fibre_segment_d_dumping)      # dashpot at link level
+    L = float(fibre_segment_equilibrium_distance)
+    dt = float(dt)
+
+    # Two springs in series
+    k_pair = 0.5 * k_node
+
+    # Kelvin-Voigt relaxation time
+    tau = d_pair / max(k_pair, eps)
+    tau_steps = tau / max(dt, eps)
+
+    print("\n--- Fibre calibration summary ---")
+    print(f"k_node = {k_node:.4g} nN/um")
+    print(f"k_pair = {k_pair:.4g} nN/um  (2 springs in series)")
+    print(f"d_dumping = {d_pair:.4g} nN*s/um  (dashpot in parallel)")
+    print(f"L0 = {L:.4g} um, dt = {dt:.4g} s")
+    print(f"Relaxation time tau = d_pair/k_pair = {tau:.4g} s")
+    print(f"That is about {tau_steps:.3g} timesteps if Δt = {dt:.4g} s")
+
+    # Suggested damping values for stable explicit integration
+    print("\nSuggested stabilization targets (tau ≈ 10–100 timesteps):")
+    for m in tau_multipliers:
+        tau_target = m * dt
+        d_suggest = tau_target * k_pair
+        print(f"  tau = {m:.0f}*dt = {tau_target:.4g} s  ->  d_dumping ≈ {d_suggest:.4g} nN*s/um")
+
+    print("\nTuning guideline:")
+    print("  - Too jittery or oscillatory: increase τ (increase d_dumping)")
+    print("  - Too sluggish / takes forever to settle: decrease τ (decrease d_dumping)")
+
+    # Forward mapping: modulus -> implied diameter
+    print("\nForward mapping (given E -> implied fibre diameter):")
+    for E_mpa in reference_modulus_mpa:
+        E = E_mpa * 1000.0  # MPa -> nN/um^2
+        area = (k_pair * L) / max(E, eps)
+        r = math.sqrt(max(area, 0.0) / math.pi)
+        d_nm = 2.0 * r * 1000.0
+        print(f"  E = {E_mpa:.4g} MPa -> diameter ≈ {d_nm:.3f} nm")
+
+    # Inverse mapping: target diameter -> required stiffness and damping
+    print("\nInverse mapping (target E, diameter -> required k_node and d_dumping):")
+    for E_mpa in reference_modulus_mpa:
+        E = E_mpa * 1000.0
+        for diam_nm in reference_diameter_nm:
+            diam_um = diam_nm / 1000.0
+            r = 0.5 * diam_um
+            area = math.pi * r * r
+
+            k_pair_req = E * area / max(L, eps)
+            k_node_req = 2.0 * k_pair_req
+
+            # keep same relaxation time tau
+            d_req = tau * k_pair_req
+            tau_req_steps = tau / max(dt, eps)
+
+            print(
+                f"  E={E_mpa:.4g} MPa, d={diam_nm:.4g} nm -> "
+                f"k_node≈{k_node_req:.4g} nN/um, "
+                f"d_dumping≈{d_req:.4g} nN*s/um "
+                f"(tau≈{tau:.4g} s ≈ {tau_req_steps:.3g} steps)"
+            )
+    print()
+
+    return {
+        "k_node": k_node,
+        "k_pair": k_pair,
+        "d_pair": d_pair,
+        "tau_s": tau,
+        "tau_steps": tau_steps,
+    }
+
 
 
 #Helper functions for agent initialization
@@ -234,7 +345,7 @@ def getFixedVectors3D(n_vectors: int, v_dir: np.array):
     return v_array
     
     
-def getRandomCoordsAroundPoint(n, px, py, pz, radius):
+def getRandomCoordsAroundPoint(n, px, py, pz, radius, on_surface=False):
     """
     Generates N random 3D coordinates within a sphere of a specific radius around a central point.
 
@@ -250,6 +361,8 @@ def getRandomCoordsAroundPoint(n, px, py, pz, radius):
         The z-coordinate of the central point.
     radius : float
         The radius of the sphere.
+    on_surface : bool
+        If True, points lie on the sphere surface; otherwise, points are within the sphere.
 
     Returns
     -------
@@ -261,11 +374,1150 @@ def getRandomCoordsAroundPoint(n, px, py, pz, radius):
     coords = np.zeros((n, 3))
     np.random.seed()
     for i in range(n):
-        radius_i = np.random.uniform(0.0, 1.0) * radius        
+        if on_surface:
+            radius_i = radius
+        else:
+            radius_i = np.random.uniform(0.0, 1.0) * radius
         coords[i, :] = central_point + np.array(rand_dirs[i, :] * radius_i, dtype='float')
     
 
     return coords
+
+
+def compute_u_ref_from_anchor_pos(anchor_pos: np.ndarray,
+                                 cell_center: np.ndarray,
+                                 eps: float = 1e-12) -> np.ndarray:
+    """
+    Compute reference unit vectors u_ref for nucleus anchors.
+
+    Parameters
+    ----------
+    anchor_pos : (N, 3) np.ndarray
+        Anchor positions in world coordinates.
+    cell_center : (3,) np.ndarray
+        Nucleus center in world coordinates (cell_pos[i, :]).
+    eps : float
+        Small value to avoid division by zero.
+
+    Returns
+    -------
+    u_ref : (N, 3) np.ndarray
+        Unit vectors pointing from nucleus center to each anchor.
+    """
+    anchor_pos = np.asarray(anchor_pos, dtype=np.float64)
+    cell_center = np.asarray(cell_center, dtype=np.float64).reshape(3,)
+
+    if anchor_pos.ndim != 2 or anchor_pos.shape[1] != 3:
+        raise ValueError(f"anchor_pos must have shape (N, 3), got {anchor_pos.shape}")
+    if cell_center.shape != (3,):
+        raise ValueError(f"cell_center must have shape (3,), got {cell_center.shape}")
+
+    # Vectors from center to anchors
+    u = anchor_pos - cell_center[None, :]  # (N, 3)
+
+    # Normalize safely
+    norm = np.linalg.norm(u, axis=1)  # (N,)
+    norm = np.maximum(norm, eps)      # avoid divide by zero
+    u_ref = u / norm[:, None]
+
+    return u_ref
+
+
+def build_save_data_context(ecm_agents_per_dir, include_fibre_network, n_nodes):
+    context = {}
+    context["header"] = [
+        "# vtk DataFile Version 3.0",
+        "ECM data",
+        "ASCII",
+        "DATASET POLYDATA",
+        "POINTS {} float".format(8 + ecm_agents_per_dir[0] * ecm_agents_per_dir[1] * ecm_agents_per_dir[2]),
+    ]
+
+    domaindata = ["POLYGONS 6 30"]
+    cube_conn = [
+        [4, 0, 3, 7, 4],
+        [4, 1, 2, 6, 5],
+        [4, 1, 0, 4, 5],
+        [4, 2, 3, 7, 6],
+        [4, 0, 1, 2, 3],
+        [4, 4, 5, 6, 7],
+    ]
+    for i in range(len(cube_conn)):
+        for j in range(len(cube_conn[i])):
+            if j > 0:
+                cube_conn[i][j] = cube_conn[i][j] + ecm_agents_per_dir[0] * ecm_agents_per_dir[1] * ecm_agents_per_dir[2]
+        domaindata.append(' '.join(str(x) for x in cube_conn[i]))
+
+    context["domaindata"] = domaindata
+
+    if include_fibre_network:
+        domaindata_network = []
+        cube_conn_network = [
+            [4, 0, 3, 7, 4],
+            [4, 1, 2, 6, 5],
+            [4, 1, 0, 4, 5],
+            [4, 2, 3, 7, 6],
+            [4, 0, 1, 2, 3],
+            [4, 4, 5, 6, 7],
+        ]
+        for i in range(len(cube_conn_network)):
+            for j in range(len(cube_conn_network[i])):
+                if j > 0:
+                    cube_conn_network[i][j] = cube_conn_network[i][j] + n_nodes
+            domaindata_network.append(' '.join(str(x) for x in cube_conn_network[i]))
+        context["domaindata_network"] = domaindata_network
+
+    context["domaindata"] += [
+        "CELL_DATA 6",
+        "SCALARS boundary_index int 1",
+        "LOOKUP_TABLE default",
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "NORMALS boundary_normals float",
+        "1 0 0",
+        "-1 0 0",
+        "0 1 0",
+        "0 -1 0",
+        "0 0 1",
+        "0 0 -1",
+    ]
+
+    context["vascularizationdata"] = [
+        "# vtk DataFile Version 3.0",
+        "Vascularization points",
+        "ASCII",
+        "DATASET UNSTRUCTURED_GRID",
+    ]
+    context["fibrenodedata"] = [
+        "# vtk DataFile Version 3.0",
+        "Fibre node agents",
+        "ASCII",
+        "DATASET UNSTRUCTURED_GRID",
+    ]
+    context["celldata"] = [
+        "# vtk DataFile Version 3.0",
+        "Cell agents",
+        "ASCII",
+        "DATASET UNSTRUCTURED_GRID",
+    ]
+    context["nucleusdata"] = [
+        "# vtk DataFile Version 3.0",
+        "Cell agents - nucleus data",
+        "ASCII",
+        "DATASET UNSTRUCTURED_GRID",
+    ]
+    context["focaladhesionsdata"] = [
+        "# vtk DataFile Version 3.0",
+        "Focal adhesions",
+        "ASCII",
+        "DATASET UNSTRUCTURED_GRID",
+    ]
+
+    return context
+
+
+def save_data_to_file_step(FLAMEGPU, save_context, config):
+    save_data_to_file = config["SAVE_DATA_TO_FILE"]
+    save_every_n_steps = config["SAVE_EVERY_N_STEPS"]
+    n_species = config["N_SPECIES"]
+    res_path = config["RES_PATH"]
+    include_fibre_network = config["INCLUDE_FIBRE_NETWORK"]
+    heterogeneous_diffusion = config["HETEROGENEOUS_DIFFUSION"]
+    initial_network_connectivity = config["INITIAL_NETWORK_CONNECTIVITY"]
+    n_nodes = config["N_NODES"]
+    include_cells = config["INCLUDE_CELLS"]
+    ecm_population_size = config["ECM_POPULATION_SIZE"]
+    include_focal_adhesions = config["INCLUDE_FOCAL_ADHESIONS"]
+    pyflamegpu = config["pyflamegpu"]
+
+    stepCounter = FLAMEGPU.getStepCounter() + 1
+    coord_boundary = list(FLAMEGPU.environment.getPropertyArrayFloat("COORDS_BOUNDARIES"))
+
+    if not save_data_to_file:
+        return
+    if stepCounter % save_every_n_steps != 0 and stepCounter != 1:
+        return
+
+    if include_fibre_network:
+        file_name = 'fibre_network_data_t{:04d}.vtk'.format(stepCounter)
+        file_path = res_path / file_name
+
+        agent = FLAMEGPU.agent("FNODE")
+        sum_bx_pos = -agent.sumFloat("f_bx_pos")
+        sum_bx_neg = -agent.sumFloat("f_bx_neg")
+        sum_by_pos = -agent.sumFloat("f_by_pos")
+        sum_by_neg = -agent.sumFloat("f_by_neg")
+        sum_bz_pos = -agent.sumFloat("f_bz_pos")
+        sum_bz_neg = -agent.sumFloat("f_bz_neg")
+        sum_bx_pos_y = -agent.sumFloat("f_bx_pos_y")
+        sum_bx_pos_z = -agent.sumFloat("f_bx_pos_z")
+        sum_bx_neg_y = -agent.sumFloat("f_bx_neg_y")
+        sum_bx_neg_z = -agent.sumFloat("f_bx_neg_z")
+        sum_by_pos_x = -agent.sumFloat("f_by_pos_x")
+        sum_by_pos_z = -agent.sumFloat("f_by_pos_z")
+        sum_by_neg_x = -agent.sumFloat("f_by_neg_x")
+        sum_by_neg_z = -agent.sumFloat("f_by_neg_z")
+        sum_bz_pos_x = -agent.sumFloat("f_bz_pos_x")
+        sum_bz_pos_y = -agent.sumFloat("f_bz_pos_y")
+        sum_bz_neg_x = -agent.sumFloat("f_bz_neg_x")
+        sum_bz_neg_y = -agent.sumFloat("f_bz_neg_y")
+
+        ids = list()
+        coords = list()
+        velocity = list()
+        force = list()
+        elastic_energy = list()
+
+        av = agent.getPopulationData()
+        for ai in av:
+            id_ai = ai.getVariableInt("id") - 9
+            coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
+            velocity_ai = (ai.getVariableFloat("vx"), ai.getVariableFloat("vy"), ai.getVariableFloat("vz"))
+            force_ai = (ai.getVariableFloat("fx"), ai.getVariableFloat("fy"), ai.getVariableFloat("fz"))
+            ids.append(id_ai)
+            coords.append(coords_ai)
+            velocity.append(velocity_ai)
+            force.append(force_ai)
+            elastic_energy.append(ai.getVariableFloat("elastic_energy"))
+
+        sorted_indices = np.argsort(ids)
+        ids = [ids[i] for i in sorted_indices]
+        coords = [coords[i] for i in sorted_indices]
+        velocity = [velocity[i] for i in sorted_indices]
+        force = [force[i] for i in sorted_indices]
+        elastic_energy = [elastic_energy[i] for i in sorted_indices]
+
+        added_lines = set()
+        cell_connectivity = []
+        for node_index, connections in initial_network_connectivity.items():
+            for connected_node_index in connections:
+                if connected_node_index != -1:
+                    line = tuple(sorted((node_index, connected_node_index)))
+                    if line not in added_lines:
+                        added_lines.add(line)
+                        cell_connectivity.append(line)
+
+        num_cells = len(cell_connectivity)
+
+        with open(str(file_path), 'w') as file:
+            for line in save_context["fibrenodedata"]:
+                file.write(line + '\n')
+
+            file.write("POINTS {} float \n".format(8 + n_nodes))
+            for coords_ai in coords:
+                file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
+
+            file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[2], coord_boundary[4]))
+            file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[2], coord_boundary[4]))
+            file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[3], coord_boundary[4]))
+            file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[3], coord_boundary[4]))
+            file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[2], coord_boundary[5]))
+            file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[2], coord_boundary[5]))
+            file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[3], coord_boundary[5]))
+            file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[3], coord_boundary[5]))
+
+            file.write(f"CELLS {num_cells + 6} {num_cells * 3 + 6 * 5}\n")
+            for conn in cell_connectivity:
+                file.write(f"2 {conn[0]} {conn[1]}\n")
+            for line in save_context["domaindata_network"]:
+                file.write(line + '\n')
+
+            file.write(f"CELL_TYPES {num_cells + 6}\n")
+            for _ in range(num_cells):
+                file.write("3\n")
+            for _ in range(6):
+                file.write("7\n")
+
+            file.write(f"CELL_DATA {num_cells + 6}\n")
+            file.write("SCALARS boundary_idx int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for _ in range(num_cells):
+                file.write("0\n")
+            for bidx in range(6):
+                file.write(f"{bidx + 1}\n")
+
+            file.write("SCALARS boundary_normal_forces float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for _ in range(num_cells):
+                file.write("0.0\n")
+            file.write(str(sum_bx_pos) + '\n')
+            file.write(str(sum_bx_neg) + '\n')
+            file.write(str(sum_by_pos) + '\n')
+            file.write(str(sum_by_neg) + '\n')
+            file.write(str(sum_bz_pos) + '\n')
+            file.write(str(sum_bz_neg) + '\n')
+
+            file.write("SCALARS boundary_normal_force_scaling float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for _ in range(num_cells):
+                file.write("0.0\n")
+            file.write(str(abs(sum_bx_pos)) + '\n')
+            file.write(str(abs(sum_bx_neg)) + '\n')
+            file.write(str(abs(sum_by_pos)) + '\n')
+            file.write(str(abs(sum_by_neg)) + '\n')
+            file.write(str(abs(sum_bz_pos)) + '\n')
+            file.write(str(abs(sum_bz_neg)) + '\n')
+
+            file.write("SCALARS boundary_shear_forces_pos float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for _ in range(num_cells):
+                file.write("0.0\n")
+            file.write(str(sum_bx_pos_y) + '\n')
+            file.write(str(sum_bx_pos_z) + '\n')
+            file.write(str(sum_by_pos_x) + '\n')
+            file.write(str(sum_by_pos_z) + '\n')
+            file.write(str(sum_bz_pos_x) + '\n')
+            file.write(str(sum_bz_pos_y) + '\n')
+
+            file.write("SCALARS boundary_shear_forces_neg float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for _ in range(num_cells):
+                file.write("0.0\n")
+            file.write(str(sum_bx_neg_y) + '\n')
+            file.write(str(sum_bx_neg_z) + '\n')
+            file.write(str(sum_by_neg_x) + '\n')
+            file.write(str(sum_by_neg_z) + '\n')
+            file.write(str(sum_bz_neg_x) + '\n')
+            file.write(str(sum_bz_neg_y) + '\n')
+
+            file.write("POINT_DATA {} \n".format(8 + n_nodes))
+            file.write("SCALARS is_corner int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for _ in elastic_energy:
+                file.write("0 \n")
+            for _ in range(8):
+                file.write("1 \n")
+
+            file.write("SCALARS elastic_energy float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for ee_ai in elastic_energy:
+                file.write("{:.4f} \n".format(ee_ai))
+            for _ in range(8):
+                file.write("0.0 \n")
+
+            file.write("VECTORS velocity float\n")
+            for v_ai in velocity:
+                file.write("{:.4f} {:.4f} {:.4f} \n".format(v_ai[0], v_ai[1], v_ai[2]))
+            for _ in range(8):
+                file.write("0.0 0.0 0.0 \n")
+
+            file.write("VECTORS force float\n")
+            for f_ai in force:
+                file.write("{:.4f} {:.4f} {:.4f} \n".format(f_ai[0], f_ai[1], f_ai[2]))
+            for _ in range(8):
+                file.write("0.0 0.0 0.0 \n")
+
+    if include_cells:
+        cell_coords = list()
+        cell_velocity = list()
+        cell_orientation = list()
+        cell_alignment = list()
+        cell_radius = list()
+        cell_clock = list()
+        cell_cycle_phase = list()
+        cell_anchor_points_x = list()
+        cell_anchor_points_y = list()
+        cell_anchor_points_z = list()
+        c_sp_multi = list()
+        file_name = 'cells_t{:04d}.vtk'.format(stepCounter)
+        file_path = res_path / file_name
+        cell_agent = FLAMEGPU.agent("CELL")
+        cell_agent.sortInt("id", pyflamegpu.HostAgentAPI.Asc)
+        av = cell_agent.getPopulationData()
+        for ai in av:
+            coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
+            velocity_ai = (ai.getVariableFloat("vx"), ai.getVariableFloat("vy"), ai.getVariableFloat("vz"))
+            orientation_ai = (ai.getVariableFloat("orx"), ai.getVariableFloat("ory"), ai.getVariableFloat("orz"))
+            alignment_ai = ai.getVariableFloat("alignment")
+            radius_ai = ai.getVariableFloat("radius")
+            clock_ai = ai.getVariableFloat("clock")
+            cycle_phase_ai = ai.getVariableInt("cycle_phase")
+            cell_anchor_points_x.append(ai.getVariableArrayFloat("x_i"))
+            cell_anchor_points_y.append(ai.getVariableArrayFloat("y_i"))
+            cell_anchor_points_z.append(ai.getVariableArrayFloat("z_i"))
+            c_sp_multi.append(ai.getVariableArrayFloat("C_sp"))
+            cell_coords.append(coords_ai)
+            cell_velocity.append(velocity_ai)
+            cell_orientation.append(orientation_ai)
+            cell_alignment.append(alignment_ai)
+            cell_radius.append(radius_ai)
+            cell_clock.append(clock_ai)
+            cell_cycle_phase.append(cycle_phase_ai)
+
+        with open(str(file_path), 'w') as file:
+            for line in save_context["celldata"]:
+                file.write(line + '\n')
+            num_cells = FLAMEGPU.environment.getPropertyUInt("N_CELLS")
+            num_anchor_points = FLAMEGPU.environment.getPropertyUInt("N_ANCHOR_POINTS")
+            num_total_anchor_points = num_cells * num_anchor_points
+            num_points = num_cells + num_total_anchor_points
+
+            file.write("POINTS {} float \n".format(num_cells + num_total_anchor_points))
+            for coords_ai in cell_coords:
+                file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
+            for i in range(num_cells):
+                for j in range(num_anchor_points):
+                    file.write("{} {} {} \n".format(cell_anchor_points_x[i][j], cell_anchor_points_y[i][j], cell_anchor_points_z[i][j]))
+            
+            # Vertex cells (one cell per point), needed for thresholding filters
+            # VTK legacy format: CELLS <ncells> <size>
+            # Each vertex cell line is: "1 <pointId>"
+            # So size = ncells * (1 + 1) = 2 * num_points
+            file.write(f"CELLS {num_points} {2 * num_points}\n")
+            for pid in range(num_points):
+                file.write(f"1 {pid}\n")
+
+            # CELL_TYPES: VTK_VERTEX = 1
+            file.write(f"CELL_TYPES {num_points}\n")
+            for _ in range(num_points):
+                file.write("1\n")
+            
+            file.write("POINT_DATA {} \n".format(num_cells + num_total_anchor_points))
+
+            file.write("SCALARS alignment float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for a_ai in cell_alignment:
+                file.write("{:.4f} \n".format(a_ai))
+            for i in range(num_cells):
+                for _ in range(num_anchor_points):
+                    file.write("{:.4f} \n".format(cell_alignment[i]))
+
+            file.write("SCALARS radius float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for r_ai in cell_radius:
+                file.write("{:.4f} \n".format(r_ai))
+            for i in range(num_cells):
+                for _ in range(num_anchor_points):
+                    file.write("{:.4f} \n".format(cell_radius[i] / 10.0))
+
+            file.write("SCALARS clock float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for c_ai in cell_clock:
+                file.write("{:.4f} \n".format(c_ai))
+            for i in range(num_cells):
+                for _ in range(num_anchor_points):
+                    file.write("{:.4f} \n".format(cell_clock[i]))
+
+            file.write("SCALARS cycle_phase int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for ccp_ai in cell_cycle_phase:
+                file.write("{} \n".format(ccp_ai))
+            for i in range(num_cells):
+                for _ in range(num_anchor_points):
+                    file.write("{} \n".format(cell_cycle_phase[i]))
+
+            for s in range(n_species):
+                file.write("SCALARS concentration_species_{0} float 1 \n".format(s))
+                file.write("LOOKUP_TABLE default\n")
+                for c_ai in c_sp_multi:
+                    file.write("{:.4f} \n".format(c_ai[s]))
+                for i in range(num_cells):
+                    for _ in range(num_anchor_points):
+                        file.write("{:.4f} \n".format(c_sp_multi[i][s]))
+
+            file.write("VECTORS velocity float\n")
+            for v_ai in cell_velocity:
+                file.write("{:.4f} {:.4f} {:.4f} \n".format(v_ai[0], v_ai[1], v_ai[2]))
+            for _ in range(num_total_anchor_points):
+                file.write("0.0 0.0 0.0 \n")
+
+            file.write("VECTORS orientation float\n")
+            for o_ai in cell_orientation:
+                file.write("{:.4f} {:.4f} {:.4f} \n".format(o_ai[0], o_ai[1], o_ai[2]))
+            for _ in range(num_total_anchor_points):
+                file.write("0.0 0.0 0.0 \n")
+
+    if include_focal_adhesions:
+        focad_coords = list()
+        focad_velocity = list()
+        focad_force = list()
+        focad_ori = list()
+        focad_cell_id = list()
+        focad_rest_length = list()
+        focad_k_fa = list()
+        focad_f_max = list()
+        focad_attached = list()
+        focad_active = list()
+        focad_v_c = list()
+        focad_fa_state = list()
+        focad_age = list()
+        focad_k_on = list()
+        focad_k_off_0 = list()
+        focad_f_c = list()
+        focad_k_reinf = list()
+        focad_f_mag = list()
+        focad_is_front = list()
+        focad_is_rear = list()
+        focad_attached_front = list()
+        focad_attached_rear = list()
+        focad_frontness_front = list()
+        focad_frontness_rear = list()
+        focad_k_on_eff_front = list()
+        focad_k_on_eff_rear = list()
+        focad_k_off_0_eff_front = list()
+        focad_k_off_0_eff_rear = list()
+        focad_linc_prev_total_length = list()
+        focad_x_i = list()
+        focad_y_i = list()
+        focad_z_i = list()
+
+        file_name = 'focad_t{:04d}.vtk'.format(stepCounter)
+        file_path = res_path / file_name
+
+        focad_agent = FLAMEGPU.agent("FOCAD")
+        focad_agent.sortInt("id", pyflamegpu.HostAgentAPI.Asc)
+        av = focad_agent.getPopulationData()
+        num_focad = len(av)
+
+        for ai in av:
+            x = ai.getVariableFloat("x")
+            y = ai.getVariableFloat("y")
+            z = ai.getVariableFloat("z")
+            vx = ai.getVariableFloat("vx")
+            vy = ai.getVariableFloat("vy")
+            vz = ai.getVariableFloat("vz")
+            fx = ai.getVariableFloat("fx")
+            fy = ai.getVariableFloat("fy")
+            fz = ai.getVariableFloat("fz")
+            x_i = ai.getVariableFloat("x_i")
+            y_i = ai.getVariableFloat("y_i")
+            z_i = ai.getVariableFloat("z_i")
+            ox = x_i - x
+            oy = y_i - y
+            oz = z_i - z
+
+            focad_coords.append((x, y, z))
+            focad_velocity.append((vx, vy, vz))
+            focad_force.append((fx, fy, fz))
+            focad_ori.append((ox, oy, oz))
+            focad_x_i.append(x_i)
+            focad_y_i.append(y_i)
+            focad_z_i.append(z_i)
+            focad_cell_id.append(ai.getVariableInt("cell_id"))
+            focad_rest_length.append(ai.getVariableFloat("rest_length"))
+            focad_k_fa.append(ai.getVariableFloat("k_fa"))
+            focad_f_max.append(ai.getVariableFloat("f_max"))
+            focad_attached.append(ai.getVariableInt("attached"))
+            focad_active.append(ai.getVariableUInt8("active"))
+            focad_v_c.append(ai.getVariableFloat("v_c"))
+            focad_fa_state.append(ai.getVariableUInt8("fa_state"))
+            focad_age.append(ai.getVariableFloat("age"))
+            focad_k_on.append(ai.getVariableFloat("k_on"))
+            focad_k_off_0.append(ai.getVariableFloat("k_off_0"))
+            focad_f_c.append(ai.getVariableFloat("f_c"))
+            focad_k_reinf.append(ai.getVariableFloat("k_reinf"))
+            focad_f_mag.append(ai.getVariableFloat("f_mag"))
+            focad_is_front.append(ai.getVariableInt("is_front"))
+            focad_is_rear.append(ai.getVariableInt("is_rear"))
+            focad_attached_front.append(ai.getVariableInt("attached_front"))
+            focad_attached_rear.append(ai.getVariableInt("attached_rear"))
+            focad_frontness_front.append(ai.getVariableFloat("frontness_front"))
+            focad_frontness_rear.append(ai.getVariableFloat("frontness_rear"))
+            focad_k_on_eff_front.append(ai.getVariableFloat("k_on_eff_front"))
+            focad_k_on_eff_rear.append(ai.getVariableFloat("k_on_eff_rear"))
+            focad_k_off_0_eff_front.append(ai.getVariableFloat("k_off_0_eff_front"))
+            focad_k_off_0_eff_rear.append(ai.getVariableFloat("k_off_0_eff_rear"))
+            focad_linc_prev_total_length.append(ai.getVariableFloat("linc_prev_total_length"))
+
+        with open(str(file_path), 'w') as file:
+            for line in save_context["focaladhesionsdata"]:
+                file.write(line + '\n')
+
+            file.write("POINTS {} float \n".format(num_focad))
+            for coords_ai in focad_coords:
+                file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
+
+            file.write("POINT_DATA {} \n".format(num_focad))
+
+            file.write("SCALARS cell_id int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_cell_id:
+                file.write("{} \n".format(v))
+
+            file.write("SCALARS attached int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_attached:
+                file.write("{} \n".format(int(v)))
+
+            file.write("SCALARS active int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_active:
+                file.write("{} \n".format(int(v)))
+
+            file.write("SCALARS fa_state int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_fa_state:
+                file.write("{} \n".format(int(v)))
+
+            file.write("SCALARS rest_length float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_rest_length:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS k_fa float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_k_fa:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS f_max float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_f_max:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS v_c float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_v_c:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS age float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_age:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS f_mag float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_f_mag:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS is_front int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_is_front:
+                file.write("{} \n".format(int(v)))
+
+            file.write("SCALARS is_rear int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_is_rear:
+                file.write("{} \n".format(int(v)))
+
+            file.write("SCALARS attached_front int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_attached_front:
+                file.write("{} \n".format(int(v)))
+
+            file.write("SCALARS attached_rear int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_attached_rear:
+                file.write("{} \n".format(int(v)))
+
+            file.write("SCALARS frontness_front float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_frontness_front:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS frontness_rear float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_frontness_rear:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS k_on float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_k_on:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS k_on_eff_front float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_k_on_eff_front:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS k_on_eff_rear float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_k_on_eff_rear:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS k_off_0 float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_k_off_0:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS k_off_0_eff_front float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_k_off_0_eff_front:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS k_off_0_eff_rear float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_k_off_0_eff_rear:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS f_c float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_f_c:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS k_reinf float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_k_reinf:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS linc_prev_total_length float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_linc_prev_total_length:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS x_i float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_x_i:
+                file.write("{:.6f} \n".format(v))
+
+            file.write("SCALARS y_i float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_y_i:
+                file.write("{:.6f} \n".format(v))
+
+            file.write("SCALARS z_i float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_z_i:
+                file.write("{:.6f} \n".format(v))
+
+            file.write("VECTORS velocity float\n")
+            for v_ai in focad_velocity:
+                file.write("{:.6f} {:.6f} {:.6f} \n".format(v_ai[0], v_ai[1], v_ai[2]))
+
+            file.write("VECTORS force float\n")
+            for f_ai in focad_force:
+                file.write("{:.6f} {:.6f} {:.6f} \n".format(f_ai[0], f_ai[1], f_ai[2]))
+
+            file.write("VECTORS ori float\n")
+            for o_ai in focad_ori:
+                file.write("{:.6f} {:.6f} {:.6f} \n".format(o_ai[0], o_ai[1], o_ai[2]))
+                
+                
+            # Write nucleus data in a separate file. For these files:
+            #   - Apply 'Tensor Glyph' and choose tensor 'U' (or 'eps') to render ellipsoids.
+            #   - Set Glyph scale factor to nucleus radius (or use 'nucleus_radius' scalar as Scale Array).
+            file_name = "nucleus_t{:04d}.vtk".format(stepCounter)
+            file_path = res_path / file_name
+            # -----------------------------
+            # Collect CELL data
+            # -----------------------------
+            cell_coords = list()
+            cell_id = list()
+            cell_radius = list()
+            nucleus_radius = list()
+
+            # raw components
+            eps = list()   # (xx, yy, zz, xy, xz, yz)
+            sig = list()   # (xx, yy, zz, xy, xz, yz)
+
+            cell_agent = FLAMEGPU.agent("CELL")
+            cell_agent.sortInt("id", pyflamegpu.HostAgentAPI.Asc)  # keep ids ordered for viz
+            av = cell_agent.getPopulationData()
+            num_cells = len(av)
+
+            for ai in av:
+                x = ai.getVariableFloat("x")
+                y = ai.getVariableFloat("y")
+                z = ai.getVariableFloat("z")
+                r = ai.getVariableFloat("radius")
+                nr = ai.getVariableFloat("nucleus_radius")
+
+                exx = ai.getVariableFloat("eps_xx")
+                eyy = ai.getVariableFloat("eps_yy")
+                ezz = ai.getVariableFloat("eps_zz")
+                exy = ai.getVariableFloat("eps_xy")
+                exz = ai.getVariableFloat("eps_xz")
+                eyz = ai.getVariableFloat("eps_yz")
+
+                sxx = ai.getVariableFloat("sig_xx")
+                syy = ai.getVariableFloat("sig_yy")
+                szz = ai.getVariableFloat("sig_zz")
+                sxy = ai.getVariableFloat("sig_xy")
+                sxz = ai.getVariableFloat("sig_xz")
+                syz = ai.getVariableFloat("sig_yz")
+
+                cell_coords.append((x, y, z))
+                cell_id.append(ai.getVariableInt("id"))
+                cell_radius.append(r)
+                nucleus_radius.append(nr)
+
+                eps.append((exx, eyy, ezz, exy, exz, eyz))
+                sig.append((sxx, syy, szz, sxy, sxz, syz))
+
+            eps = np.asarray(eps, dtype=np.float64)  # (N,6)
+            sig = np.asarray(sig, dtype=np.float64)  # (N,6)
+            cell_radius = np.asarray(cell_radius, dtype=np.float64)
+            nucleus_radius = np.asarray(nucleus_radius, dtype=np.float64)
+
+            # -----------------------------
+            # Build full 3x3 symmetric tensors
+            # -----------------------------
+            def voigt6_to_sym33(v6):
+                """v6 = (xx,yy,zz,xy,xz,yz) -> 3x3 symmetric"""
+                xx, yy, zz, xy, xz, yz = v6
+                return np.array([[xx, xy, xz],
+                                [xy, yy, yz],
+                                [xz, yz, zz]], dtype=np.float64)
+
+            eps33 = np.zeros((num_cells, 3, 3), dtype=np.float64)
+            sig33 = np.zeros((num_cells, 3, 3), dtype=np.float64)
+            U33   = np.zeros((num_cells, 3, 3), dtype=np.float64)
+
+            for i in range(num_cells):
+                eps33[i] = voigt6_to_sym33(eps[i])
+                sig33[i] = voigt6_to_sym33(sig[i])
+                U33[i]   = np.eye(3, dtype=np.float64) + eps33[i]  # U = I + eps
+
+            # -----------------------------
+            # Derived scalars and vectors for mechanical interpretation
+            # -----------------------------
+            #
+            # eps33  : symmetric small-strain tensor (dimensionless)
+            # sig33  : Cauchy stress tensor (units: nN/um^2 = kPa)
+            #
+            # The following derived quantities provide compact,
+            # orientation-independent mechanical metrics suitable
+            # for visualization and quantitative analysis.
+            #
+
+            # Frobenius norm of strain tensor:
+            #   ||eps|| = sqrt(sum_ij eps_ij^2)
+            # Measures total magnitude of nucleus deformation,
+            # independent of coordinate system.
+            # 0 corresponds to a perfect sphere (no deformation).
+            eps_norm = np.sqrt(np.sum(eps33 * eps33, axis=(1, 2)))
+
+            # Frobenius norm of stress tensor:
+            #   ||sigma|| = sqrt(sum_ij sigma_ij^2)
+            # Represents overall stress intensity inside the nucleus.
+            # Units are kPa under the nN/um^2 unit convention.
+            sig_norm = np.sqrt(np.sum(sig33 * sig33, axis=(1, 2)))
+
+            # Hydrostatic stress:
+            #   sigma_hydro = (1/3) tr(sigma)
+            # Mean normal stress component.
+            # Positive values indicate net tension,
+            # negative values indicate net compression.
+            sig_hydro = (sig33[:, 0, 0] + sig33[:, 1, 1] + sig33[:, 2, 2]) / 3.0
+
+            # Deviatoric stress tensor:
+            #   sigma' = sigma - sigma_hydro * I
+            # Captures the anisotropic (shape-changing) component of stress.
+            # This component is responsible for distortional deformation.
+            I = np.eye(3, dtype=np.float64)
+            sig_dev = sig33 - sig_hydro[:, None, None] * I[None, :, :]
+
+            # Frobenius norm of deviatoric stress:
+            # Measures magnitude of anisotropic loading.
+            # High values indicate strong directional traction imbalance.
+            sig_dev_norm = np.sqrt(np.sum(sig_dev * sig_dev, axis=(1, 2)))
+
+            # Principal strain decomposition:
+            # Since eps33 is symmetric, eigen-decomposition is stable.
+            # Eigenvalues correspond to principal strains.
+            # Eigenvectors correspond to principal deformation directions.
+            eps_evals = np.zeros((num_cells, 3), dtype=np.float64)
+            eps_evecs = np.zeros((num_cells, 3, 3), dtype=np.float64)
+
+            for i in range(num_cells):
+                w, v = np.linalg.eigh(eps33[i])  # ascending order
+                eps_evals[i] = w
+                eps_evecs[i] = v
+
+            # Largest principal strain:
+            # Represents maximum extension (if positive)
+            # or strongest compression (if negative).
+            idx_max = 2  # eigenvalues sorted ascending
+            eps_max = eps_evals[:, idx_max]
+
+            # Corresponding principal direction:
+            # Orientation of maximum extension.
+            # Useful for analyzing nucleus elongation alignment.
+            dir_max = eps_evecs[:, :, idx_max]  # (N,3)
+
+            # Aspect ratio proxy derived from principal stretches:
+            #
+            # Under small-strain mapping:
+            #   U = I + eps
+            # Principal stretches approx:
+            #   lambda_i = 1 + e_i
+            #
+            # Aspect ratio proxy:
+            #   AR = max(lambda_i) / min(lambda_i)
+            #
+            # AR = 1  -> spherical nucleus
+            # AR > 1  -> ellipsoidal deformation
+            lam = 1.0 + eps_evals
+            lam_min = np.minimum(np.minimum(lam[:, 0], lam[:, 1]), lam[:, 2])
+            lam_max = np.maximum(np.maximum(lam[:, 0], lam[:, 1]), lam[:, 2])
+
+            # Numerical safeguard against division by zero or negative stretch
+            lam_min = np.maximum(lam_min, 1e-6)
+            ar_proxy = lam_max / lam_min
+
+            # Principal direction scaled by nucleus radius:
+            # Useful for glyph-based visualization of elongation axes.
+            # Scaling improves visual clarity in ParaView.
+            dir_max_scaled = dir_max * nucleus_radius[:, None]
+
+
+
+            with open(str(file_path), "w") as file:
+                for line in save_context["nucleusdata"]:
+                    file.write(line + "\n")
+
+                # Points: nucleus centers
+                file.write("POINTS {} float \n".format(num_cells))
+                for x, y, z in cell_coords:
+                    file.write("{:.6f} {:.6f} {:.6f}\n".format(x, y, z))
+
+                file.write("POINT_DATA {} \n".format(num_cells))
+
+                # ---- Scalars ----
+                file.write("SCALARS id int 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in cell_id:
+                    file.write("{}\n".format(v))
+
+                file.write("SCALARS radius float 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in cell_radius:
+                    file.write("{:.6f}\n".format(v))
+                    
+                file.write("SCALARS nucleus_radius float 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in nucleus_radius:
+                    file.write("{:.6f}\n".format(v))
+
+                file.write("SCALARS eps_norm float 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in eps_norm:
+                    file.write("{:.6f}\n".format(v))
+
+                file.write("SCALARS sig_norm float 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in sig_norm:
+                    file.write("{:.6f}\n".format(v))
+
+                file.write("SCALARS sig_hydro float 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in sig_hydro:
+                    file.write("{:.6f}\n".format(v))
+
+                file.write("SCALARS sig_dev_norm float 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in sig_dev_norm:
+                    file.write("{:.6f}\n".format(v))
+
+                file.write("SCALARS eps_max float 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in eps_max:
+                    file.write("{:.6f}\n".format(v))
+
+                file.write("SCALARS ar_proxy float 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in ar_proxy:
+                    file.write("{:.6f}\n".format(v))
+
+                # ---- Vectors ----
+                file.write("VECTORS eps_dir_max float\n")
+                for vx, vy, vz in dir_max_scaled:
+                    file.write("{:.6f} {:.6f} {:.6f}\n".format(vx, vy, vz))
+
+                # ---- Tensors ----
+                # 3 rows per tensor per point.
+
+                file.write("TENSORS eps float\n")
+                for i in range(num_cells):
+                    M = eps33[i]
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[0, 0], M[0, 1], M[0, 2]))
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[1, 0], M[1, 1], M[1, 2]))
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[2, 0], M[2, 1], M[2, 2]))
+
+                file.write("TENSORS sigma float\n")
+                for i in range(num_cells):
+                    M = sig33[i]
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[0, 0], M[0, 1], M[0, 2]))
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[1, 0], M[1, 1], M[1, 2]))
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[2, 0], M[2, 1], M[2, 2]))
+
+                # U = I + eps (dimensionless). Use nucelus radius as scale factor in ParaView.
+                file.write("TENSORS U float\n")
+                for i in range(num_cells):
+                    M = U33[i]
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[0, 0], M[0, 1], M[0, 2]))
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[1, 0], M[1, 1], M[1, 2]))
+                    file.write("{:.6e} {:.6e} {:.6e}\n".format(M[2, 0], M[2, 1], M[2, 2]))
+
+    file_name = 'ecm_data_t{:04d}.vtk'.format(stepCounter)
+    file_path = res_path / file_name
+    agent = FLAMEGPU.agent("ECM")
+
+    sum_bx_pos = 0.0
+    sum_bx_neg = 0.0
+    sum_by_pos = 0.0
+    sum_by_neg = 0.0
+    sum_bz_pos = 0.0
+    sum_bz_neg = 0.0
+    sum_bx_pos_y = 0.0
+    sum_bx_pos_z = 0.0
+    sum_bx_neg_y = 0.0
+    sum_bx_neg_z = 0.0
+    sum_by_pos_x = 0.0
+    sum_by_pos_z = 0.0
+    sum_by_neg_x = 0.0
+    sum_by_neg_z = 0.0
+    sum_bz_pos_x = 0.0
+    sum_bz_pos_y = 0.0
+    sum_bz_neg_x = 0.0
+    sum_bz_neg_y = 0.0
+
+    coords = list()
+    velocity = list()
+    force = list()
+    c_sp_multi = list()
+    if heterogeneous_diffusion:
+        d_sp_multi = list()
+    av = agent.getPopulationData()
+    for ai in av:
+        coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
+        velocity_ai = (ai.getVariableFloat("vx"), ai.getVariableFloat("vy"), ai.getVariableFloat("vz"))
+        force_ai = (ai.getVariableFloat("fx"), ai.getVariableFloat("fy"), ai.getVariableFloat("fz"))
+        coords.append(coords_ai)
+        velocity.append(velocity_ai)
+        force.append(force_ai)
+        c_sp_multi.append(ai.getVariableArrayFloat("C_sp"))
+        if heterogeneous_diffusion:
+            d_sp_multi.append(ai.getVariableArrayFloat("D_sp"))
+
+    print("====== SAVING DATA FROM Step {:03d} TO FILE ======".format(stepCounter))
+    with open(str(file_path), 'w') as file:
+        for line in save_context["header"]:
+            file.write(line + '\n')
+        for coords_ai in coords:
+            file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
+
+        file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[2], coord_boundary[4]))
+        file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[2], coord_boundary[4]))
+        file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[3], coord_boundary[4]))
+        file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[3], coord_boundary[4]))
+        file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[2], coord_boundary[5]))
+        file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[2], coord_boundary[5]))
+        file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[3], coord_boundary[5]))
+        file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[3], coord_boundary[5]))
+        for line in save_context["domaindata"]:
+            file.write(line + '\n')
+
+        file.write("SCALARS boundary_normal_forces float 1\n")
+        file.write("LOOKUP_TABLE default\n")
+        file.write(str(sum_bx_pos) + '\n')
+        file.write(str(sum_bx_neg) + '\n')
+        file.write(str(sum_by_pos) + '\n')
+        file.write(str(sum_by_neg) + '\n')
+        file.write(str(sum_bz_pos) + '\n')
+        file.write(str(sum_bz_neg) + '\n')
+
+        file.write("SCALARS boundary_normal_force_scaling float 1\n")
+        file.write("LOOKUP_TABLE default\n")
+        file.write(str(abs(sum_bx_pos)) + '\n')
+        file.write(str(abs(sum_bx_neg)) + '\n')
+        file.write(str(abs(sum_by_pos)) + '\n')
+        file.write(str(abs(sum_by_neg)) + '\n')
+        file.write(str(abs(sum_bz_pos)) + '\n')
+        file.write(str(abs(sum_bz_neg)) + '\n')
+
+        file.write("VECTORS boundary_normal_force_dir float\n")
+        file.write("1 0 0 \n" if sum_bx_pos > 0 else "-1 0 0 \n")
+        file.write("1 0 0 \n" if sum_bx_neg > 0 else "-1 0 0 \n")
+        file.write("0 1 0 \n" if sum_by_pos > 0 else "0 -1 0 \n")
+        file.write("0 1 0 \n" if sum_by_neg > 0 else "0 -1 0 \n")
+        file.write("0 0 1 \n" if sum_bz_pos > 0 else "0 0 -1 \n")
+        file.write("0 0 1 \n" if sum_bz_neg > 0 else "0 0 -1 \n")
+
+        file.write("SCALARS boundary_shear_forces_pos float 1\n")
+        file.write("LOOKUP_TABLE default\n")
+        file.write(str(sum_bx_pos_y) + '\n')
+        file.write(str(sum_bx_pos_z) + '\n')
+        file.write(str(sum_by_pos_x) + '\n')
+        file.write(str(sum_by_pos_z) + '\n')
+        file.write(str(sum_bz_pos_x) + '\n')
+        file.write(str(sum_bz_pos_y) + '\n')
+
+        file.write("SCALARS boundary_shear_forces_neg float 1\n")
+        file.write("LOOKUP_TABLE default\n")
+        file.write(str(sum_bx_neg_y) + '\n')
+        file.write(str(sum_bx_neg_z) + '\n')
+        file.write(str(sum_by_neg_x) + '\n')
+        file.write(str(sum_by_neg_z) + '\n')
+        file.write(str(sum_bz_neg_x) + '\n')
+        file.write(str(sum_bz_neg_y) + '\n')
+
+        file.write("SCALARS boundary_shear_force_scaling_pos float 1\n")
+        file.write("LOOKUP_TABLE default\n")
+        file.write(str(abs(sum_bx_pos_y)) + '\n')
+        file.write(str(abs(sum_bx_pos_z)) + '\n')
+        file.write(str(abs(sum_by_pos_x)) + '\n')
+        file.write(str(abs(sum_by_pos_z)) + '\n')
+        file.write(str(abs(sum_bz_pos_x)) + '\n')
+        file.write(str(abs(sum_bz_pos_y)) + '\n')
+
+        file.write("SCALARS boundary_shear_force_scaling_neg float 1\n")
+        file.write("LOOKUP_TABLE default\n")
+        file.write(str(abs(sum_bx_neg_y)) + '\n')
+        file.write(str(abs(sum_bx_neg_z)) + '\n')
+        file.write(str(abs(sum_by_neg_x)) + '\n')
+        file.write(str(abs(sum_by_neg_z)) + '\n')
+        file.write(str(abs(sum_bz_neg_x)) + '\n')
+        file.write(str(abs(sum_bz_neg_y)) + '\n')
+
+        file.write("VECTORS boundary_shear_force_dir_pos float\n")
+        file.write("0 1 0 \n" if sum_bx_pos_y > 0 else "0 -1 0 \n")
+        file.write("0 0 1 \n" if sum_bx_pos_z > 0 else "0 0 -1 \n")
+        file.write("1 0 0 \n" if sum_by_pos_x > 0 else "-1 0 0 \n")
+        file.write("0 0 1 \n" if sum_by_pos_z > 0 else "0 0 -1 \n")
+        file.write("1 0 0 \n" if sum_bz_pos_x > 0 else "-1 0 0 \n")
+        file.write("0 1 0 \n" if sum_bz_pos_y > 0 else "0 -1 0 \n")
+
+        file.write("VECTORS boundary_shear_force_dir_neg float\n")
+        file.write("0 1 0 \n" if sum_bx_neg_y > 0 else "0 -1 0 \n")
+        file.write("0 0 1 \n" if sum_bx_neg_z > 0 else "0 0 -1 \n")
+        file.write("1 0 0 \n" if sum_by_neg_x > 0 else "-1 0 0 \n")
+        file.write("0 0 1 \n" if sum_by_neg_z > 0 else "0 0 -1 \n")
+        file.write("1 0 0 \n" if sum_bz_neg_x > 0 else "-1 0 0 \n")
+        file.write("0 1 0 \n" if sum_bz_neg_y > 0 else "0 -1 0 \n")
+
+        file.write("POINT_DATA {} \n".format(8 + ecm_population_size))
+        file.write("SCALARS is_corner int 1\n")
+        file.write("LOOKUP_TABLE default\n")
+        for _ in range(ecm_population_size):
+            file.write("0 \n")
+        for _ in range(8):
+            file.write("1 \n")
+
+        for s in range(n_species):
+            file.write("SCALARS concentration_species_{0} float 1 \n".format(s))
+            file.write("LOOKUP_TABLE default\n")
+            for c_ai in c_sp_multi:
+                file.write("{:.4f} \n".format(c_ai[s]))
+            for _ in range(8):
+                file.write("0.0 \n")
+
+        if heterogeneous_diffusion:
+            for s in range(n_species):
+                file.write("SCALARS diffusion_coeff_{0} float 1 \n".format(s))
+                file.write("LOOKUP_TABLE default\n")
+                for d_ai in d_sp_multi:
+                    file.write("{:.4f} \n".format(d_ai[s]))
+                for _ in range(8):
+                    file.write("0.0 \n")
+
+        file.write("VECTORS velocity float\n")
+        for v_ai in velocity:
+            file.write("{:.4f} {:.4f} {:.4f} \n".format(v_ai[0], v_ai[1], v_ai[2]))
+        for _ in range(8):
+            file.write("0.0 0.0 0.0 \n")
+
+        file.write("VECTORS force float\n")
+        for f_ai in force:
+            file.write("{:.4f} {:.4f} {:.4f} \n".format(f_ai[0], f_ai[1], f_ai[2]))
+        for _ in range(8):
+            file.write("0.0 0.0 0.0 \n")
+
+    print("... succesful save ")
+    print("=================================")
 
 
 class ModelParameterConfig:
@@ -315,6 +1567,7 @@ class ModelParameterConfig:
         max_search_radius_fnodes: float = None,
         # Diffusion
         include_diffusion: bool = None,
+        heterogeneous_diffusion: bool = None,
         n_species: int = None,
         diffusion_coeff_multi: list = None,
         boundary_conc_init_multi: list = None,
@@ -350,6 +1603,42 @@ class ModelParameterConfig:
         init_cell_consumption_rates: list = None,
         init_cell_production_rates: list = None,
         init_cell_reaction_rates: list = None,
+        # Focal adhesions
+        include_focal_adhesions: bool = None,
+        init_n_focad_per_cell: int = None,
+        n_anchor_points: int = None,
+        max_search_radius_focad: float = None,
+        max_focad_arm_length: float = None,
+        focad_rest_length_0: float = None,
+        focad_min_rest_length: float = None,
+        focad_k_fa: float = None,
+        focad_f_max: float = None,
+        focad_v_c: float = None,
+        focad_k_on: float = None,
+        focad_k_off_0: float = None,
+        focad_f_c: float = None,
+        use_catch_bond: bool = None,
+        catch_bond_catch_scale: float = None,
+        catch_bond_slip_scale: float = None,
+        catch_bond_f_catch: float = None,
+        catch_bond_f_slip: float = None,
+        focad_k_reinf: float = None,
+        focad_f_reinf: float = None,
+        focad_k_fa_max: float = None,
+        focad_k_fa_decay: float = None,
+        focad_polarity_kon_front_gain: float = None,
+        focad_polarity_koff_front_reduction: float = None,
+        focad_polarity_koff_rear_gain: float = None,
+        focad_mobility_mu: float = None,
+        include_linc_coupling: bool = None,
+        linc_k_elast: float = None,
+        linc_d_dumping: float = None,
+        linc_rest_length: float = None,
+        # Nucleus mechanics
+        nucleus_e: float = None,
+        nucleus_nu: float = None,
+        nucleus_tau: float = None,
+        nucleus_eps_clamp: float = None,
         # Oscillatory assay
         oscillatory_shear_assay: bool = None,
         max_strain: float = None,
@@ -408,6 +1697,7 @@ class ModelParameterConfig:
         self.FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE = fibre_node_boundary_equilibrium_distance
         self.MAX_SEARCH_RADIUS_FNODES = max_search_radius_fnodes
         self.INCLUDE_DIFFUSION = include_diffusion
+        self.HETEROGENEOUS_DIFFUSION = heterogeneous_diffusion
         self.N_SPECIES = n_species
         self.DIFFUSION_COEFF_MULTI = diffusion_coeff_multi
         self.BOUNDARY_CONC_INIT_MULTI = boundary_conc_init_multi
@@ -442,6 +1732,40 @@ class ModelParameterConfig:
         self.INIT_CELL_CONSUMPTION_RATES = init_cell_consumption_rates
         self.INIT_CELL_PRODUCTION_RATES = init_cell_production_rates
         self.INIT_CELL_REACTION_RATES = init_cell_reaction_rates
+        self.INCLUDE_FOCAL_ADHESIONS = include_focal_adhesions
+        self.INIT_N_FOCAD_PER_CELL = init_n_focad_per_cell
+        self.N_ANCHOR_POINTS = n_anchor_points
+        self.MAX_SEARCH_RADIUS_FOCAD = max_search_radius_focad
+        self.MAX_FOCAD_ARM_LENGTH = max_focad_arm_length
+        self.FOCAD_REST_LENGTH_0 = focad_rest_length_0
+        self.FOCAD_MIN_REST_LENGTH = focad_min_rest_length
+        self.FOCAD_K_FA = focad_k_fa
+        self.FOCAD_F_MAX = focad_f_max
+        self.FOCAD_V_C = focad_v_c
+        self.FOCAD_K_ON = focad_k_on
+        self.FOCAD_K_OFF_0 = focad_k_off_0
+        self.FOCAD_F_C = focad_f_c
+        self.USE_CATCH_BOND = use_catch_bond
+        self.CATCH_BOND_CATCH_SCALE = catch_bond_catch_scale
+        self.CATCH_BOND_SLIP_SCALE = catch_bond_slip_scale
+        self.CATCH_BOND_F_CATCH = catch_bond_f_catch
+        self.CATCH_BOND_F_SLIP = catch_bond_f_slip
+        self.FOCAD_K_REINF = focad_k_reinf
+        self.FOCAD_F_REINF = focad_f_reinf
+        self.FOCAD_K_FA_MAX = focad_k_fa_max
+        self.FOCAD_K_FA_DECAY = focad_k_fa_decay
+        self.FOCAD_POLARITY_KON_FRONT_GAIN = focad_polarity_kon_front_gain
+        self.FOCAD_POLARITY_KOFF_FRONT_REDUCTION = focad_polarity_koff_front_reduction
+        self.FOCAD_POLARITY_KOFF_REAR_GAIN = focad_polarity_koff_rear_gain
+        self.FOCAD_MOBILITY_MU = focad_mobility_mu
+        self.INCLUDE_LINC_COUPLING = include_linc_coupling
+        self.LINC_K_ELAST = linc_k_elast
+        self.LINC_D_DUMPING = linc_d_dumping
+        self.LINC_REST_LENGTH = linc_rest_length
+        self.NUCLEUS_E = nucleus_e
+        self.NUCLEUS_NU = nucleus_nu
+        self.NUCLEUS_TAU = nucleus_tau
+        self.NUCLEUS_EPS_CLAMP = nucleus_eps_clamp
         self.OSCILLATORY_SHEAR_ASSAY = oscillatory_shear_assay
         self.MAX_STRAIN = max_strain
         self.OSCILLATORY_AMPLITUDE = oscillatory_amplitude
@@ -469,6 +1793,13 @@ class ModelParameterConfig:
         print(f"ECM_AGENTS_PER_DIR: {self.ECM_AGENTS_PER_DIR}")
         print(f"INCLUDE_DIFFUSION: {self.INCLUDE_DIFFUSION} | N_SPECIES: {self.N_SPECIES}")
         print(f"INCLUDE_CELLS: {self.INCLUDE_CELLS} | N_CELLS: {self.N_CELLS}")
+        if self.INCLUDE_FOCAL_ADHESIONS and self.N_CELLS is not None and self.INIT_N_FOCAD_PER_CELL is not None:
+            focad_count = self.N_CELLS * self.INIT_N_FOCAD_PER_CELL
+            print(
+                f"INCLUDE_FOCAL_ADHESIONS: True | FOCAD_PER_CELL: {self.INIT_N_FOCAD_PER_CELL} | FOCAD_COUNT: {focad_count} | LINC: {self.INCLUDE_LINC_COUPLING}"
+            )
+        else:
+            print(f"INCLUDE_FOCAL_ADHESIONS: {self.INCLUDE_FOCAL_ADHESIONS}")
         print(f"INCLUDE_FIBRE_NETWORK: {self.INCLUDE_FIBRE_NETWORK}")
         print(f"MOVING_BOUNDARIES: {self.MOVING_BOUNDARIES}")
 
@@ -495,6 +1826,7 @@ class ModelParameterConfig:
 
         print("=========================================\n")
         print("MODEL RUNNING...\n")
+        
     def print_agent_config(self, n_nodes=None, n_fibres=None):
         print("=========== Agent Configuration =========")
         print("== ECM: ")
@@ -510,9 +1842,10 @@ class ModelParameterConfig:
                 "unknown" if self.UNSTABLE_DIFFUSION is None else self.UNSTABLE_DIFFUSION
             )
             print(
-                "Diffusion: enabled | Species: {0} | Coefficients: {1} | Unstable: {2}".format(
+                "Diffusion: enabled | Species: {0} | Coefficients: {1} | Mode: {2} | Unstable: {3}".format(
                     self.N_SPECIES,
                     coeff_text,
+                    "heterogeneous" if self.HETEROGENEOUS_DIFFUSION else "homogeneous",
                     unstable_text,
                 )
             )
@@ -525,7 +1858,7 @@ class ModelParameterConfig:
             nodes_text = "unknown" if n_nodes is None else str(n_nodes)
             fibres_text = "unknown" if n_fibres is None else str(n_fibres)
             print(
-                "Fibre network: enabled | Nodes: {0} | Fibres: {1} | Segment equilibrium: {2}".format(
+                "Fibre network: enabled | Nodes: {0} | Fibres: {1} | Segment length: {2}".format(
                     nodes_text,
                     fibres_text,
                     self.FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE,
@@ -550,6 +1883,39 @@ class ModelParameterConfig:
         )
         else:
             print("Cells: disabled")
+        print()
+        
+        if self.INCLUDE_FOCAL_ADHESIONS and self.N_CELLS is not None and self.INIT_N_FOCAD_PER_CELL is not None:
+            focad_count = self.N_CELLS * self.INIT_N_FOCAD_PER_CELL
+            total_number_of_agents += focad_count
+            print("== FOCAL ADHESIONS: ")
+            print("Focal adhesions: enabled")
+            print(f" - FOCAD_PER_CELL: {self.INIT_N_FOCAD_PER_CELL}")
+            print(f" - FOCAD_COUNT: {focad_count}")
+            print(f" - Search radius: {self.MAX_SEARCH_RADIUS_FOCAD}")
+            print(f" - Rest length (L0, min): {self.FOCAD_REST_LENGTH_0}, {self.FOCAD_MIN_REST_LENGTH}")
+            print(f" - Stiffness (k_fa, k_fa_max): {self.FOCAD_K_FA}, {self.FOCAD_K_FA_MAX}")
+            print(f" - Bond model: {'catch' if self.USE_CATCH_BOND else 'slip'}")
+            if self.USE_CATCH_BOND:
+                print(
+                    f"   · Catch params (catch_scale, slip_scale, F_catch, F_slip): "
+                    f"{self.CATCH_BOND_CATCH_SCALE}, {self.CATCH_BOND_SLIP_SCALE}, "
+                    f"{self.CATCH_BOND_F_CATCH}, {self.CATCH_BOND_F_SLIP}"
+                )
+            else:
+                print(f"   · Slip param F_c: {self.FOCAD_F_C}")
+            print(f" - Reinforcement (k_reinf, f_reinf, decay): {self.FOCAD_K_REINF}, {self.FOCAD_F_REINF}, {self.FOCAD_K_FA_DECAY}")
+            print(
+                f" - Polarity gains (kon_front, koff_front_red, koff_rear_gain): "
+                f"{self.FOCAD_POLARITY_KON_FRONT_GAIN}, {self.FOCAD_POLARITY_KOFF_FRONT_REDUCTION}, {self.FOCAD_POLARITY_KOFF_REAR_GAIN}"
+            )
+            print(f" - Mobility (durotaxis traction coupling): {self.FOCAD_MOBILITY_MU}")
+            print(f" - LINC coupling: {self.INCLUDE_LINC_COUPLING}")
+            if self.INCLUDE_LINC_COUPLING:
+                print(
+                    f"   · LINC (k, d, L0): {self.LINC_K_ELAST}, {self.LINC_D_DUMPING}, {self.LINC_REST_LENGTH}"
+                )
+
         print()
         print(f"TOTAL NUMBER OF AGENTS: {total_number_of_agents}")
 
@@ -809,6 +2175,7 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         fibre_node_boundary_equilibrium_distance=ns.get("FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE"),
         max_search_radius_fnodes=ns.get("MAX_SEARCH_RADIUS_FNODES"),
         include_diffusion=ns.get("INCLUDE_DIFFUSION"),
+        heterogeneous_diffusion=ns.get("HETEROGENEOUS_DIFFUSION"),
         n_species=ns.get("N_SPECIES"),
         diffusion_coeff_multi=ns.get("DIFFUSION_COEFF_MULTI"),
         boundary_conc_init_multi=ns.get("BOUNDARY_CONC_INIT_MULTI"),
@@ -843,6 +2210,40 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         init_cell_consumption_rates=ns.get("INIT_CELL_CONSUMPTION_RATES"),
         init_cell_production_rates=ns.get("INIT_CELL_PRODUCTION_RATES"),
         init_cell_reaction_rates=ns.get("INIT_CELL_REACTION_RATES"),
+        include_focal_adhesions=ns.get("INCLUDE_FOCAL_ADHESIONS"),
+        init_n_focad_per_cell=ns.get("INIT_N_FOCAD_PER_CELL"),
+        n_anchor_points=ns.get("N_ANCHOR_POINTS"),
+        max_search_radius_focad=ns.get("MAX_SEARCH_RADIUS_FOCAD"),
+        max_focad_arm_length=ns.get("MAX_FOCAD_ARM_LENGTH"),
+        focad_rest_length_0=ns.get("FOCAD_REST_LENGTH_0"),
+        focad_min_rest_length=ns.get("FOCAD_MIN_REST_LENGTH"),
+        focad_k_fa=ns.get("FOCAD_K_FA"),
+        focad_f_max=ns.get("FOCAD_F_MAX"),
+        focad_v_c=ns.get("FOCAD_V_C"),
+        focad_k_on=ns.get("FOCAD_K_ON"),
+        focad_k_off_0=ns.get("FOCAD_K_OFF_0"),
+        focad_f_c=ns.get("FOCAD_F_C"),
+        use_catch_bond=ns.get("USE_CATCH_BOND"),
+        catch_bond_catch_scale=ns.get("CATCH_BOND_CATCH_SCALE"),
+        catch_bond_slip_scale=ns.get("CATCH_BOND_SLIP_SCALE"),
+        catch_bond_f_catch=ns.get("CATCH_BOND_F_CATCH"),
+        catch_bond_f_slip=ns.get("CATCH_BOND_F_SLIP"),
+        focad_k_reinf=ns.get("FOCAD_K_REINF"),
+        focad_f_reinf=ns.get("FOCAD_F_REINF"),
+        focad_k_fa_max=ns.get("FOCAD_K_FA_MAX"),
+        focad_k_fa_decay=ns.get("FOCAD_K_FA_DECAY"),
+        focad_polarity_kon_front_gain=ns.get("FOCAD_POLARITY_KON_FRONT_GAIN"),
+        focad_polarity_koff_front_reduction=ns.get("FOCAD_POLARITY_KOFF_FRONT_REDUCTION"),
+        focad_polarity_koff_rear_gain=ns.get("FOCAD_POLARITY_KOFF_REAR_GAIN"),
+        focad_mobility_mu=ns.get("FOCAD_MOBILITY_MU"),
+        include_linc_coupling=ns.get("INCLUDE_LINC_COUPLING"),
+        linc_k_elast=ns.get("LINC_K_ELAST"),
+        linc_d_dumping=ns.get("LINC_D_DUMPING"),
+        linc_rest_length=ns.get("LINC_REST_LENGTH"),
+        nucleus_e=ns.get("NUCLEUS_E"),
+        nucleus_nu=ns.get("NUCLEUS_NU"),
+        nucleus_tau=ns.get("NUCLEUS_TAU"),
+        nucleus_eps_clamp=ns.get("NUCLEUS_EPS_CLAMP"),
         oscillatory_shear_assay=ns.get("OSCILLATORY_SHEAR_ASSAY"),
         max_strain=ns.get("MAX_STRAIN"),
         oscillatory_amplitude=ns.get("OSCILLATORY_AMPLITUDE"),

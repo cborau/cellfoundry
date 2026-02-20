@@ -3,6 +3,31 @@ import matplotlib.pyplot as plt
 from scipy.spatial import distance
 
 
+def check_duplicates(nodes, edges, label, edge_kind="fibers"):
+    # Order-insensitive edge duplicates + exact node duplicates.
+    if edge_kind == "fibers":
+        edges_sorted = np.sort(edges, axis=1)
+        _, edge_counts = np.unique(edges_sorted, axis=0, return_counts=True)
+        dup_edges = int(np.sum(edge_counts > 1))
+    elif edge_kind == "connectivity":
+        edge_counts = {}
+        for node_idx, conns in edges.items():
+            for neighbor in conns:
+                if neighbor == -1:
+                    continue
+                edge = tuple(sorted((int(node_idx), int(neighbor))))
+                edge_counts[edge] = edge_counts.get(edge, 0) + 1
+        # In undirected connectivity, each edge should appear exactly twice (A->B, B->A).
+        dup_edges = sum(1 for count in edge_counts.values() if count > 2)
+    else:
+        raise ValueError(f"Unknown edge_kind: {edge_kind}")
+
+    _, node_counts = np.unique(nodes, axis=0, return_counts=True)
+    dup_nodes = int(np.sum(node_counts > 1))
+
+    print(f"{label}: duplicate edges = {dup_edges}, duplicate nodes = {dup_nodes}")
+
+
 def compute_node_connectivity(fibers, num_nodes, MAX_CONNECTIVITY = 8):
     node_connectivity = {i: [-1] * MAX_CONNECTIVITY for i in range(num_nodes)}
     
@@ -29,6 +54,9 @@ def add_intermediate_nodes(nodes, connectivity, edge_length, MAX_CONNECTIVITY):
     new_connectivity = {i: connectivity[i][:] for i in range(len(nodes))}
 
     current_node_index = len(nodes)
+    processed_edges = set()
+    split_edges = 0
+    added_nodes = 0
 
     for node1 in range(len(nodes)):
         for j in range(MAX_CONNECTIVITY):
@@ -37,6 +65,10 @@ def add_intermediate_nodes(nodes, connectivity, edge_length, MAX_CONNECTIVITY):
                 continue
 
             node2 = int(node2)
+            edge_key = tuple(sorted((node1, node2)))
+            if edge_key in processed_edges:
+                continue
+            processed_edges.add(edge_key)
             dist = np.linalg.norm(nodes[node1] - nodes[node2])
 
             if dist > edge_length:
@@ -48,6 +80,7 @@ def add_intermediate_nodes(nodes, connectivity, edge_length, MAX_CONNECTIVITY):
                 for k in range(1, num_new_nodes + 1):
                     new_node = nodes[node1] + k * direction
                     new_nodes.append(new_node)
+                    added_nodes += 1
 
                     # Find the first available slot in connectivity
                     for idx in range(MAX_CONNECTIVITY):
@@ -78,6 +111,14 @@ def add_intermediate_nodes(nodes, connectivity, edge_length, MAX_CONNECTIVITY):
                     if new_connectivity[node2][idx] == node1:
                         new_connectivity[node2][idx] = -1
                         break
+
+                split_edges += 1
+
+    print(
+        "add_intermediate_nodes: split_edges={}, added_nodes={}, final_nodes={}".format(
+            split_edges, added_nodes, len(new_nodes)
+        )
+    )
 
     return np.array(new_nodes), new_connectivity
 
@@ -232,6 +273,86 @@ def remove_boundary_connectivity(nodes, connectivity, bounds=None):
     num_removed_nodes = len(nodes_to_remove)
     print(f"Number of removed nodes: {num_removed_nodes}")
     
+    return new_nodes, new_connectivity
+
+def merge_duplicate_nodes(nodes, connectivity, tol=0.0):
+    """
+    Merge duplicate nodes (exact or within tolerance) and update connectivity.
+
+    Parameters:
+        nodes (numpy.ndarray): Array of node coordinates (N x 3).
+        connectivity (dict): Connectivity dictionary {node_index: [neighbors...]}
+        tol (float): If > 0, nodes within this tolerance (per-axis rounding) are merged.
+
+    Returns:
+        (new_nodes, new_connectivity): merged nodes and updated connectivity.
+    """
+    if nodes.size == 0:
+        print("merge_duplicate_nodes: no nodes to merge")
+        return nodes, connectivity
+
+    def count_edges(conn):
+        edges = set()
+        for node_idx, conns in conn.items():
+            for neighbor in conns:
+                if neighbor == -1:
+                    continue
+                edge = tuple(sorted((int(node_idx), int(neighbor))))
+                edges.add(edge)
+        return len(edges)
+
+    before_nodes = len(nodes)
+    before_edges = count_edges(connectivity)
+
+    if tol > 0.0:
+        keys = np.round(nodes / tol).astype(np.int64)
+    else:
+        keys = nodes
+
+    unique_nodes, _, inverse = np.unique(keys, axis=0, return_index=True, return_inverse=True)
+
+    if tol > 0.0:
+        new_nodes = np.zeros((unique_nodes.shape[0], nodes.shape[1]))
+        counts = np.zeros(unique_nodes.shape[0], dtype=int)
+        for old_idx, new_idx in enumerate(inverse):
+            new_nodes[new_idx] += nodes[old_idx]
+            counts[new_idx] += 1
+        new_nodes = new_nodes / counts[:, None]
+    else:
+        new_nodes = unique_nodes
+
+    max_len = max((len(conns) for conns in connectivity.values()), default=0)
+    merged_neighbors = {i: set() for i in range(len(new_nodes))}
+
+    for old_idx, conns in connectivity.items():
+        new_idx = inverse[old_idx]
+        for conn in conns:
+            if conn == -1:
+                continue
+            new_conn = inverse[conn]
+            if new_conn == new_idx:
+                continue
+            merged_neighbors[new_idx].add(new_conn)
+
+    new_connectivity = {}
+    for idx in range(len(new_nodes)):
+        neighbors = sorted(merged_neighbors.get(idx, []))
+        if max_len > 0:
+            neighbors = neighbors[:max_len]
+            neighbors.extend([-1] * (max_len - len(neighbors)))
+        new_connectivity[idx] = neighbors
+
+    after_nodes = len(new_nodes)
+    after_edges = count_edges(new_connectivity)
+    merged_nodes = before_nodes - after_nodes
+    removed_edges = before_edges - after_edges
+
+    print(
+        "merge_duplicate_nodes: merged_nodes={}, removed_edges={}, final_nodes={}, final_edges={}".format(
+            merged_nodes, removed_edges, after_nodes, after_edges
+        )
+    )
+
     return new_nodes, new_connectivity
 
 def scale_to_unit_cube(nodes):

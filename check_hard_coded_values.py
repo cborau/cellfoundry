@@ -37,10 +37,11 @@ DEFAULT_EXTS = {".py", ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp", ".hh", ".hxx",
 
 @dataclass(frozen=True)
 class ReferenceValues:
-    metabolism_path: str
+    model_path: str
     n: int
     n_species: int
     max_connectivity: int
+    n_anchor_points: int
     boundary_coords: List[Number]
     ecm_agents_per_dir: List[int]
     ecm_population_size: int
@@ -117,35 +118,36 @@ def _extract_literal_assignments(tree: ast.AST) -> Dict[str, object]:
     return out
 
 
-def load_reference_values(metabolism_path: str) -> ReferenceValues:
-    metabolism_path = os.path.abspath(metabolism_path)
-    if not os.path.isfile(metabolism_path):
-        raise FileNotFoundError(f"Reference file not found: {metabolism_path}")
+def load_reference_values(model_path: str) -> ReferenceValues:
+    model_path = os.path.abspath(model_path)
+    if not os.path.isfile(model_path):
+        raise FileNotFoundError(f"Reference file not found: {model_path}")
 
-    tree = _safe_parse_py(metabolism_path)
+    tree = _safe_parse_py(model_path)
     assigns = _extract_literal_assignments(tree)
 
     def need_int(name: str) -> int:
         if name not in assigns:
-            raise RuntimeError(f"Could not find literal assignment {name} = <int> in {metabolism_path}")
+            raise RuntimeError(f"Could not find literal assignment {name} = <int> in {model_path}")
         v = assigns[name]
         if not isinstance(v, int):
-            raise RuntimeError(f"{name} must be an integer literal in {metabolism_path}, found: {v!r}")
+            raise RuntimeError(f"{name} must be an integer literal in {model_path}, found: {v!r}")
         return v
 
     def need_boundary() -> List[Number]:
         if "BOUNDARY_COORDS" not in assigns:
-            raise RuntimeError(f"Could not find literal assignment BOUNDARY_COORDS = [..] in {metabolism_path}")
+            raise RuntimeError(f"Could not find literal assignment BOUNDARY_COORDS = [..] in {model_path}")
         v = assigns["BOUNDARY_COORDS"]
         if not isinstance(v, list) or len(v) != 6 or not all(isinstance(x, (int, float)) for x in v):
             raise RuntimeError(
-                f"BOUNDARY_COORDS must be a list of 6 numeric literals in {metabolism_path}, found: {v!r}"
+                f"BOUNDARY_COORDS must be a list of 6 numeric literals in {model_path}, found: {v!r}"
             )
         return v
 
     N = need_int("N")
     N_SPECIES = need_int("N_SPECIES")
     MAX_CONNECTIVITY = need_int("MAX_CONNECTIVITY")
+    N_ANCHOR_POINTS = need_int("N_ANCHOR_POINTS")
     BOUNDARY_COORDS = need_boundary()
 
     diff_x = abs(BOUNDARY_COORDS[0] - BOUNDARY_COORDS[1])
@@ -182,10 +184,11 @@ def load_reference_values(metabolism_path: str) -> ReferenceValues:
     ECM_POPULATION_SIZE = ECM_AGENTS_PER_DIR[0] * ECM_AGENTS_PER_DIR[1] * ECM_AGENTS_PER_DIR[2]
 
     return ReferenceValues(
-        metabolism_path=metabolism_path,
+        model_path=model_path,
         n=N,
         n_species=N_SPECIES,
         max_connectivity=MAX_CONNECTIVITY,
+        n_anchor_points=N_ANCHOR_POINTS,
         boundary_coords=BOUNDARY_COORDS,
         ecm_agents_per_dir=ECM_AGENTS_PER_DIR,
         ecm_population_size=ECM_POPULATION_SIZE,
@@ -301,11 +304,11 @@ def find_mismatches(
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--metabolism-file", default="metabolism.py")
+    parser.add_argument("--model-file", default="model.py")
     parser.add_argument(
         "--scan-root",
         default=None,
-        help="Directory to scan. Default: the directory containing the reference file.",
+        help="Directory to scan. Default: the directory containing the model file.",
     )
     parser.add_argument(
         "--exts",
@@ -315,13 +318,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--fail-on-mismatch", action="store_true")
     args = parser.parse_args(argv)
 
-    metabolism_file = os.path.abspath(args.metabolism_file)
+    model_file = os.path.abspath(args.model_file)
     checker_file = os.path.abspath(__file__)
 
-    print(f"Reading reference from: {metabolism_file}")
+    print(f"Reading reference from: {model_file}")
 
     try:
-        ref = load_reference_values(metabolism_file)
+        ref = load_reference_values(model_file)
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
@@ -329,24 +332,26 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"N = {ref.n}")
     print(f"N_SPECIES = {ref.n_species}")
     print(f"MAX_CONNECTIVITY = {ref.max_connectivity}")
+    print(f"N_ANCHOR_POINTS = {ref.n_anchor_points}")
     print(f"ECM_AGENTS_PER_DIR = {ref.ecm_agents_per_dir}")
     print(f"ECM_POPULATION_SIZE = {ref.ecm_population_size}")
     print("")
 
-    # Default scan root: SAME folder as metabolism.py (not parent)
-    scan_root = os.path.abspath(args.scan_root) if args.scan_root else os.path.dirname(ref.metabolism_path)
+    # Default scan root: SAME folder as model.py (not parent)
+    scan_root = os.path.abspath(args.scan_root) if args.scan_root else os.path.dirname(ref.model_path)
 
     exts = {e.strip().lower() for e in args.exts.split(",") if e.strip()}
     expected = {
         "N_SPECIES": ref.n_species,
         "ECM_POPULATION_SIZE": ref.ecm_population_size,
         "MAX_CONNECTIVITY": ref.max_connectivity,
+        "N_ANCHOR_POINTS": ref.n_anchor_points,
     }
 
     # Exclude:
-    # - metabolism.py itself
+    # - model.py itself
     # - the checker script itself
-    excluded_files_abs = {os.path.abspath(ref.metabolism_path), checker_file}
+    excluded_files_abs = {os.path.abspath(ref.model_path), checker_file}
 
     print(f"Scanning (plain text) under: {scan_root}")
     print(f"Extensions: {', '.join(sorted(exts))}")

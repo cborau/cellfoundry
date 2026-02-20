@@ -33,7 +33,19 @@ FLAMEGPU_DEVICE_FUNCTION float getAngleBetweenVec(const float x1, const float y1
   
   return angle; //in radians
 }
-// This function computes the interaction between cells
+/**
+ * fnode_fnode_spatial_interaction
+ *
+ * Purpose:
+ *   Apply short-range repulsion between nearby FNODE agents to prevent overlap.
+ *
+ * Inputs:
+ *   - Spatial FNODE neighbor messages
+ *   - Environment parameters: MAX_SEARCH_RADIUS_FNODES, FIBRE_NODE_REPULSION_K
+ *
+ * Outputs:
+ *   - Updated repulsive force components (fx, fy, fz) on each FNODE
+ */
 FLAMEGPU_AGENT_FUNCTION(fnode_fnode_spatial_interaction, flamegpu::MessageSpatial3D, flamegpu::MessageNone) {
   // Agent properties in local register
   int id = FLAMEGPU->getVariable<int>("id");
@@ -49,6 +61,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_spatial_interaction, flamegpu::MessageSpatia
   float agent_fz = 0.0;
  
   const float MAX_SEARCH_RADIUS_FNODES = FLAMEGPU->environment.getProperty<float>("MAX_SEARCH_RADIUS_FNODES");
+  const float FIBRE_NODE_REPULSION_K = FLAMEGPU->environment.getProperty<float>("FIBRE_NODE_REPULSION_K");
   const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
   float EPSILON = FLAMEGPU->environment.getProperty<float>("EPSILON");
    
@@ -92,9 +105,8 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_spatial_interaction, flamegpu::MessageSpatia
       cos_z = (0.0 * dir_x + 0.0 * dir_y + 1.0 * dir_z) / distance;
       
       
-      float repulsion_force_mag = 0.1;
       // if total_f > 0, agents are attracted, if <0 agents are repelled.
-      total_f = -1.0 * repulsion_force_mag * (MAX_SEARCH_RADIUS_FNODES - distance);
+      total_f = -1.0 * FIBRE_NODE_REPULSION_K * (MAX_SEARCH_RADIUS_FNODES - distance);
             
       agent_fx += -1 * total_f * cos_x; // minus comes from the direction definition (agent-message)
       agent_fy += -1 * total_f * cos_y;

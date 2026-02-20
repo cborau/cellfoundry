@@ -51,8 +51,20 @@ FLAMEGPU_DEVICE_FUNCTION void getMaxForceDir(float &dx, float &dy, float &dz,flo
     dz = 1.0;
   }
 }
-
-
+/**
+ * fnode_fnode_bucket_interaction
+ *
+ * Purpose:
+ *   Compute spring-damper forces along explicit FNODE connectivity links and
+ *   accumulate network mechanical metrics (extension/compression/elastic energy).
+ *
+ * Inputs:
+ *   - Bucket messages keyed by linked node ids
+ *   - Connectivity arrays and per-link equilibrium distances
+ *
+ * Outputs:
+ *   - Updated FNODE force components and mechanical summary variables
+ */
 FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket, flamegpu::MessageNone) {
   // Current simulation step
   const unsigned int CURRENT_STEP = FLAMEGPU->getStepCounter();
@@ -85,16 +97,13 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket,
   float equilibrium_distance[MAX_CONNECTIVITY] = {};
   for (int i = 0; i < MAX_CONNECTIVITY; i++) {
     equilibrium_distance[i] = FLAMEGPU->getVariable<float, MAX_CONNECTIVITY>("equilibrium_distance", i);
-    if (id == 9 && CURRENT_STEP < 2) {
-      printf("DEBUG: id=%d step=%u equilibrium_distance[%d]=%f\n", id, CURRENT_STEP, i, equilibrium_distance[i]);
-    }
   }
 
 
     
-  float agent_fx = FLAMEGPU->getVariable<float>("fx");
-  float agent_fy = FLAMEGPU->getVariable<float>("fy");
-  float agent_fz = FLAMEGPU->getVariable<float>("fz"); 
+  float agent_fx = 0.0f;
+  float agent_fy = 0.0f;
+  float agent_fz = 0.0f; 
   float agent_fx_abs = 0.0; // if there are opposing forces (F) in the same direction, agent_fx = 0, but agent_fx_abs = 2*F
   float agent_fy_abs = 0.0;
   float agent_fz_abs = 0.0; 

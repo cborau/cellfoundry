@@ -1,6 +1,6 @@
 # +====================================================================+
-# | Model: metabolism                                                  |
-# | Last update: 02/02/2026 - 13:28:03                                 |
+# | Model: CELLFOUNDRY                                                 |
+# | Last update: 13/02/2026 - 13:28:03                                 |
 # +====================================================================+
 
 
@@ -16,8 +16,14 @@ import random
 import os
 import pickle
 import matplotlib.pyplot as plt
-from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network
+from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary
 
+# TODO LIST:
+# Add cell-fnode repulsion
+# Add FOCAD interaction with other FOCADs from other cells?
+# Include new FOCAD agent generation? (e.g. when a cell starts migrating, it generates new FOCAD agents at its leading edge, which then try to find fibres to attach to. When a FOCAD agent detaches, it can be removed from the simulation or moved back to the cell center to be reused later)
+# Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
+# Add matrix degradation / deposition. Easy: Modifying FNODE properties, Complex: removing / adding FNODE agents (which would require updating the connectivity matrix)
 
 start_time = time.time()
 
@@ -33,7 +39,7 @@ PAUSE_EVERY_STEP = False  # If True, the visualization stops every step until P 
 SAVE_PICKLE = True  # If True, dumps model configuration into a pickle file for post-processing
 SHOW_PLOTS = False  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
-SAVE_EVERY_N_STEPS = 50 # Affects both the .vtk files and the Dataframes storing boundary data
+SAVE_EVERY_N_STEPS = 1 # Affects both the .vtk files and the Dataframes storing boundary data
 
 CURR_PATH = pathlib.Path().absolute()
 RES_PATH = CURR_PATH / 'result_files'
@@ -41,15 +47,16 @@ RES_PATH.mkdir(parents=True, exist_ok=True)
 EPSILON = 0.0000000001
 
 print("Executing in ", CURR_PATH)
-# Minimum number of agents per direction (x,y,z). 
+# Minimum number of ECM agents per direction (x,y,z). 
 # If domain is not cubical, N is asigned to the shorter dimension and more agents are added to the longer ones
+# NOTE: ECM agents are always present (mandatory) eventhough they are only used when INCLUDE_DIFFUSION is True. If there is no diffusion, set N to a small value to reduce computational cost.
 # ----------------------------------------------------------------------
 N = 21
 
 # Time simulation parameters
 # ----------------------------------------------------------------------
-TIME_STEP = 0.01# time. WARNING: diffusion and cell migration events might need different scales
-STEPS = 2000
+TIME_STEP = 0.1 # s. WARNING: diffusion and cell migration events might need different scales
+STEPS = 50
 
 # +====================================================================+
 # | BOUNDARY CONDITIONS                                                |
@@ -57,26 +64,26 @@ STEPS = 2000
 
 # Boundary interactions and mechanical parameters
 # ----------------------------------------------------------------------
-ECM_K_ELAST = 0.2  # [N/units/kg]
-ECM_D_DUMPING = 0.04  # [N*s/units/kg]
-ECM_ETA = 1  # [1/time]
+ECM_K_ELAST = 0.2  # [nN/um]
+ECM_D_DUMPING = 0.04  # [nN·s/um]
+ECM_ETA = 2.0  # [nN·s/µm] Effective drag for overdamped FNODE motion (calibration parameter)
 
 #BOUNDARY_COORDS = [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]  # +X,-X,+Y,-Y,+Z,-Z
 BOUNDARY_COORDS = [100.0, -100.0, 100.0, -100.0, 100.0, -100.0]# microdevice dimensions in um
 #BOUNDARY_COORDS = [coord / 1000.0 for coord in BOUNDARY_COORDS] # in mm
-BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [units/time]
-BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[units/time]
+BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
+BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[um/s]
 
 POISSON_DIRS = [0, 1]  # 0: xdir, 1:ydir, 2:zdir. poisson_ratio ~= -incL(dir1)/incL(dir2) dir2 is the direction in which the load is applied
 ALLOW_BOUNDARY_ELASTIC_MOVEMENT = [0, 0, 0, 0, 0, 0]  # [bool]
 RELATIVE_BOUNDARY_STIFFNESS = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-BOUNDARY_STIFFNESS_VALUE = 10.0  # N/units
+BOUNDARY_STIFFNESS_VALUE = 10.0  # nN/um
 BOUNDARY_DUMPING_VALUE = 5.0
 BOUNDARY_STIFFNESS = [BOUNDARY_STIFFNESS_VALUE * x for x in RELATIVE_BOUNDARY_STIFFNESS]
 BOUNDARY_DUMPING = [BOUNDARY_DUMPING_VALUE * x for x in RELATIVE_BOUNDARY_STIFFNESS]
 #CLAMP_AGENT_TOUCHING_BOUNDARY = [0, 0, 1, 1, 0, 0]# +X,-X,+Y,-Y,+Z,-Z [bool] - shear assay
 CLAMP_AGENT_TOUCHING_BOUNDARY = [1, 1, 1, 1, 1, 1]# +X,-X,+Y,-Y,+Z,-Z [bool]
-ALLOW_AGENT_SLIDING = [0, 0, 0, 0, 0, 0]# +X,-X,+Y,-Y,+Z,-Z [bool]
+ALLOW_AGENT_SLIDING = [1, 1, 1, 1, 1, 1]# +X,-X,+Y,-Y,+Z,-Z [bool]
 
 if any(rate != 0.0 for rate in BOUNDARY_DISP_RATES_PARALLEL) or any(rate != 0.0 for rate in BOUNDARY_DISP_RATES):
     MOVING_BOUNDARIES = True
@@ -119,7 +126,7 @@ MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION = 2 * ECM_ECM_EQUILIBRIUM_DISTANCE # thi
 OSCILLATORY_SHEAR_ASSAY = False  # if True, BOUNDARY_DISP_RATES_PARALLEL options are overrun but used to make the boundaries oscillate in their corresponding planes following a sin() function
 MAX_STRAIN = 0.25  # maximum strain applied during oscillatory shear assay (used to compute OSCILLATORY_AMPLITUDE)
 OSCILLATORY_AMPLITUDE = MAX_STRAIN * (BOUNDARY_COORDS[2] - BOUNDARY_COORDS[3])  # range [0-1] * domain size in the direction of oscillation
-OSCILLATORY_FREQ = 0.05  # strain oscillation frequency [time^-1]
+OSCILLATORY_FREQ = 0.05  # strain oscillation frequency [s^-1]
 OSCILLATORY_W = 2 * math.pi * OSCILLATORY_FREQ * TIME_STEP
 # Compute expected boundary positions after motion, WARNING: make sure the direction matches with OSCILLATORY_AMPLITUDE definition
 MAX_EXPECTED_BOUNDARY_POS_OSCILLATORY = 0.25 * (BOUNDARY_COORDS[2] - BOUNDARY_COORDS[3]) + BOUNDARY_COORDS[2]  # max pos reached at sin()=1
@@ -146,12 +153,15 @@ if OSCILLATORY_SHEAR_ASSAY:
 INCLUDE_FIBRE_NETWORK = True
 
 MAX_CONNECTIVITY = 8 # must match hard-coded C++ values
-FIBRE_SEGMENT_K_ELAST = 0.2  # [N/units/kg]
-FIBRE_SEGMENT_D_DUMPING = 0.04  # [N*s/units/kg]
+# NOTE: These are calibrated model parameters (effective segment-level mechanics), not universal material constants.
+# They depend on collagen type/concentration, crosslinking, architecture and coarse-graining choices.
+FIBRE_SEGMENT_K_ELAST = 0.5  # [nN/um] Effective fibre-segment stiffness (baseline for tuning)
+FIBRE_SEGMENT_D_DUMPING = 0.2  # [nN*s/um] Effective fibre-segment damping (baseline for tuning)
 FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE = 15 # WARNING: must match the value used in network generation
 FIBRE_NODE_BOUNDARY_INTERACTION_RADIUS = 0.05
 FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE = 0.0
 MAX_SEARCH_RADIUS_FNODES = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / 10.0 # must me smaller than FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
+FIBRE_NODE_REPULSION_K = 0.2 * FIBRE_SEGMENT_K_ELAST  # [nN/um] Short-range FNODE-FNODE exclusion stiffness (kept below segment stiffness)
 
 
 # +====================================================================+
@@ -159,29 +169,33 @@ MAX_SEARCH_RADIUS_FNODES = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / 10.0 # must me s
 # +====================================================================+
 INCLUDE_DIFFUSION = True
 N_SPECIES = 2  # number of diffusing species.WARNING: make sure that the value coincides with the one declared in TODO
-DIFFUSION_COEFF_MULTI = [300.0, 300.0]  # diffusion coefficient in [units^2/s] per specie
-BOUNDARY_CONC_INIT_MULTI = [[50.0,50.0, 50.0, 50.0, 50.0, 50.0],
-                            # initial concentration at each surface (+X,-X,+Y,-Y,+Z,-Z) [units^2/s]. -1.0 means no condition assigned. All agents are assigned 0 by default.
+DIFFUSION_COEFF_MULTI = [300.0, 300.0]  # diffusion coefficient in [um^2/s] per specie
+BOUNDARY_CONC_INIT_MULTI = [[50.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                            # initial concentration at each surface (+X,-X,+Y,-Y,+Z,-Z) [um^2/s]. -1.0 means no condition assigned. All agents are assigned 0 by default.
                             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
 
-BOUNDARY_CONC_FIXED_MULTI = [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+BOUNDARY_CONC_FIXED_MULTI = [[50.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                              # concentration boundary conditions at each surface. WARNING: -1.0 means initial condition prevails. Don't use 0.0 as initial condition if that value is not fixed. Use -1.0 instead
                              [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
-HETEROGENEOUS_DIFFUSION = True  # if True, diffusion coefficient is multiplied by (1 - local ECM density) to simulate hindered diffusion through the ECM. WARNING: this is a very simple approximation of the phenomenon and highly depends on grid density (N). 
+HETEROGENEOUS_DIFFUSION = False  # if True, diffusion coefficient is multiplied by (1 - local ECM density) to simulate hindered diffusion through the ECM. WARNING: this is a very simple approximation of the phenomenon and highly depends on grid density (N). 
 # +====================================================================+
-# | CELL PARAMETERS                                                   |
+# | CELL PARAMETERS                                                    |
 # +====================================================================+
 INCLUDE_CELLS = True
 INCLUDE_CELL_ORIENTATION = True
 INCLUDE_CELL_CELL_INTERACTION = False
 INCLUDE_CELL_CYCLE = False
 PERIODIC_BOUNDARIES_FOR_CELLS = False
-CELL_ORIENTATION_RATE = 1.0  # [1/time] TODO: check whether cell reorient themselves faster than ECM
-N_CELLS = 1
-CELL_K_ELAST = 2.0  # [N/units/kg]
-CELL_D_DUMPING = 0.4  # [N*time/units/kg]
-CELL_RADIUS = 8.412 #ECM_ECM_EQUILIBRIUM_DISTANCE / 2 # [units]
-CELL_SPEED_REF = ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / 10.0 # [units/time]
+CELL_ORIENTATION_RATE = 1.0  # [1/s] TODO: check whether cell reorient themselves faster than ECM
+N_CELLS = 50
+CELL_K_ELAST = 2.0  # [nN/um]
+CELL_D_DUMPING = 0.4  # [nN·s/um]
+CELL_RADIUS = 8.412 #ECM_ECM_EQUILIBRIUM_DISTANCE / 2 # [um]
+CELL_NUCLEUS_RADIUS = CELL_RADIUS / 2 # [um]
+CELL_SPEED_REF = 0.75 # [um/s] Another option is to define it according to grid distance ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / X -> e.g. in how many steps a cell would move the distance between ECM agents. This is important to avoid missing interactions with ECM agents due to large jumps. WARNING: if cell speed is too high, consider increasing the number of ECM agents (N) or reducing the time step (TIME_STEP) to avoid missing interactions.
+BROWNIAN_MOTION_STRENGTH = CELL_SPEED_REF / 10.0 # [um/s] Strength of random movement added to cell velocity to represent Brownian motion and other non-directed motility.
+print(f'Initial cell speed reference: {CELL_SPEED_REF} um/s')   
+print(f'Initial Brownian motion strength: {BROWNIAN_MOTION_STRENGTH} um/s')
 CYCLE_PHASE_G1_DURATION = 10.0 #[h]
 CYCLE_PHASE_S_DURATION = 8.0
 CYCLE_PHASE_G2_DURATION = 4.0
@@ -191,13 +205,85 @@ CYCLE_PHASE_S_START = CYCLE_PHASE_G1_DURATION
 CYCLE_PHASE_G2_START = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION
 CYCLE_PHASE_M_START = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION + CYCLE_PHASE_G2_DURATION
 CELL_CYCLE_DURATION = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION + CYCLE_PHASE_G2_DURATION + CYCLE_PHASE_M_DURATION # typically 24h [h]
-INIT_ECM_CONCENTRATION_VALS = [50.0, 0.0]  # initial concentration of each species on the ECM agents
+INIT_ECM_CONCENTRATION_VALS = [0.0, 0.0]  # initial concentration of each species on the ECM agents
 INIT_CELL_CONCENTRATION_VALS = [15.0, 0.0]  # initial concentration of each species on the CELL agents
 INIT_CELL_CONC_MASS_VALS = [x * (4/3 * 3.1415926 * CELL_RADIUS**3) for x in INIT_CELL_CONCENTRATION_VALS]  # initial mass of each species on the CELL agents
 INIT_ECM_SAT_CONCENTRATION_VALS = [0.0, 10.0]  # initial saturation concentration of each species on the ECM agents
 INIT_CELL_CONSUMPTION_RATES = [0.001, 0.0]  # consumption rate of each species by the CELL agents 
 INIT_CELL_PRODUCTION_RATES = [0.0, 10.0]  # production rate of each species by the CELL agents 
 INIT_CELL_REACTION_RATES = [0.00018, 0.00018]  # metabolic reaction rates of each species by the CELL agents 
+# +====================================================================+
+# | FOCAL ADHESION PARAMETERS  (units: um, s, nN)                      |
+# +====================================================================+
+INCLUDE_FOCAL_ADHESIONS = True
+INIT_N_FOCAD_PER_CELL = 10 # initial number of focal adhesions per cell. 
+N_ANCHOR_POINTS = 100 # number of anchor points to which focal adhesions can attach on the nucleus surface. Their positions change with nucleus deformation
+MAX_SEARCH_RADIUS_FOCAD = 3.0 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE  # TEMP(debug attach): increased to strongly favor FA-node encounters. Reasonable baseline: 1.0 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
+MAX_FOCAD_ARM_LENGTH = 4 * CELL_RADIUS  # maximum length of the focal adhesion "arm" (distance between the focal adhesion and its anchor point on the nucleus). If the arm is stretched beyond this length, the focal adhesion moves back towards the anchor point. This is a simple way to represent the limited reach of cellular protrusions and avoid unrealistic stretching of focal adhesions. WARNING: make sure this value is consistent with CELL_RADIUS and MAX_SEARCH_RADIUS_FOCAD to avoid unrealistic behavior.
+# WARNING: rate values below assume global timestep ~ 1.0 s
+FOCAD_REST_LENGTH_0 = CELL_RADIUS - CELL_NUCLEUS_RADIUS # [um] Initial rest/target length at creation time.
+FOCAD_MIN_REST_LENGTH = FOCAD_REST_LENGTH_0 / 10.0 # [um] Minimum rest length to prevent collapse. 
+FOCAD_K_FA = 10.0 # [nN/um] Adhesion stiffness (effective spring constant). Typical range: ~0.1–10 nN/um; 
+FOCAD_F_MAX= 0.0 # [nN] Maximum force per adhesion (cap to avoid runaway and represent myosin/structural limits).Typical range: ~5–50 nN. WARNING: 0 means "no cap" 
+FOCAD_V_C = 0.2 # [um/s] Contractile shortening speed of L(t) (actomyosin-driven).
+FOCAD_K_ON = 5.0 # [1/s] TEMP(debug attach): high binding rate to force attachments. Reasonable baseline: 0.01 [1/s]
+FOCAD_K_OFF_0 = 0.0002 # [1/s] TEMP(debug attach): low baseline detachment to retain attachments. Reasonable baseline: 0.003 [1/s]
+FOCAD_F_C = 5.0 # [nN] Force scale controlling force sensitivity in koff(F) (catch/slip style). Typical range: ~2–10 nN. Sets how quickly detachment probability changes as traction builds.
+# Example (simple slip): koff(F)=K_OFF_0*exp(|F|/F_C) => faster turnover under high force.
+USE_CATCH_BOND = True  # If True, use a two-pathway catch+slip off-rate instead of pure slip-bond.
+CATCH_BOND_CATCH_SCALE = 4.0  # Multiplier of K_OFF_0 for catch branch (larger -> stronger stabilization window).
+CATCH_BOND_SLIP_SCALE = 0.2  # Multiplier of K_OFF_0 for slip branch (larger -> faster high-force failure).
+CATCH_BOND_F_CATCH = 2.0  # [nN] Force scale for catch branch exp(-|F|/F_catch).
+CATCH_BOND_F_SLIP = 4.0  # [nN] Force scale for slip branch exp(+|F|/F_slip).
+# Suggested starting point when USE_CATCH_BOND=True (to avoid over-stabilization):
+#   FOCAD_K_ON ~ 0.02-0.1 [1/s], FOCAD_K_OFF_0 ~ 0.001-0.01 [1/s], FOCAD_K_REINF <= 0.001 [1/s].
+FOCAD_K_REINF = 0.001 # [1/s] Reinforcement rate for adhesion strengthening. Timescale ~1/K_REINF = 1000 s (~17 min). E.g. something like k_fa <- k_fa + K_REINF * g(|F|) * DT, adhesions gradually stiffen over tens of minutes when they carry load.
+FOCAD_F_REINF = 1.0 # [nN] Force scale for reinforcement saturation: g(F)=F/(F+F_REINF).
+FOCAD_K_FA_MAX = 50.0 # [nN/um] Upper bound for reinforced adhesion stiffness.
+FOCAD_K_FA_DECAY = 0.0 # [1/s] Optional decay towards baseline FOCAD_K_FA when unloaded/detached. 0 disables decay.
+FOCAD_POLARITY_KON_FRONT_GAIN = 2.0  # [-] Frontness gain for attachment probability (k_on).
+FOCAD_POLARITY_KOFF_FRONT_REDUCTION = 0.5  # [-] Fractional reduction of k_off_0 at the front.
+FOCAD_POLARITY_KOFF_REAR_GAIN = 1.0  # [-] Fractional increase of k_off_0 at the rear.
+FOCAD_F_MATURE = 1.0  # [nN] force threshold to transition nascent->mature
+FOCAD_T_NASCENT_MAX = 120.0  # [s] max nascent lifetime before disassembly if unresolved
+FOCAD_T_DETACHED_GRACE = 30.0  # [s] detached grace before disassembly
+FOCAD_T_DISASSEMBLY = 20.0  # [s] time spent detached in disassembling state before deletion
+# +====================================================================+
+# | LINC coupling between cell nucleus and FOCAD                       |
+# +====================================================================+
+INCLUDE_LINC_COUPLING = False
+LINC_K_ELAST = 10.0 # [nN/um] Effective LINC stiffness in series with FOCAD stiffness.
+LINC_D_DUMPING = 0.0 # [nN·s/um] Optional damping along FOCAD-LINC axis.
+LINC_REST_LENGTH = 0.0 # [um] Rest length of virtual LINC segment.
+
+# +====================================================================+
+# | NUCLEAR MECHANICS  (ONLY USED IF FOCAL ADHESIONS ARE INCLUDED)     |
+# +====================================================================+
+# Elasticity (small-strain linear)
+NUCLEUS_E = 2.0               # [nN/µm² = kPa] Young’s modulus of the nucleus (effective stiffness). Typical: 0.5–5.0 Pa depending on cell type/lamina.
+NUCLEUS_NU = 0.48             # [-] Poisson ratio. Nearly incompressible nucleus. Typical: 0.45–0.49. WARNING: must be < 0.5.
+# Viscoelastic relaxation
+NUCLEUS_TAU = 0.2            # [s] Relaxation time controlling how fast strain follows the instantaneous elastic strain. Typical: 10–100 s.
+NUCLEUS_EPS_CLAMP = 0.30      # [-] Clamp for each strain component to preserve small-strain assumptions and avoid numerical blow-up. Typical: 0.1–0.3.
+# +====================================================================+
+# | CHEMOTAXIS                                                         |
+# +====================================================================+
+INCLUDE_CHEMOTAXIS = True
+CHEMOTAXIS_SENSITIVITY = [1.0, 0.0] # [-1.0 to +1.0] Chemotactic sensitivity for each species. Positive: attraction, Negative: repulsion towards higher concentrations.
+CHEMOTAXIS_ONLY_DIR = True # if True, chemotaxis only affects cell orientation, not speed. If False, chemotaxis affects both orientation and speed (e.g. by making cells move faster when they are oriented towards higher concentration gradient)
+CHEMOTAXIS_CHI = 10.0 # [um^2/s] Chemotactic coefficient (χ) used to compute chemotactic velocity as v_chem = χ * ∇C. Typical range: 0.1–10 µm²/s depending on cell type and chemoattractant. Only used if CHEMOTAXIS_ONLY_DIR is False.
+# +====================================================================+
+# | CELL MIGRATION RELATED PARAMETERS                                  |
+# +====================================================================+
+INCLUDE_DUROTAXIS = True   # if True, cells prefer to move towards stiffer regions, which is implemented by making them prefer to move in the direction of maximum stress/strain. 
+DUROTAXIS_ONLY_DIR = True  # if True, stress/strain direction changes movement vector (keeps speed), False: changes speed too
+FOCAD_MOBILITY_MU  = 1e-4   # Mobility scaling for stress contribution (start small)
+INCLUDE_ORIENTATION_ALIGN = True  # True: enable gradual alignment to principal direction
+ORIENTATION_ALIGN_RATE  = 1.0  # Alignment rate [1/time] -> ~ ORIENTATION_ALIGN_RATE/TIME_STEP steps to achive full aligment
+ORIENTATION_ALIGN_USE_STRESS = True  # True: align to stress eigvec1, False: align to strain eigvec1
+DUROTAXIS_BLEND_BETA = 0.5   # 0: traction only, 1: principal direction only
+DUROTAXIS_USE_STRESS = True   # True: use stress eigenpair, False: use strain eigenpair
+
 
 # +====================================================================+
 # | OTHER DERIVED PARAMETERS AND MODEL CHECKS                          |
@@ -243,7 +329,7 @@ for i in range(6):
 
 
 if INCLUDE_FIBRE_NETWORK:
-    nodes, connectivity, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, fibre_critical_error = load_fibre_network(
+    nodes, connectivity, n_fib, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, fibre_critical_error = load_fibre_network(
         file_name='network_3d.pkl',
         boundary_coords=BOUNDARY_COORDS,
         epsilon=EPSILON,
@@ -258,7 +344,7 @@ if INCLUDE_FIBRE_NETWORK:
         AVG_NETWORK_VOXEL_DENSITY = math.ceil((N_NODES / (L0_x * L0_y * L0_z)) * ECM_VOXEL_VOLUME) # average number of fibre nodes per voxel, used to adjust the heterogeneous diffusion effect
         print(f'Average network voxel density (number of fibre nodes per voxel): {AVG_NETWORK_VOXEL_DENSITY}')
     if nodes is not None and connectivity is not None:
-        N_FIBRES = len(connectivity)
+        N_FIBRES = n_fib
     else:
         N_FIBRES = None
 
@@ -276,7 +362,7 @@ if INCLUDE_DIFFUSION:
         # print('Fi_x value: {0} for species {1}'.format(Fi_x, i + 1))
         if Fi_x > 0.5:
             print(
-                'WARNING: diffusion problem is ill conditioned (Fi_x should be < 0.5), check parameters and consider decreasing time step\nSemi-implicit diffusion will be used instead')
+                f'WARNING: diffusion problem is ill conditioned (Fi_x {Fi_x} should be < 0.5), check parameters and consider decreasing time step\nSemi-implicit diffusion will be used instead')
             UNSTABLE_DIFFUSION = True
     dy = L0_y / (ECM_AGENTS_PER_DIR[1] - 1)
     for i in range(N_SPECIES):
@@ -284,7 +370,7 @@ if INCLUDE_DIFFUSION:
         # print('Fi_y value: {0} for species {1}'.format(Fi_y, i + 1))
         if Fi_y > 0.5:
             print(
-                'WARNING: diffusion problem is ill conditioned (Fi_y should be < 0.5), check parameters and consider decreasing time step\nSemi-implicit diffusion will be used instead')
+                f'WARNING: diffusion problem is ill conditioned (Fi_y {Fi_y} should be < 0.5), check parameters and consider decreasing time step\nSemi-implicit diffusion will be used instead')
             UNSTABLE_DIFFUSION = True
     dz = L0_z / (ECM_AGENTS_PER_DIR[2] - 1)
     for i in range(N_SPECIES):
@@ -292,7 +378,7 @@ if INCLUDE_DIFFUSION:
         # print('Fi_z value: {0} for species {1}'.format(Fi_z, i + 1))
         if Fi_z > 0.5:
             print(
-                'WARNING: diffusion problem is ill conditioned (Fi_z should be < 0.5), check parameters and consider decreasing time step\nSemi-implicit diffusion will be used instead')
+                f'WARNING: diffusion problem is ill conditioned (Fi_z {Fi_z} should be < 0.5), check parameters and consider decreasing time step\nSemi-implicit diffusion will be used instead')
             UNSTABLE_DIFFUSION = True
     if not INCLUDE_FIBRE_NETWORK and HETEROGENEOUS_DIFFUSION:
         print(f'WARNING: HETEROGENEOUS_DIFFUSION is set to True but no fibre network is included, default D values ({DIFFUSION_COEFF_MULTI}) will be used instead')
@@ -302,6 +388,22 @@ if INCLUDE_CELLS:
     if MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION < (2 * CELL_RADIUS):
         print('MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION: {0} must be higher than 2 * CELL_RADIUS: 2 * {1}'.format(MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION, CELL_RADIUS))
         critical_error = True
+    if INCLUDE_FOCAL_ADHESIONS and not INCLUDE_FIBRE_NETWORK: 
+        print('ERROR: focal adhesions cannot be included if there is no fibre network to interact with')
+        critical_error = True
+    if INCLUDE_FOCAL_ADHESIONS and MAX_FOCAD_ARM_LENGTH < CELL_RADIUS:
+        print('ERROR: MAX_FOCAD_ARM_LENGTH: {0} must be bigger than CELL_RADIUS: {1}, as focal adhesions are initiated at the cell surface and should be able to grow away'.format(MAX_FOCAD_ARM_LENGTH, CELL_RADIUS))
+elif INCLUDE_FOCAL_ADHESIONS:
+    print('ERROR: focal adhesions cannot be included if there are no cells to form them')
+    critical_error= True
+
+if INCLUDE_FIBRE_NETWORK:
+    print_fibre_calibration_summary(
+        fibre_segment_k_elast=FIBRE_SEGMENT_K_ELAST,
+        fibre_segment_d_dumping=FIBRE_SEGMENT_D_DUMPING,
+        fibre_segment_equilibrium_distance=FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE,
+        dt = TIME_STEP,
+    )
 
 
 if critical_error:
@@ -329,7 +431,7 @@ AGENT Files
 """
   ECM
 """
-ecm_output_grid_location_data_file = "ecm_output_grid_location_data.cpp"
+ecm_grid_location_data_file = "ecm_grid_location_data.cpp"
 ecm_ecm_interaction_file = "ecm_ecm_interaction.cpp"
 ecm_boundary_concentration_conditions_file = "ecm_boundary_concentration_conditions.cpp"
 ecm_move_file = "ecm_move.cpp"
@@ -339,9 +441,20 @@ ecm_Dsp_update_file = "ecm_Dsp_update.cpp"
 """
   CELL
 """
-cell_output_location_data_file = "cell_output_location_data.cpp"
+cell_spatial_location_data_file = "cell_spatial_location_data.cpp"
 cell_ecm_interaction_metabolism_file = "cell_ecm_interaction_metabolism.cpp"
 cell_move_file = "cell_move.cpp"
+cell_bucket_location_data_file = "cell_bucket_location_data.cpp"
+cell_update_stress_file = "cell_update_stress.cpp"
+
+"""
+  FOCAD
+"""
+focad_bucket_location_data_file = "focad_bucket_location_data.cpp"
+focad_spatial_location_data_file = "focad_spatial_location_data.cpp"
+focad_anchor_update_file = "focad_anchor_update.cpp"
+focad_fnode_interaction_file = "focad_fnode_interaction.cpp"
+focad_move_file = "focad_move.cpp"
 
 """
   BCORNER  
@@ -358,9 +471,10 @@ fnode_boundary_interaction_file = "fnode_boundary_interaction.cpp"
 fnode_fnode_spatial_interaction_file = "fnode_fnode_spatial_interaction.cpp"
 fnode_fnode_bucket_interaction_file = "fnode_fnode_bucket_interaction.cpp"
 fnode_move_file = "fnode_move.cpp"
+fnode_focad_interaction_file = "fnode_focad_interaction.cpp"
 
 
-model = pyflamegpu.ModelDescription("metabolism")
+model = pyflamegpu.ModelDescription("cellfoundry")
 
 # ++==================================================================++
 # ++ Globals                                                           |
@@ -425,8 +539,9 @@ env.newPropertyUInt("INCLUDE_FIBRE_NETWORK", INCLUDE_FIBRE_NETWORK)
 env.newPropertyFloat("MAX_SEARCH_RADIUS_FNODES",MAX_SEARCH_RADIUS_FNODES)
 env.newPropertyFloat("FIBRE_SEGMENT_K_ELAST",FIBRE_SEGMENT_K_ELAST)
 env.newPropertyFloat("FIBRE_SEGMENT_D_DUMPING",FIBRE_SEGMENT_D_DUMPING)
+env.newPropertyFloat("FIBRE_NODE_REPULSION_K", FIBRE_NODE_REPULSION_K)
 
-# Cell properties
+# Cell properties TODO: MOVE SOME OF THESE PROPERTIES TO THE CELL AGENT 
 env.newPropertyUInt("INCLUDE_CELL_ORIENTATION", INCLUDE_CELL_ORIENTATION)
 env.newPropertyUInt("INCLUDE_CELL_CELL_INTERACTION", INCLUDE_CELL_CELL_INTERACTION)
 env.newPropertyUInt("PERIODIC_BOUNDARIES_FOR_CELLS", PERIODIC_BOUNDARIES_FOR_CELLS)
@@ -434,7 +549,9 @@ env.newPropertyUInt("N_CELLS", N_CELLS)
 env.newPropertyFloat("CELL_K_ELAST", CELL_K_ELAST)
 env.newPropertyFloat("CELL_D_DUMPING", CELL_D_DUMPING)
 env.newPropertyFloat("CELL_RADIUS", CELL_RADIUS)
+env.newPropertyFloat("CELL_NUCLEUS_RADIUS", CELL_NUCLEUS_RADIUS)
 env.newPropertyFloat("CELL_SPEED_REF", CELL_SPEED_REF)
+env.newPropertyFloat("BROWNIAN_MOTION_STRENGTH", BROWNIAN_MOTION_STRENGTH)
 env.newPropertyFloat("CELL_ORIENTATION_RATE", CELL_ORIENTATION_RATE)
 env.newPropertyFloat("MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION", MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION)
 env.newPropertyFloat("MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION", MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION)
@@ -447,6 +564,63 @@ env.newPropertyFloat("CYCLE_PHASE_G1_START", CYCLE_PHASE_G1_START)
 env.newPropertyFloat("CYCLE_PHASE_S_START", CYCLE_PHASE_S_START)
 env.newPropertyFloat("CYCLE_PHASE_G2_START", CYCLE_PHASE_G2_START)
 env.newPropertyFloat("CYCLE_PHASE_M_START", CYCLE_PHASE_M_START)
+
+# Focal adhesion properties
+env.newPropertyUInt("INCLUDE_FOCAL_ADHESIONS", INCLUDE_FOCAL_ADHESIONS)
+env.newPropertyUInt("INIT_N_FOCAD_PER_CELL", INIT_N_FOCAD_PER_CELL)
+env.newPropertyUInt("N_ANCHOR_POINTS", N_ANCHOR_POINTS)
+env.newPropertyFloat("MAX_SEARCH_RADIUS_FOCAD", MAX_SEARCH_RADIUS_FOCAD)
+env.newPropertyFloat("MAX_FOCAD_ARM_LENGTH", MAX_FOCAD_ARM_LENGTH)
+env.newPropertyFloat("FOCAD_REST_LENGTH_0", FOCAD_REST_LENGTH_0)
+env.newPropertyFloat("FOCAD_MIN_REST_LENGTH", FOCAD_MIN_REST_LENGTH)
+env.newPropertyFloat("FOCAD_K_FA", FOCAD_K_FA)
+env.newPropertyFloat("FOCAD_F_MAX", FOCAD_F_MAX)
+env.newPropertyFloat("FOCAD_V_C", FOCAD_V_C)
+env.newPropertyFloat("FOCAD_K_ON", FOCAD_K_ON)
+env.newPropertyFloat("FOCAD_K_OFF_0", FOCAD_K_OFF_0)
+env.newPropertyFloat("FOCAD_F_C", FOCAD_F_C)
+env.newPropertyUInt("USE_CATCH_BOND", USE_CATCH_BOND)
+env.newPropertyFloat("CATCH_BOND_CATCH_SCALE", CATCH_BOND_CATCH_SCALE)
+env.newPropertyFloat("CATCH_BOND_SLIP_SCALE", CATCH_BOND_SLIP_SCALE)
+env.newPropertyFloat("CATCH_BOND_F_CATCH", CATCH_BOND_F_CATCH)
+env.newPropertyFloat("CATCH_BOND_F_SLIP", CATCH_BOND_F_SLIP)
+env.newPropertyFloat("FOCAD_K_REINF", FOCAD_K_REINF)
+env.newPropertyFloat("FOCAD_F_REINF", FOCAD_F_REINF)
+env.newPropertyFloat("FOCAD_K_FA_MAX", FOCAD_K_FA_MAX)
+env.newPropertyFloat("FOCAD_K_FA_DECAY", FOCAD_K_FA_DECAY)
+env.newPropertyFloat("FOCAD_POLARITY_KON_FRONT_GAIN", FOCAD_POLARITY_KON_FRONT_GAIN)
+env.newPropertyFloat("FOCAD_POLARITY_KOFF_FRONT_REDUCTION", FOCAD_POLARITY_KOFF_FRONT_REDUCTION)
+env.newPropertyFloat("FOCAD_POLARITY_KOFF_REAR_GAIN", FOCAD_POLARITY_KOFF_REAR_GAIN)
+env.newPropertyFloat("FOCAD_F_MATURE", FOCAD_F_MATURE)
+env.newPropertyFloat("FOCAD_T_NASCENT_MAX", FOCAD_T_NASCENT_MAX)
+env.newPropertyFloat("FOCAD_T_DETACHED_GRACE", FOCAD_T_DETACHED_GRACE)
+env.newPropertyFloat("FOCAD_T_DISASSEMBLY", FOCAD_T_DISASSEMBLY)
+env.newPropertyUInt("INCLUDE_LINC_COUPLING", INCLUDE_LINC_COUPLING)
+env.newPropertyFloat("LINC_K_ELAST", LINC_K_ELAST)
+env.newPropertyFloat("LINC_D_DUMPING", LINC_D_DUMPING)
+env.newPropertyFloat("LINC_REST_LENGTH", LINC_REST_LENGTH)
+
+# Nucleus mechanical properties
+env.newPropertyFloat("NUCLEUS_E", NUCLEUS_E)
+env.newPropertyFloat("NUCLEUS_NU", NUCLEUS_NU)
+env.newPropertyFloat("NUCLEUS_TAU", NUCLEUS_TAU)
+env.newPropertyFloat("NUCLEUS_EPS_CLAMP", NUCLEUS_EPS_CLAMP)
+
+# Chemotaxis properties
+env.newPropertyUInt("INCLUDE_CHEMOTAXIS", INCLUDE_CHEMOTAXIS)
+env.newPropertyFloat("CHEMOTAXIS_CHI", CHEMOTAXIS_CHI)
+env.newPropertyUInt("CHEMOTAXIS_ONLY_DIR", CHEMOTAXIS_ONLY_DIR)
+
+# Cell migration (durotaxis/orientation alignment) properties
+env.newPropertyUInt("INCLUDE_DUROTAXIS", INCLUDE_DUROTAXIS)
+env.newPropertyUInt("DUROTAXIS_ONLY_DIR", DUROTAXIS_ONLY_DIR)
+env.newPropertyFloat("FOCAD_MOBILITY_MU", FOCAD_MOBILITY_MU)
+env.newPropertyUInt("INCLUDE_ORIENTATION_ALIGN", INCLUDE_ORIENTATION_ALIGN)
+env.newPropertyFloat("ORIENTATION_ALIGN_RATE", ORIENTATION_ALIGN_RATE)
+env.newPropertyUInt("ORIENTATION_ALIGN_USE_STRESS", ORIENTATION_ALIGN_USE_STRESS)
+env.newPropertyFloat("DUROTAXIS_BLEND_BETA", DUROTAXIS_BLEND_BETA)
+env.newPropertyUInt("DUROTAXIS_USE_STRESS", DUROTAXIS_USE_STRESS)
+
 
 # ECM BEHAVIOUR 
 # ------------------------------------------------------
@@ -475,47 +649,47 @@ env.newPropertyUInt("MOVING_BOUNDARIES", MOVING_BOUNDARIES)
 """
   LOCATION MESSAGES
 """
-bcorner_location_message = model.newMessageSpatial3D("bcorner_location_message")
+BCORNER_location_message = model.newMessageSpatial3D("bcorner_location_message")
 # Set the range and bounds.
-bcorner_location_message.setRadius(MAX_EXPECTED_BOUNDARY_POS - MIN_EXPECTED_BOUNDARY_POS)  # corners are not actually interacting with anything
-bcorner_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS)
-bcorner_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS)
+BCORNER_location_message.setRadius(MAX_EXPECTED_BOUNDARY_POS - MIN_EXPECTED_BOUNDARY_POS)  # corners are not actually interacting with anything
+BCORNER_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS)
+BCORNER_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS)
 # A message to hold the location of an agent. WARNING: spatial3D messages already define x,y,z variables internally.
-bcorner_location_message.newVariableInt("id")
+BCORNER_location_message.newVariableInt("id")
 
 
 if INCLUDE_FIBRE_NETWORK:
-    fnode_spatial_location_message = model.newMessageSpatial3D("fnode_spatial_location_message")
+    FNODE_spatial_location_message = model.newMessageSpatial3D("fnode_spatial_location_message")
     # If heterogeneous diffusion is included, the search/broadcast radius for fibre nodes must be at least equal to the equilibrium distance to make sure that ECM nodes can find all the fibre nodes when looking for neighbours. 
     # WARNING: increasing this radius will increase the number of messages of fnode_fnode_spatial_interaction and therefore the computational cost of the simulation, so it should be kept as low as possible while making sure that fibre nodes are found by ECM nodes.
     if (MAX_SEARCH_RADIUS_FNODES < ECM_ECM_EQUILIBRIUM_DISTANCE) and INCLUDE_DIFFUSION and HETEROGENEOUS_DIFFUSION:
-        fnode_spatial_location_message.setRadius(ECM_ECM_EQUILIBRIUM_DISTANCE) 
+        FNODE_spatial_location_message.setRadius(ECM_ECM_EQUILIBRIUM_DISTANCE) 
     else:
-        fnode_spatial_location_message.setRadius(MAX_SEARCH_RADIUS_FNODES)  
-    fnode_spatial_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS,MIN_EXPECTED_BOUNDARY_POS)
-    fnode_spatial_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS,MAX_EXPECTED_BOUNDARY_POS)
-    fnode_spatial_location_message.newVariableInt("id") # as an edge can have multiple inner agents, this stores the position within the edge
+        FNODE_spatial_location_message.setRadius(MAX_SEARCH_RADIUS_FNODES)  
+    FNODE_spatial_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS,MIN_EXPECTED_BOUNDARY_POS)
+    FNODE_spatial_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS,MAX_EXPECTED_BOUNDARY_POS)
+    FNODE_spatial_location_message.newVariableInt("id") # as an edge can have multiple inner agents, this stores the position within the edge
 
-    fnode_bucket_location_message = model.newMessageBucket("fnode_bucket_location_message")
+    FNODE_bucket_location_message = model.newMessageBucket("fnode_bucket_location_message")
     # Set the range and bounds.
     # setBounds(min, max) where min and max are the min and max ids of the message buckets. This is independent of the number of agents (there can be more agents than buckets and vice versa).
     # Here, we assign one bucket per fibre node so that each fibre node can be found in its own bucket when searching for neighbours.
-    fnode_bucket_location_message.setBounds(8,N_NODES + 8) # +8 because domain corners have idx from 1 to 8. WARNING: make sure to initialize fibre nodes starting from index 9
+    FNODE_bucket_location_message.setBounds(8+1,N_NODES + 8) # +8 because domain corners have idx from 1 to 8. WARNING: make sure to initialize fibre nodes starting from index 9
 
-    fnode_bucket_location_message.newVariableInt("id")
-    fnode_bucket_location_message.newVariableFloat("x")
-    fnode_bucket_location_message.newVariableFloat("y")
-    fnode_bucket_location_message.newVariableFloat("z")
-    fnode_bucket_location_message.newVariableFloat("vx")
-    fnode_bucket_location_message.newVariableFloat("vy")
-    fnode_bucket_location_message.newVariableFloat("vz")
-    fnode_bucket_location_message.newVariableFloat("k_elast")
-    fnode_bucket_location_message.newVariableFloat("d_dumping")
-    fnode_bucket_location_message.newVariableArrayFloat("equilibrium_distance", MAX_CONNECTIVITY) # each segment can have a different equilibrium distance depending on the rest length assigned during network generation
-    fnode_bucket_location_message.newVariableArrayInt("linked_nodes", MAX_CONNECTIVITY) # store the index of the linked nodes, which is a proxy for the bucket id
+    FNODE_bucket_location_message.newVariableInt("id")
+    FNODE_bucket_location_message.newVariableFloat("x")
+    FNODE_bucket_location_message.newVariableFloat("y")
+    FNODE_bucket_location_message.newVariableFloat("z")
+    FNODE_bucket_location_message.newVariableFloat("vx")
+    FNODE_bucket_location_message.newVariableFloat("vy")
+    FNODE_bucket_location_message.newVariableFloat("vz")
+    FNODE_bucket_location_message.newVariableFloat("k_elast")
+    FNODE_bucket_location_message.newVariableFloat("d_dumping")
+    FNODE_bucket_location_message.newVariableArrayFloat("equilibrium_distance", MAX_CONNECTIVITY) # each segment can have a different equilibrium distance depending on the rest length assigned during network generation
+    FNODE_bucket_location_message.newVariableArrayInt("linked_nodes", MAX_CONNECTIVITY) # store the index of the linked nodes, which is a proxy for the bucket id
 
 
-ECM_grid_location_message = model.newMessageArray3D("ECM_grid_location_message")
+ECM_grid_location_message = model.newMessageArray3D("ecm_grid_location_message")
 ECM_grid_location_message.setDimensions(ECM_AGENTS_PER_DIR[0], ECM_AGENTS_PER_DIR[1], ECM_AGENTS_PER_DIR[2])
 ECM_grid_location_message.newVariableInt("id")
 ECM_grid_location_message.newVariableFloat("x")
@@ -545,7 +719,7 @@ ECM_grid_location_message.newVariableUInt8("clamped_bz_neg")
 
 if INCLUDE_CELLS:
     # If message type is MessageSpatial3D, variables x, y, z are included internally.
-    CELL_spatial_location_message = model.newMessageSpatial3D("CELL_spatial_location_message")
+    CELL_spatial_location_message = model.newMessageSpatial3D("cell_spatial_location_message")
     CELL_spatial_location_message.setRadius(MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION)
     CELL_spatial_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS)
     CELL_spatial_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS)
@@ -566,6 +740,75 @@ if INCLUDE_CELLS:
     CELL_spatial_location_message.newVariableFloat("cycle_phase")
     CELL_spatial_location_message.newVariableFloat("clock")
     CELL_spatial_location_message.newVariableInt("completed_cycles")
+        
+    # Set the range and bounds.
+    if INCLUDE_FOCAL_ADHESIONS:
+        CELL_bucket_location_message = model.newMessageBucket("cell_bucket_location_message")
+        cell_bucket_min = 8 + N_NODES + 1
+        cell_bucket_max = 8 + N_NODES + N_CELLS
+        if cell_bucket_max <= cell_bucket_min:
+            cell_bucket_max = cell_bucket_min + 1 # to avoid compilation errors in case there is only 1 cell
+        # +8 because domain corners have idx from 1 to 8, +N_NODES because fibre nodes have idx from 9 to 8+N_NODES. WARNING: make sure to initialize cell agents starting from index 8+N_NODES
+        CELL_bucket_location_message.setBounds(cell_bucket_min, cell_bucket_max)
+        CELL_bucket_location_message.newVariableInt("id")
+        CELL_bucket_location_message.newVariableFloat("x")
+        CELL_bucket_location_message.newVariableFloat("y")
+        CELL_bucket_location_message.newVariableFloat("z")
+        CELL_bucket_location_message.newVariableFloat("orx")
+        CELL_bucket_location_message.newVariableFloat("ory")
+        CELL_bucket_location_message.newVariableFloat("orz")
+        CELL_bucket_location_message.newVariableArrayFloat("x_i", N_ANCHOR_POINTS)
+        CELL_bucket_location_message.newVariableArrayFloat("y_i", N_ANCHOR_POINTS)
+        CELL_bucket_location_message.newVariableArrayFloat("z_i", N_ANCHOR_POINTS)
+        
+        FOCAD_bucket_location_message = model.newMessageBucket("focad_bucket_location_message")
+        FOCAD_bucket_location_message.setBounds(cell_bucket_min, cell_bucket_max) # WARNING: the key in the bucket list is the cell_id, not the focad id
+        FOCAD_bucket_location_message.newVariableInt("id")
+        FOCAD_bucket_location_message.newVariableInt("cell_id")
+        FOCAD_bucket_location_message.newVariableInt("fnode_id")
+        FOCAD_bucket_location_message.newVariableFloat("x")
+        FOCAD_bucket_location_message.newVariableFloat("y")
+        FOCAD_bucket_location_message.newVariableFloat("z")
+        FOCAD_bucket_location_message.newVariableFloat("vx")
+        FOCAD_bucket_location_message.newVariableFloat("vy")
+        FOCAD_bucket_location_message.newVariableFloat("vz")
+        FOCAD_bucket_location_message.newVariableFloat("fx")
+        FOCAD_bucket_location_message.newVariableFloat("fy")
+        FOCAD_bucket_location_message.newVariableFloat("fz")
+        FOCAD_bucket_location_message.newVariableInt("anchor_id") # to identify which anchor point of the cell this focal adhesion corresponds to
+        FOCAD_bucket_location_message.newVariableFloat("x_i")
+        FOCAD_bucket_location_message.newVariableFloat("y_i")
+        FOCAD_bucket_location_message.newVariableFloat("z_i")
+        FOCAD_bucket_location_message.newVariableFloat("x_c")
+        FOCAD_bucket_location_message.newVariableFloat("y_c")
+        FOCAD_bucket_location_message.newVariableFloat("z_c")
+        FOCAD_bucket_location_message.newVariableFloat("rest_length_0")
+        FOCAD_bucket_location_message.newVariableFloat("rest_length")
+        FOCAD_bucket_location_message.newVariableFloat("k_fa")
+        FOCAD_bucket_location_message.newVariableFloat("f_max")
+        FOCAD_bucket_location_message.newVariableInt("attached")
+        FOCAD_bucket_location_message.newVariableUInt8("active")
+        FOCAD_bucket_location_message.newVariableFloat("v_c")
+        FOCAD_bucket_location_message.newVariableUInt8("fa_state")
+        FOCAD_bucket_location_message.newVariableFloat("age")
+        FOCAD_bucket_location_message.newVariableFloat("detached_age")
+        FOCAD_bucket_location_message.newVariableFloat("k_on")
+        FOCAD_bucket_location_message.newVariableFloat("k_off_0")
+        FOCAD_bucket_location_message.newVariableFloat("f_c")
+        FOCAD_bucket_location_message.newVariableFloat("k_reinf")
+
+        
+        FOCAD_spatial_location_message = model.newMessageSpatial3D("focad_spatial_location_message")
+        FOCAD_spatial_location_message.setRadius(MAX_SEARCH_RADIUS_FOCAD)
+        FOCAD_spatial_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS)
+        FOCAD_spatial_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS)
+        FOCAD_spatial_location_message.newVariableInt("id")
+        FOCAD_spatial_location_message.newVariableFloat("fx")
+        FOCAD_spatial_location_message.newVariableFloat("fy")
+        FOCAD_spatial_location_message.newVariableFloat("fz")
+        FOCAD_spatial_location_message.newVariableInt("fnode_id")
+        FOCAD_spatial_location_message.newVariableInt("attached")
+        FOCAD_spatial_location_message.newVariableUInt8("active")
 
 # ++==================================================================++
 # ++ Agents                                                            |
@@ -577,72 +820,74 @@ if INCLUDE_CELLS:
 """
   BCORNER agent
 """
-bcorner_agent = model.newAgent("BCORNER") # boundary corner agent to track boundary positions
-bcorner_agent.newVariableInt("id")
-bcorner_agent.newVariableFloat("x")
-bcorner_agent.newVariableFloat("y")
-bcorner_agent.newVariableFloat("z")
+BCORNER_agent = model.newAgent("BCORNER") # boundary corner agent to track boundary positions
+BCORNER_agent.newVariableInt("id")
+BCORNER_agent.newVariableFloat("x")
+BCORNER_agent.newVariableFloat("y")
+BCORNER_agent.newVariableFloat("z")
 
-bcorner_agent.newRTCFunctionFile("bcorner_output_location_data", bcorner_output_location_data_file).setMessageOutput("bcorner_location_message")
+BCORNER_agent.newRTCFunctionFile("bcorner_output_location_data", bcorner_output_location_data_file).setMessageOutput("bcorner_location_message")
 if MOVING_BOUNDARIES:
-    bcorner_agent.newRTCFunctionFile("bcorner_move", bcorner_move_file)
+    BCORNER_agent.newRTCFunctionFile("bcorner_move", bcorner_move_file)
 
 """
   FIBRE NODE agent
 """
 if INCLUDE_FIBRE_NETWORK:
-    fnode_agent = model.newAgent("FNODE")
-    fnode_agent.newVariableInt("id")
-    fnode_agent.newVariableFloat("x")
-    fnode_agent.newVariableFloat("y")
-    fnode_agent.newVariableFloat("z")
-    fnode_agent.newVariableFloat("vx", 0.0)
-    fnode_agent.newVariableFloat("vy", 0.0)
-    fnode_agent.newVariableFloat("vz", 0.0)
-    fnode_agent.newVariableFloat("fx", 0.0)
-    fnode_agent.newVariableFloat("fy", 0.0)
-    fnode_agent.newVariableFloat("fz", 0.0)
-    fnode_agent.newVariableFloat("k_elast")
-    fnode_agent.newVariableFloat("d_dumping")
-    fnode_agent.newVariableArrayFloat("equilibrium_distance", MAX_CONNECTIVITY) # each segment can have a different equilibrium distance depending on the rest length assigned during network generation
-    fnode_agent.newVariableFloat("boundary_fx")  # boundary_f[A]: normal force coming from boundary [A] when elastic boundaries option is selected.
-    fnode_agent.newVariableFloat("boundary_fy")
-    fnode_agent.newVariableFloat("boundary_fz")
-    fnode_agent.newVariableFloat("f_bx_pos")  # f_b[A]_[B]: normal force transmitted to the boundary [A]_[B] when agent is clamped
-    fnode_agent.newVariableFloat("f_bx_neg")
-    fnode_agent.newVariableFloat("f_by_pos")
-    fnode_agent.newVariableFloat("f_by_neg")
-    fnode_agent.newVariableFloat("f_bz_pos")
-    fnode_agent.newVariableFloat("f_bz_neg")
-    fnode_agent.newVariableFloat("f_bx_pos_y")  # f_b[A]_[B]_[C]: shear force transmitted to the boundary [A]_[B] in the direction [C] when agent is clamped
-    fnode_agent.newVariableFloat("f_bx_pos_z")
-    fnode_agent.newVariableFloat("f_bx_neg_y")
-    fnode_agent.newVariableFloat("f_bx_neg_z")
-    fnode_agent.newVariableFloat("f_by_pos_x")
-    fnode_agent.newVariableFloat("f_by_pos_z")
-    fnode_agent.newVariableFloat("f_by_neg_x")
-    fnode_agent.newVariableFloat("f_by_neg_z")
-    fnode_agent.newVariableFloat("f_bz_pos_x")
-    fnode_agent.newVariableFloat("f_bz_pos_y")
-    fnode_agent.newVariableFloat("f_bz_neg_x")
-    fnode_agent.newVariableFloat("f_bz_neg_y")
-    fnode_agent.newVariableFloat("f_extension")
-    fnode_agent.newVariableFloat("f_compression")
-    fnode_agent.newVariableFloat("elastic_energy")
-    fnode_agent.newVariableArrayFloat("linked_nodes", MAX_CONNECTIVITY)
-    fnode_agent.newVariableUInt8("clamped_bx_pos")
-    fnode_agent.newVariableUInt8("clamped_bx_neg")
-    fnode_agent.newVariableUInt8("clamped_by_pos")
-    fnode_agent.newVariableUInt8("clamped_by_neg")
-    fnode_agent.newVariableUInt8("clamped_bz_pos")
-    fnode_agent.newVariableUInt8("clamped_bz_neg")
+    FNODE_agent = model.newAgent("FNODE")
+    FNODE_agent.newVariableInt("id")
+    FNODE_agent.newVariableFloat("x")
+    FNODE_agent.newVariableFloat("y")
+    FNODE_agent.newVariableFloat("z")
+    FNODE_agent.newVariableFloat("vx", 0.0)
+    FNODE_agent.newVariableFloat("vy", 0.0)
+    FNODE_agent.newVariableFloat("vz", 0.0)
+    FNODE_agent.newVariableFloat("fx", 0.0)
+    FNODE_agent.newVariableFloat("fy", 0.0)
+    FNODE_agent.newVariableFloat("fz", 0.0)
+    FNODE_agent.newVariableFloat("k_elast")
+    FNODE_agent.newVariableFloat("d_dumping")
+    FNODE_agent.newVariableArrayFloat("equilibrium_distance", MAX_CONNECTIVITY) # each segment can have a different equilibrium distance depending on the rest length assigned during network generation
+    FNODE_agent.newVariableFloat("boundary_fx")  # boundary_f[A]: normal force coming from boundary [A] when elastic boundaries option is selected.
+    FNODE_agent.newVariableFloat("boundary_fy")
+    FNODE_agent.newVariableFloat("boundary_fz")
+    FNODE_agent.newVariableFloat("f_bx_pos")  # f_b[A]_[B]: normal force transmitted to the boundary [A]_[B] when agent is clamped
+    FNODE_agent.newVariableFloat("f_bx_neg")
+    FNODE_agent.newVariableFloat("f_by_pos")
+    FNODE_agent.newVariableFloat("f_by_neg")
+    FNODE_agent.newVariableFloat("f_bz_pos")
+    FNODE_agent.newVariableFloat("f_bz_neg")
+    FNODE_agent.newVariableFloat("f_bx_pos_y")  # f_b[A]_[B]_[C]: shear force transmitted to the boundary [A]_[B] in the direction [C] when agent is clamped
+    FNODE_agent.newVariableFloat("f_bx_pos_z")
+    FNODE_agent.newVariableFloat("f_bx_neg_y")
+    FNODE_agent.newVariableFloat("f_bx_neg_z")
+    FNODE_agent.newVariableFloat("f_by_pos_x")
+    FNODE_agent.newVariableFloat("f_by_pos_z")
+    FNODE_agent.newVariableFloat("f_by_neg_x")
+    FNODE_agent.newVariableFloat("f_by_neg_z")
+    FNODE_agent.newVariableFloat("f_bz_pos_x")
+    FNODE_agent.newVariableFloat("f_bz_pos_y")
+    FNODE_agent.newVariableFloat("f_bz_neg_x")
+    FNODE_agent.newVariableFloat("f_bz_neg_y")
+    FNODE_agent.newVariableFloat("f_extension")
+    FNODE_agent.newVariableFloat("f_compression")
+    FNODE_agent.newVariableFloat("elastic_energy")
+    FNODE_agent.newVariableArrayFloat("linked_nodes", MAX_CONNECTIVITY)
+    FNODE_agent.newVariableUInt8("clamped_bx_pos")
+    FNODE_agent.newVariableUInt8("clamped_bx_neg")
+    FNODE_agent.newVariableUInt8("clamped_by_pos")
+    FNODE_agent.newVariableUInt8("clamped_by_neg")
+    FNODE_agent.newVariableUInt8("clamped_bz_pos")
+    FNODE_agent.newVariableUInt8("clamped_bz_neg")
 
-    fnode_agent.newRTCFunctionFile("fnode_spatial_location_data", fnode_spatial_location_data_file).setMessageOutput("fnode_spatial_location_message")
-    fnode_agent.newRTCFunctionFile("fnode_bucket_location_data", fnode_bucket_location_data_file).setMessageOutput("fnode_bucket_location_message")
-    fnode_agent.newRTCFunctionFile("fnode_boundary_interaction", fnode_boundary_interaction_file)
-    fnode_agent.newRTCFunctionFile("fnode_fnode_spatial_interaction", fnode_fnode_spatial_interaction_file).setMessageInput("fnode_spatial_location_message")
-    fnode_agent.newRTCFunctionFile("fnode_fnode_bucket_interaction", fnode_fnode_bucket_interaction_file).setMessageInput("fnode_bucket_location_message")
-    fnode_agent.newRTCFunctionFile("fnode_move", fnode_move_file)
+    FNODE_agent.newRTCFunctionFile("fnode_spatial_location_data", fnode_spatial_location_data_file).setMessageOutput("fnode_spatial_location_message")
+    FNODE_agent.newRTCFunctionFile("fnode_bucket_location_data", fnode_bucket_location_data_file).setMessageOutput("fnode_bucket_location_message")
+    FNODE_agent.newRTCFunctionFile("fnode_boundary_interaction", fnode_boundary_interaction_file)
+    FNODE_agent.newRTCFunctionFile("fnode_fnode_spatial_interaction", fnode_fnode_spatial_interaction_file).setMessageInput("fnode_spatial_location_message")
+    FNODE_agent.newRTCFunctionFile("fnode_fnode_bucket_interaction", fnode_fnode_bucket_interaction_file).setMessageInput("fnode_bucket_location_message")
+    FNODE_agent.newRTCFunctionFile("fnode_move", fnode_move_file)
+    if INCLUDE_FOCAL_ADHESIONS:
+        FNODE_agent.newRTCFunctionFile("fnode_focad_interaction", fnode_focad_interaction_file).setMessageInput("focad_spatial_location_message")
 
 
 """
@@ -674,8 +919,8 @@ ECM_agent.newVariableUInt8("clamped_by_pos")
 ECM_agent.newVariableUInt8("clamped_by_neg")
 ECM_agent.newVariableUInt8("clamped_bz_pos")
 ECM_agent.newVariableUInt8("clamped_bz_neg")
-ECM_agent.newRTCFunctionFile("ecm_output_grid_location_data", ecm_output_grid_location_data_file).setMessageOutput("ECM_grid_location_message")
-ECM_agent.newRTCFunctionFile("ecm_ecm_interaction", ecm_ecm_interaction_file).setMessageInput("ECM_grid_location_message")
+ECM_agent.newRTCFunctionFile("ecm_grid_location_data", ecm_grid_location_data_file).setMessageOutput("ecm_grid_location_message")
+ECM_agent.newRTCFunctionFile("ecm_ecm_interaction", ecm_ecm_interaction_file).setMessageInput("ecm_grid_location_message")
 ECM_agent.newRTCFunctionFile("ecm_boundary_concentration_conditions", ecm_boundary_concentration_conditions_file)
 ECM_agent.newRTCFunctionFile("ecm_Csp_update", ecm_Csp_update_file)
 if HETEROGENEOUS_DIFFUSION and INCLUDE_FIBRE_NETWORK:
@@ -705,14 +950,124 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableArrayFloat("k_production", N_SPECIES) 
     CELL_agent.newVariableArrayFloat("k_reaction", N_SPECIES) 
     CELL_agent.newVariableArrayFloat("C_sp", N_SPECIES) 
-    CELL_agent.newVariableArrayFloat("M_sp", N_SPECIES)    
+    CELL_agent.newVariableArrayFloat("M_sp", N_SPECIES) 
+    CELL_agent.newVariableFloat("speed_ref", CELL_SPEED_REF)   
     CELL_agent.newVariableFloat("radius", CELL_RADIUS)
+    CELL_agent.newVariableFloat("nucleus_radius", CELL_NUCLEUS_RADIUS)
     CELL_agent.newVariableInt("cycle_phase", 1) # [1:G1] [2:S] [3:G2] [4:M]
     CELL_agent.newVariableFloat("clock", 0.0) # internal clock of the cell to switch phases
     CELL_agent.newVariableInt("completed_cycles", 0)
-    CELL_agent.newRTCFunctionFile("cell_output_location_data", cell_output_location_data_file).setMessageOutput("CELL_spatial_location_message")
-    CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ECM_grid_location_message")
+    CELL_agent.newRTCFunctionFile("cell_spatial_location_data", cell_spatial_location_data_file).setMessageOutput("cell_spatial_location_message")
+    CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ecm_grid_location_message")
     CELL_agent.newRTCFunctionFile("cell_move", cell_move_file)
+    CELL_agent.newVariableArrayFloat("x_i", N_ANCHOR_POINTS) # store the position of the anchor points on the cell. Unused if INCLUDE_FOCAL_ADHESIONS is False
+    CELL_agent.newVariableArrayFloat("y_i", N_ANCHOR_POINTS) 
+    CELL_agent.newVariableArrayFloat("z_i", N_ANCHOR_POINTS)
+    CELL_agent.newVariableArrayFloat("u_ref_x_i", N_ANCHOR_POINTS) # unit direction vector from the cell center to the anchor point in the reference configuration (used for elastic force calculation). Unused if INCLUDE_FOCAL_ADHESIONS is False
+    CELL_agent.newVariableArrayFloat("u_ref_y_i", N_ANCHOR_POINTS)
+    CELL_agent.newVariableArrayFloat("u_ref_z_i", N_ANCHOR_POINTS)
+    CELL_agent.newVariableFloat("eps_xx", 0.0) # strain tensor
+    CELL_agent.newVariableFloat("eps_yy", 0.0)
+    CELL_agent.newVariableFloat("eps_zz", 0.0)
+    CELL_agent.newVariableFloat("eps_xy", 0.0)
+    CELL_agent.newVariableFloat("eps_xz", 0.0)
+    CELL_agent.newVariableFloat("eps_yz", 0.0)
+    CELL_agent.newVariableFloat("sig_xx", 0.0) # stress tensor
+    CELL_agent.newVariableFloat("sig_yy", 0.0)
+    CELL_agent.newVariableFloat("sig_zz", 0.0)
+    CELL_agent.newVariableFloat("sig_xy", 0.0)
+    CELL_agent.newVariableFloat("sig_xz", 0.0)
+    CELL_agent.newVariableFloat("sig_yz", 0.0)
+    CELL_agent.newVariableFloat("sig_eig_1", 0.0)
+    CELL_agent.newVariableFloat("sig_eig_2", 0.0)
+    CELL_agent.newVariableFloat("sig_eig_3", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec1_x", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec1_y", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec1_z", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec2_x", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec2_y", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec2_z", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec3_x", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec3_y", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec3_z", 0.0)
+    CELL_agent.newVariableFloat("eps_eig_1", 0.0)
+    CELL_agent.newVariableFloat("eps_eig_2", 0.0)
+    CELL_agent.newVariableFloat("eps_eig_3", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec1_x", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec1_y", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec1_z", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec2_x", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec2_y", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec2_z", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec3_x", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec3_y", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec3_z", 0.0)
+    CELL_agent.newVariableArrayFloat("chemotaxis_sensitivity", N_SPECIES)
+    if INCLUDE_FOCAL_ADHESIONS:  
+        CELL_agent.newRTCFunctionFile("cell_bucket_location_data", cell_bucket_location_data_file).setMessageOutput("cell_bucket_location_message")
+        CELL_agent.newRTCFunctionFile("cell_update_stress", cell_update_stress_file).setMessageInput("focad_bucket_location_message")
+        
+"""
+  FOCAD agent
+"""
+if INCLUDE_FOCAL_ADHESIONS:
+    FOCAD_agent = model.newAgent("FOCAD")
+    FOCAD_agent.newVariableInt("id", 0)
+    FOCAD_agent.newVariableInt("cell_id")
+    FOCAD_agent.newVariableInt("fnode_id")    
+    FOCAD_agent.newVariableFloat("x", 0.0)
+    FOCAD_agent.newVariableFloat("y", 0.0)
+    FOCAD_agent.newVariableFloat("z", 0.0)
+    FOCAD_agent.newVariableFloat("vx", 0.0)
+    FOCAD_agent.newVariableFloat("vy", 0.0)
+    FOCAD_agent.newVariableFloat("vz", 0.0)
+    FOCAD_agent.newVariableFloat("fx", 0.0)
+    FOCAD_agent.newVariableFloat("fy", 0.0)
+    FOCAD_agent.newVariableFloat("fz", 0.0)
+    FOCAD_agent.newVariableInt("anchor_id",-1)
+    FOCAD_agent.newVariableFloat("x_i", 0.0)
+    FOCAD_agent.newVariableFloat("y_i", 0.0)
+    FOCAD_agent.newVariableFloat("z_i", 0.0)
+    FOCAD_agent.newVariableFloat("x_c", 0.0)
+    FOCAD_agent.newVariableFloat("y_c", 0.0)
+    FOCAD_agent.newVariableFloat("z_c", 0.0)
+    FOCAD_agent.newVariableFloat("orx", 1.0)
+    FOCAD_agent.newVariableFloat("ory", 0.0)
+    FOCAD_agent.newVariableFloat("orz", 0.0)
+    FOCAD_agent.newVariableFloat("rest_length_0")
+    FOCAD_agent.newVariableFloat("rest_length")
+    FOCAD_agent.newVariableFloat("k_fa")
+    FOCAD_agent.newVariableFloat("f_max")
+    FOCAD_agent.newVariableInt("attached")
+    FOCAD_agent.newVariableUInt8("active")
+    FOCAD_agent.newVariableFloat("v_c")
+    FOCAD_agent.newVariableUInt8("fa_state")
+    FOCAD_agent.newVariableFloat("age")
+    FOCAD_agent.newVariableFloat("detached_age", 0.0)
+    FOCAD_agent.newVariableFloat("k_on")
+    FOCAD_agent.newVariableFloat("k_off_0")
+    FOCAD_agent.newVariableFloat("f_c")
+    FOCAD_agent.newVariableFloat("k_reinf")
+    FOCAD_agent.newVariableFloat("f_mag", 0.0)  # |F_FA| traction magnitude [nN] at current step
+    FOCAD_agent.newVariableInt("is_front", 0)  # 1 if adhesion is classified in the cell front hemisphere, else 0
+    FOCAD_agent.newVariableInt("is_rear", 0)  # 1 if adhesion is classified in the cell rear hemisphere, else 0
+    FOCAD_agent.newVariableInt("attached_front", 0)  # 1 if attached and in front; diagnostic aggregate helper
+    FOCAD_agent.newVariableInt("attached_rear", 0)  # 1 if attached and in rear; diagnostic aggregate helper
+    FOCAD_agent.newVariableFloat("frontness_front", 0.0)  # frontness score used for front-biased kinetics (front branch) -> Polarity score p in [-1,1] from orientation vs anchor direction (cell center -> anchor)
+    FOCAD_agent.newVariableFloat("frontness_rear", 0.0)  # rearness/frontness-derived score used for rear-biased kinetics
+    FOCAD_agent.newVariableFloat("k_on_eff_front", 0.0)  # effective attachment rate used for front-side update [1/s]
+    FOCAD_agent.newVariableFloat("k_on_eff_rear", 0.0)  # effective attachment rate used for rear-side update [1/s]
+    FOCAD_agent.newVariableFloat("k_off_0_eff_front", 0.0)  # effective baseline detachment rate at front [1/s]
+    FOCAD_agent.newVariableFloat("k_off_0_eff_rear", 0.0)  # effective baseline detachment rate at rear [1/s]
+    FOCAD_agent.newVariableFloat("linc_prev_total_length", 0.0)  # previous-step LINC internal length state for BE Kelvin-Voigt-in-series solve [um]
+
+
+    FOCAD_agent.newRTCFunctionFile("focad_bucket_location_data", focad_bucket_location_data_file).setMessageOutput("focad_bucket_location_message")
+    FOCAD_agent.newRTCFunctionFile("focad_spatial_location_data", focad_spatial_location_data_file).setMessageOutput("focad_spatial_location_message")
+    FOCAD_agent.newRTCFunctionFile("focad_anchor_update", focad_anchor_update_file).setMessageInput("cell_bucket_location_message")
+    FOCAD_agent.newRTCFunctionFile("focad_fnode_interaction", focad_fnode_interaction_file).setMessageInput("fnode_spatial_location_message")
+    FOCAD_agent.newRTCFunctionFile("focad_move", focad_move_file).setMessageInput("fnode_bucket_location_message")        
+
 
 
 """
@@ -721,11 +1076,21 @@ if INCLUDE_CELLS:
 
 # Agent population initialization 
 # ----------------------------------------------------------------------    
-# This class is used to ensure that corner agents are assigned the first 8 ids
+# IMPORTANT NOTE: agents must be initialized in the following order to make sure that their ids are consistent with the assumptions made in the RTC functions and bucket message bounds:
+# 1) Boundary corners (idx 1 to 8)
+# 2) Fibre nodes (idx 9 to 8+N_NODES) if INCLUDE_FIBRE_NETWORK is True
+# 3) Cell agents (idx 8+N_NODES+1 to 8+N_NODES+N_CELLS)
+# 4) Focal adhesions (idx 8+N_NODES+N_CELLS+1 to 8+N_NODES+N_CELLS+(INIT_N_FOCAD_PER_CELL*N_CELLS)) if INCLUDE_FOCAL_ADHESIONS is True.
+# 5) ECM agents (idx starting from 8+N_NODES+N_CELLS+(INIT_N_FOCAD_PER_CELL*N_CELLS)+1)
 class initAgentPopulations(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
-        # TODO: clean this line of globals
-        global DIFFUSION_COEFF_MULTI, INIT_ECM_CONCENTRATION_VALS, INIT_CELL_CONCENTRATION_VALS,INIT_CELL_CONC_MASS_VALS, INIT_ECM_SAT_CONCENTRATION_VALS, INIT_CELL_CONSUMPTION_RATES, INIT_CELL_PRODUCTION_RATES,INIT_CELL_REACTION_RATES, N_SPECIES, INCLUDE_DIFFUSION,INCLUDE_FIBRE_NETWORK, INCLUDE_CELLS, N_CELLS, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, MAX_CONNECTIVITY
+        global INCLUDE_CELLS, N_CELLS, INIT_CELL_CONCENTRATION_VALS, INIT_CELL_REACTION_RATES
+        global INIT_CELL_CONC_MASS_VALS, INIT_CELL_CONSUMPTION_RATES, INIT_CELL_PRODUCTION_RATES
+        global INCLUDE_FOCAL_ADHESIONS, N_ANCHOR_POINTS, INIT_N_FOCAD_PER_CELL, CELL_RADIUS, CELL_NUCLEUS_RADIUS
+        global FOCAD_REST_LENGTH_0, FOCAD_K_FA, FOCAD_F_MAX, FOCAD_K_ON, FOCAD_K_OFF_0, FOCAD_F_C, FOCAD_K_REINF
+        global INCLUDE_DIFFUSION, N_SPECIES, DIFFUSION_COEFF_MULTI
+        global INIT_ECM_CONCENTRATION_VALS, INIT_ECM_SAT_CONCENTRATION_VALS
+        global INCLUDE_FIBRE_NETWORK, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, MAX_CONNECTIVITY
         # BOUNDARY CORNERS
         current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
         coord_boundary = FLAMEGPU.environment.getPropertyArrayFloat("COORDS_BOUNDARIES")
@@ -853,6 +1218,179 @@ class initAgentPopulations(pyflamegpu.HostFunction):
 
 
             FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
+            
+        # CELLS
+        if INCLUDE_CELLS:
+            current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
+            current_id += 1
+            print(f"--- Initializing CELLS ({N_CELLS})")
+            print("  |-> current_id:", current_id)
+            count = -1
+            cell_pos = getRandomCoords3D(N_CELLS,
+                                        coord_boundary[0], coord_boundary[1],
+                                        coord_boundary[2], coord_boundary[3],
+                                        coord_boundary[4], coord_boundary[5])
+            if N_CELLS == 1: # DEBUGGING. FIX CELL POSITION TO 0,0,0
+                cell_pos = np.array([[0.0, 0.0, 0.0]], dtype=float) # for testing with 1 cell. 
+            cell_orientations = getRandomVectors3D(N_CELLS)
+            k_elast = FLAMEGPU.environment.getPropertyFloat("CELL_K_ELAST")
+            d_dumping = FLAMEGPU.environment.getPropertyFloat("CELL_D_DUMPING")
+            cell_id_list = []
+            for i in range(N_CELLS):
+                count += 1
+                cell_id_list.append(current_id + count) # store the cell ids in a list to be used for focal adhesion initialization if INCLUDE_FOCAL_ADHESIONS is True
+                instance = FLAMEGPU.agent("CELL").newAgent()
+                instance.setVariableInt("id", current_id + count)
+                instance.setVariableFloat("x", cell_pos[i, 0])
+                instance.setVariableFloat("y", cell_pos[i, 1])
+                instance.setVariableFloat("z", cell_pos[i, 2])
+                instance.setVariableFloat("vx", 0.0)
+                instance.setVariableFloat("vy", 0.0)
+                instance.setVariableFloat("vz", 0.0)
+                instance.setVariableFloat("orx", cell_orientations[i, 0])
+                instance.setVariableFloat("ory", cell_orientations[i, 1])
+                instance.setVariableFloat("orz", cell_orientations[i, 2])
+                instance.setVariableFloat("alignment", 0.0)
+                instance.setVariableFloat("k_elast", k_elast)
+                instance.setVariableFloat("d_dumping", d_dumping)
+                instance.setVariableArrayFloat("C_sp", INIT_CELL_CONCENTRATION_VALS)
+                instance.setVariableArrayFloat("M_sp", INIT_CELL_CONC_MASS_VALS)                
+                instance.setVariableArrayFloat("k_consumption", INIT_CELL_CONSUMPTION_RATES)
+                instance.setVariableArrayFloat("k_production", INIT_CELL_PRODUCTION_RATES)
+                instance.setVariableArrayFloat("k_reaction", INIT_CELL_REACTION_RATES)
+                instance.setVariableFloat("radius", CELL_RADIUS)
+                instance.setVariableFloat("nucleus_radius", CELL_NUCLEUS_RADIUS)
+                instance.setVariableFloat("speed_ref", CELL_SPEED_REF)
+                cycle_phase = random.randint(1, 4) # [1:G1] [2:S] [3:G2] [4:M]
+                instance.setVariableInt("cycle_phase", cycle_phase)
+                cycle_clock = 0.0
+                if cycle_phase == 1:
+                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G1_START") 
+                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G1_DURATION")                
+                elif cycle_phase == 2:
+                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_S_START")
+                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_S_DURATION")                    
+                elif cycle_phase == 3:
+                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G2_START")
+                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G2_DURATION")                    
+                elif cycle_phase == 4:
+                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_M_START")
+                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_M_DURATION")                    
+                instance.setVariableFloat("clock", cycle_clock)
+                instance.setVariableInt("completed_cycles",0)
+                
+                anchor_pos = getRandomCoordsAroundPoint(N_ANCHOR_POINTS, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_NUCLEUS_RADIUS, on_surface=True)
+                instance.setVariableArrayFloat("x_i", anchor_pos[:, 0].tolist())
+                instance.setVariableArrayFloat("y_i", anchor_pos[:, 1].tolist())
+                instance.setVariableArrayFloat("z_i", anchor_pos[:, 2].tolist())
+                instance.setVariableFloat("eps_xx", 0.0)
+                instance.setVariableFloat("eps_yy", 0.0)
+                instance.setVariableFloat("eps_zz", 0.0)
+                instance.setVariableFloat("eps_xy", 0.0)
+                instance.setVariableFloat("eps_xz", 0.0)
+                instance.setVariableFloat("eps_yz", 0.0)
+                instance.setVariableFloat("sig_xx", 0.0)
+                instance.setVariableFloat("sig_yy", 0.0)
+                instance.setVariableFloat("sig_zz", 0.0)
+                instance.setVariableFloat("sig_xy", 0.0)
+                instance.setVariableFloat("sig_xz", 0.0)   
+                instance.setVariableFloat("sig_yz", 0.0)  
+                instance.setVariableFloat("sig_eig_1", 0.0)
+                instance.setVariableFloat("sig_eig_2", 0.0)
+                instance.setVariableFloat("sig_eig_3", 0.0)
+                instance.setVariableFloat("sig_eigvec1_x", 0.0)
+                instance.setVariableFloat("sig_eigvec1_y", 0.0)
+                instance.setVariableFloat("sig_eigvec1_z", 0.0)
+                instance.setVariableFloat("sig_eigvec2_x", 0.0)
+                instance.setVariableFloat("sig_eigvec2_y", 0.0)
+                instance.setVariableFloat("sig_eigvec2_z", 0.0)
+                instance.setVariableFloat("sig_eigvec3_x", 0.0)
+                instance.setVariableFloat("sig_eigvec3_y", 0.0)
+                instance.setVariableFloat("sig_eigvec3_z", 0.0)
+                instance.setVariableFloat("eps_eig_1", 0.0)
+                instance.setVariableFloat("eps_eig_2", 0.0)
+                instance.setVariableFloat("eps_eig_3", 0.0)
+                instance.setVariableFloat("eps_eigvec1_x", 0.0)
+                instance.setVariableFloat("eps_eigvec1_y", 0.0)
+                instance.setVariableFloat("eps_eigvec1_z", 0.0)
+                instance.setVariableFloat("eps_eigvec2_x", 0.0)
+                instance.setVariableFloat("eps_eigvec2_y", 0.0)
+                instance.setVariableFloat("eps_eigvec2_z", 0.0)
+                instance.setVariableFloat("eps_eigvec3_x", 0.0)
+                instance.setVariableFloat("eps_eigvec3_y", 0.0)
+                instance.setVariableFloat("eps_eigvec3_z", 0.0)
+                u_ref = compute_u_ref_from_anchor_pos(anchor_pos, cell_pos[i, :])
+                instance.setVariableArrayFloat("u_ref_x_i", u_ref[:, 0].tolist())
+                instance.setVariableArrayFloat("u_ref_y_i", u_ref[:, 1].tolist())
+                instance.setVariableArrayFloat("u_ref_z_i", u_ref[:, 2].tolist())
+                instance.setVariableArrayFloat("chemotaxis_sensitivity", CHEMOTAXIS_SENSITIVITY) 
+
+
+            FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
+            
+        if INCLUDE_FOCAL_ADHESIONS:
+            current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
+            current_id += 1
+            print(f"--- Initializing FOCAL ADHESIONS ({N_CELLS * INIT_N_FOCAD_PER_CELL})")
+            print("  |-> current_id:", current_id)
+            count = -1
+            for i in range(N_CELLS):
+                focad_pos = getRandomCoordsAroundPoint(INIT_N_FOCAD_PER_CELL, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_RADIUS, on_surface=True)
+                for j in range(INIT_N_FOCAD_PER_CELL):
+                    count += 1
+                    instance = FLAMEGPU.agent("FOCAD").newAgent()
+                    instance.setVariableInt("id", current_id + count)
+                    instance.setVariableInt("fnode_id", -1) # initialized as not attached to any fibre node
+                    instance.setVariableInt("cell_id", cell_id_list[i])
+                    instance.setVariableFloat("x", focad_pos[j, 0])
+                    instance.setVariableFloat("y", focad_pos[j, 1])
+                    instance.setVariableFloat("z", focad_pos[j, 2])                    
+                    instance.setVariableFloat("vx", 0.0)
+                    instance.setVariableFloat("vy", 0.0)
+                    instance.setVariableFloat("vz", 0.0)
+                    instance.setVariableFloat("fx", 0.0)
+                    instance.setVariableFloat("fy", 0.0)
+                    instance.setVariableFloat("fz", 0.0)
+                    instance.setVariableInt("anchor_id", -1) # initialized as not attached to any anchor point
+                    focad_dir = focad_pos[j, :] - cell_pos[i, :]
+                    anchor_pos = cell_pos[i, :] + (focad_dir / np.linalg.norm(focad_dir)) * CELL_NUCLEUS_RADIUS
+                    instance.setVariableFloat("x_i", anchor_pos[0])
+                    instance.setVariableFloat("y_i", anchor_pos[1])
+                    instance.setVariableFloat("z_i", anchor_pos[2])
+                    instance.setVariableFloat("x_c", cell_pos[i, 0])
+                    instance.setVariableFloat("y_c", cell_pos[i, 1])
+                    instance.setVariableFloat("z_c", cell_pos[i, 2])
+                    instance.setVariableFloat("orx", cell_orientations[i, 0])
+                    instance.setVariableFloat("ory", cell_orientations[i, 1])
+                    instance.setVariableFloat("orz", cell_orientations[i, 2])
+                    instance.setVariableFloat("rest_length_0", FOCAD_REST_LENGTH_0)
+                    instance.setVariableFloat("rest_length", FOCAD_REST_LENGTH_0) # initialized at rest length, can be updated during the simulation if needed
+                    instance.setVariableFloat("k_fa", FOCAD_K_FA)
+                    instance.setVariableFloat("f_max", FOCAD_F_MAX) # WARNING: 0 means "no cap" 
+                    instance.setVariableInt("attached", 0) # initialized as not attached
+                    instance.setVariableUInt8("active", 1) # initialized as active (can form new attachments)
+                    instance.setVariableFloat("v_c", FOCAD_V_C)
+                    instance.setVariableUInt8("fa_state", 1) # [1: nascent] [2: mature] [3: disassembling]
+                    instance.setVariableFloat("age", 0.0)
+                    instance.setVariableFloat("detached_age", 0.0)
+                    instance.setVariableFloat("k_on", FOCAD_K_ON)
+                    instance.setVariableFloat("k_off_0", FOCAD_K_OFF_0)
+                    instance.setVariableFloat("f_c", FOCAD_F_C)
+                    instance.setVariableFloat("k_reinf", FOCAD_K_REINF)
+                    instance.setVariableFloat("f_mag", 0.0)
+                    instance.setVariableInt("is_front", 0)
+                    instance.setVariableInt("is_rear", 0)
+                    instance.setVariableInt("attached_front", 0)
+                    instance.setVariableInt("attached_rear", 0)
+                    instance.setVariableFloat("frontness_front", 0.0)
+                    instance.setVariableFloat("frontness_rear", 0.0)
+                    instance.setVariableFloat("k_on_eff_front", 0.0)
+                    instance.setVariableFloat("k_on_eff_rear", 0.0)
+                    instance.setVariableFloat("k_off_0_eff_front", 0.0)
+                    instance.setVariableFloat("k_off_0_eff_rear", 0.0)
+                    instance.setVariableFloat("linc_prev_total_length", 0.0)
+            
+            FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
 
         # ECM
         k_elast = FLAMEGPU.environment.getPropertyFloat("ECM_K_ELAST")
@@ -911,59 +1449,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableUInt8("grid_k", k)
 
         FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
-
-        # CELLS
-        if INCLUDE_CELLS:
-            current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
-            current_id += 1
-            print(f"--- Initializing CELLS ({N_CELLS})")
-            print("  |-> current_id:", current_id)
-            count = -1
-            cell_orientations = getRandomVectors3D(N_CELLS)
-            k_elast = FLAMEGPU.environment.getPropertyFloat("CELL_K_ELAST")
-            d_dumping = FLAMEGPU.environment.getPropertyFloat("CELL_D_DUMPING")
-            radius = FLAMEGPU.environment.getPropertyFloat("CELL_RADIUS")
-            for i in range(N_CELLS):
-                count += 1
-                instance = FLAMEGPU.agent("CELL").newAgent()
-                instance.setVariableInt("id", current_id + count)
-                instance.setVariableFloat("x", 0.0)
-                instance.setVariableFloat("y", 0.0)
-                instance.setVariableFloat("z", 0.0)
-                instance.setVariableFloat("vx", 0.0)
-                instance.setVariableFloat("vy", 0.0)
-                instance.setVariableFloat("vz", 0.0)
-                instance.setVariableFloat("orx", cell_orientations[count, 0])
-                instance.setVariableFloat("ory", cell_orientations[count, 1])
-                instance.setVariableFloat("orz", cell_orientations[count, 2])
-                instance.setVariableFloat("alignment", 0.0)
-                instance.setVariableFloat("k_elast", k_elast)
-                instance.setVariableFloat("d_dumping", d_dumping)
-                instance.setVariableArrayFloat("C_sp", INIT_CELL_CONCENTRATION_VALS)
-                instance.setVariableArrayFloat("M_sp", INIT_CELL_CONC_MASS_VALS)                
-                instance.setVariableArrayFloat("k_consumption", INIT_CELL_CONSUMPTION_RATES)
-                instance.setVariableArrayFloat("k_production", INIT_CELL_PRODUCTION_RATES)
-                instance.setVariableArrayFloat("k_reaction", INIT_CELL_REACTION_RATES)
-                instance.setVariableFloat("radius", radius)
-                cycle_phase = random.randint(1, 4) # [1:G1] [2:S] [3:G2] [4:M]
-                instance.setVariableInt("cycle_phase", cycle_phase)
-                cycle_clock = 0.0
-                if cycle_phase == 1:
-                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G1_START") 
-                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G1_DURATION")                
-                elif cycle_phase == 2:
-                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_S_START")
-                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_S_DURATION")                    
-                elif cycle_phase == 3:
-                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G2_START")
-                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G2_DURATION")                    
-                elif cycle_phase == 4:
-                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_M_START")
-                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_M_DURATION")                    
-                instance.setVariableFloat("clock", cycle_clock)
-                instance.setVariableInt("completed_cycles",0)
-
-            FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
+        
         
         return
 
@@ -1135,519 +1621,67 @@ class SaveDataToFile(pyflamegpu.HostFunction):
     def __init__(self):
         global ECM_AGENTS_PER_DIR, INCLUDE_FIBRE_NETWORK, N_NODES
         super().__init__()
-        self.header = list()
-        self.header.append("# vtk DataFile Version 3.0")
-        self.header.append("ECM data")
-        self.header.append("ASCII")
-        self.header.append("DATASET POLYDATA")
-        self.header.append("POINTS {} float".format(8 + ECM_AGENTS_PER_DIR[0] * ECM_AGENTS_PER_DIR[1] * ECM_AGENTS_PER_DIR[2]))  # number of ECM agents + 8 corners
-        # Domain data for boundary visualization in ECM files
-        self.domaindata = list()
-        self.domaindata.append("POLYGONS 6 30")        
-        cube_conn = [[4, 0, 3, 7, 4], 
-                     [4, 1, 2, 6, 5], 
-                     [4, 1, 0, 4, 5], 
-                     [4, 2, 3, 7, 6], 
-                     [4, 0, 1, 2, 3],
-                     [4, 4, 5, 6, 7]]
-        for i in range(len(cube_conn)):
-            for j in range(len(cube_conn[i])):
-                if j > 0:
-                    cube_conn[i][j] = cube_conn[i][j] + ECM_AGENTS_PER_DIR[0] * ECM_AGENTS_PER_DIR[1] * ECM_AGENTS_PER_DIR[2]
-            self.domaindata.append(' '.join(str(x) for x in cube_conn[i]))
-
-        if INCLUDE_FIBRE_NETWORK:
-            # Domain data for boundary visualization in FIBRE network files (contains different data)
-            self.domaindata_network = list()
-            cube_conn_network = [[4, 0, 3, 7, 4],
-                     [4, 1, 2, 6, 5], 
-                     [4, 1, 0, 4, 5], 
-                     [4, 2, 3, 7, 6], 
-                     [4, 0, 1, 2, 3],
-                     [4, 4, 5, 6, 7]]
-            for i in range(len(cube_conn_network)):
-                for j in range(len(cube_conn_network[i])):
-                    if j > 0:
-                        cube_conn_network[i][j] = cube_conn_network[i][j] + N_NODES
-                self.domaindata_network.append(' '.join(str(x) for x in cube_conn_network[i]))
-
-        self.domaindata.append("CELL_DATA 6")
-        self.domaindata.append("SCALARS boundary_index int 1")
-        self.domaindata.append("LOOKUP_TABLE default")
-        self.domaindata.append("0")
-        self.domaindata.append("1")
-        self.domaindata.append("2")
-        self.domaindata.append("3")
-        self.domaindata.append("4")
-        self.domaindata.append("5")
-        self.domaindata.append("NORMALS boundary_normals float")
-        self.domaindata.append("1 0 0")
-        self.domaindata.append("-1 0 0")
-        self.domaindata.append("0 1 0")
-        self.domaindata.append("0 -1 0")
-        self.domaindata.append("0 0 1")
-        self.domaindata.append("0 0 -1")
-        # VASCULARIZATION (TODO: UNUSED FOR NOW)
-        self.vascularizationdata = list()  # a different file is created to show the position of the vascularization points
-        self.vascularizationdata.append("# vtk DataFile Version 3.0")
-        self.vascularizationdata.append("Vascularization points")
-        self.vascularizationdata.append("ASCII")
-        self.vascularizationdata.append("DATASET UNSTRUCTURED_GRID")
-        # FIBRE NODES 
-        self.fibrenodedata = list()  # a different file is created to show fibre node agent data
-        self.fibrenodedata.append("# vtk DataFile Version 3.0") 
-        self.fibrenodedata.append("Fibre node agents")
-        self.fibrenodedata.append("ASCII")
-        self.fibrenodedata.append("DATASET UNSTRUCTURED_GRID")
-        # CELLS
-        self.celldata = list()  # a different file is created to show cell agent data
-        self.celldata.append("# vtk DataFile Version 3.0")
-        self.celldata.append("Cell agents")
-        self.celldata.append("ASCII")
-        self.celldata.append("DATASET UNSTRUCTURED_GRID")
+        self.save_context = build_save_data_context(
+            ecm_agents_per_dir=ECM_AGENTS_PER_DIR,
+            include_fibre_network=INCLUDE_FIBRE_NETWORK,
+            n_nodes=N_NODES,
+        )
 
     def run(self, FLAMEGPU):
         global SAVE_DATA_TO_FILE, SAVE_EVERY_N_STEPS, N_SPECIES
-        global RES_PATH, ENSEMBLE
-        global INCLUDE_FIBRE_NETWORK, HETEROGENEOUS_DIFFUSION, INITIAL_NETWORK_CONNECTIVITY,N_NODES, INCLUDE_CELLS, ECM_POPULATION_SIZE
-        BUCKLING_COEFF_D0 = FLAMEGPU.environment.getPropertyFloat("BUCKLING_COEFF_D0")
-        STRAIN_STIFFENING_COEFF_DS = FLAMEGPU.environment.getPropertyFloat("STRAIN_STIFFENING_COEFF_DS")
-        CRITICAL_STRAIN = FLAMEGPU.environment.getPropertyFloat("CRITICAL_STRAIN")
+        global RES_PATH
+        global INCLUDE_FIBRE_NETWORK, HETEROGENEOUS_DIFFUSION, INITIAL_NETWORK_CONNECTIVITY, N_NODES, INCLUDE_CELLS, ECM_POPULATION_SIZE
+        global INCLUDE_FOCAL_ADHESIONS
+        save_data_to_file_step(
+            FLAMEGPU=FLAMEGPU,
+            save_context=self.save_context,
+            config={
+                "SAVE_DATA_TO_FILE": SAVE_DATA_TO_FILE,
+                "SAVE_EVERY_N_STEPS": SAVE_EVERY_N_STEPS,
+                "N_SPECIES": N_SPECIES,
+                "RES_PATH": RES_PATH,
+                "INCLUDE_FIBRE_NETWORK": INCLUDE_FIBRE_NETWORK,
+                "HETEROGENEOUS_DIFFUSION": HETEROGENEOUS_DIFFUSION,
+                "INITIAL_NETWORK_CONNECTIVITY": INITIAL_NETWORK_CONNECTIVITY,
+                "N_NODES": N_NODES,
+                "INCLUDE_CELLS": INCLUDE_CELLS,
+                "ECM_POPULATION_SIZE": ECM_POPULATION_SIZE,
+                "INCLUDE_FOCAL_ADHESIONS": INCLUDE_FOCAL_ADHESIONS,
+                "pyflamegpu": pyflamegpu,
+            },
+        )
+
+
+class ReportFAMetrics(pyflamegpu.HostFunction):
+    def __init__(self):
+        super().__init__()
+
+    def run(self, FLAMEGPU):
+        global INCLUDE_FOCAL_ADHESIONS, SAVE_EVERY_N_STEPS
+        if not INCLUDE_FOCAL_ADHESIONS:
+            return
+
         stepCounter = FLAMEGPU.getStepCounter() + 1
-        
-        coord_boundary = list(FLAMEGPU.environment.getPropertyArrayFloat("COORDS_BOUNDARIES"))
+        if not (stepCounter % SAVE_EVERY_N_STEPS == 0 or stepCounter == 1):
+            return
 
-        if SAVE_DATA_TO_FILE:
-            if stepCounter % SAVE_EVERY_N_STEPS == 0 or stepCounter == 1:
+        focad_agent = FLAMEGPU.agent("FOCAD")
+        n_focad = focad_agent.count()
+        if n_focad <= 0:
+            print(f"FA metrics (step {stepCounter:04d}) -> no FOCAD agents")
+            return
 
-                if INCLUDE_FIBRE_NETWORK:
-                    file_name = 'fibre_network_data_t{:04d}.vtk'.format(stepCounter)
-                    file_path = RES_PATH / file_name
+        attached_count = focad_agent.sumInt("attached")
+        total_force_mag = focad_agent.sumFloat("f_mag")
+        attached_ratio = attached_count / float(n_focad)
+        mean_force_mag = total_force_mag / float(n_focad)
 
-                    agent = FLAMEGPU.agent("FNODE")
-                    # reaction forces, thus, opposite to agent-applied forces
-                    sum_bx_pos = -agent.sumFloat("f_bx_pos")
-                    sum_bx_neg = -agent.sumFloat("f_bx_neg")
-                    sum_by_pos = -agent.sumFloat("f_by_pos")
-                    sum_by_neg = -agent.sumFloat("f_by_neg")
-                    sum_bz_pos = -agent.sumFloat("f_bz_pos")
-                    sum_bz_neg = -agent.sumFloat("f_bz_neg")
-                    sum_bx_pos_y = -agent.sumFloat("f_bx_pos_y")
-                    sum_bx_pos_z = -agent.sumFloat("f_bx_pos_z")
-                    sum_bx_neg_y = -agent.sumFloat("f_bx_neg_y")
-                    sum_bx_neg_z = -agent.sumFloat("f_bx_neg_z")
-                    sum_by_pos_x = -agent.sumFloat("f_by_pos_x")
-                    sum_by_pos_z = -agent.sumFloat("f_by_pos_z")
-                    sum_by_neg_x = -agent.sumFloat("f_by_neg_x")
-                    sum_by_neg_z = -agent.sumFloat("f_by_neg_z")
-                    sum_bz_pos_x = -agent.sumFloat("f_bz_pos_x")
-                    sum_bz_pos_y = -agent.sumFloat("f_bz_pos_y")
-                    sum_bz_neg_x = -agent.sumFloat("f_bz_neg_x")
-                    sum_bz_neg_y = -agent.sumFloat("f_bz_neg_y")
-
-                    ids = list()
-                    coords = list()
-                    velocity = list()
-                    force = list()
-                    elastic_energy = list()
-
-                    av = agent.getPopulationData()  # this returns a DeviceAgentVector
-                    for ai in av:
-                        id_ai = ai.getVariableInt("id") - 9 # for vtk visualization, FNODE agents start at 0
-                        coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
-                        velocity_ai = (ai.getVariableFloat("vx"), ai.getVariableFloat("vy"), ai.getVariableFloat("vz"))
-                        force_ai = (ai.getVariableFloat("fx"), ai.getVariableFloat("fy"), ai.getVariableFloat("fz"))
-                        ids.append(id_ai)
-                        coords.append(coords_ai)
-                        velocity.append(velocity_ai)
-                        force.append(force_ai)
-                        elastic_energy.append(ai.getVariableFloat("elastic_energy"))
-                        
-                    # Get sorting indices based on ids
-                    sorted_indices = np.argsort(ids)
-
-                    # Rearrange lists according to the sorted indices
-                    ids = [ids[i] for i in sorted_indices]
-                    coords = [coords[i] for i in sorted_indices]
-                    velocity = [velocity[i] for i in sorted_indices]
-                    force = [force[i] for i in sorted_indices]
-                    elastic_energy = [elastic_energy[i] for i in sorted_indices]
-                    # Extract lines from INITIAL_NETWORK_CONNECTIVITY
-                    # To avoid duplicating cells, use a set to keep track of added lines
-                    added_lines = set()
-                    cell_connectivity = []
-                    
-                    for node_index, connections in INITIAL_NETWORK_CONNECTIVITY.items():
-                        for connected_node_index in connections:
-                            if connected_node_index != -1:
-                                # Create a tuple with sorted indices to ensure uniqueness
-                                line = tuple(sorted((node_index, connected_node_index)))
-                                if line not in added_lines:
-                                    added_lines.add(line)
-                                    cell_connectivity.append(line)
-                    
-                    num_cells = len(cell_connectivity)
-                    
-                    
-                    with open(str(file_path), 'w') as file:
-                        for line in self.fibrenodedata:
-                            file.write(line + '\n')
-                            
-                        file.write("POINTS {} float \n".format(8 + N_NODES))
-                        for coords_ai in coords:
-                            file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
-
-                        # Write boundary positions at the end so that corner points don't cover the points underneath
-                        file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[2], coord_boundary[4]))
-                        file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[2], coord_boundary[4]))
-                        file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[3], coord_boundary[4]))
-                        file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[3], coord_boundary[4]))
-                        file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[2], coord_boundary[5]))
-                        file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[2], coord_boundary[5]))
-                        file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[3], coord_boundary[5]))
-                        file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[3], coord_boundary[5]))
-                            
-                        # Write the cell connectivity
-                        file.write(f"CELLS {num_cells + 6} {num_cells * 3 + 6 * 5}\n") # each of the 6 boundaries is a cell of type POLYGON with 4 nodes
-                        for conn in cell_connectivity:
-                            file.write(f"2 {conn[0]} {conn[1]}\n") 
-                        for line in self.domaindata_network:
-                            file.write(line + '\n')
-                        
-                        # Write the cell types (3 for VTK_LINE)
-                        file.write(f"CELL_TYPES {num_cells + 6}\n")
-                        for _ in range(num_cells):
-                            file.write("3\n")  # VTK_LINE  
-                        for _ in range(6):
-                            file.write("7\n")  # VTK_POLYGON 
-                            
-                        file.write(f"CELL_DATA {num_cells + 6}\n")
-                        file.write("SCALARS boundary_idx int 1" + '\n')
-                        file.write("LOOKUP_TABLE default" + '\n')                    
-                        for _ in range(num_cells):
-                            file.write("0\n")    
-                        for bidx in range(6):
-                            file.write(f"{bidx + 1}\n") 
-
-                        file.write("SCALARS boundary_normal_forces float 1" + '\n')
-                        file.write("LOOKUP_TABLE default" + '\n')                    
-                        for _ in range(num_cells):
-                            file.write("0.0\n")    
-                        file.write(str(sum_bx_pos) + '\n')
-                        file.write(str(sum_bx_neg) + '\n')
-                        file.write(str(sum_by_pos) + '\n')
-                        file.write(str(sum_by_neg) + '\n')
-                        file.write(str(sum_bz_pos) + '\n')
-                        file.write(str(sum_bz_neg) + '\n')
-                        
-                        file.write("SCALARS boundary_normal_force_scaling float 1" + '\n')
-                        file.write("LOOKUP_TABLE default" + '\n')
-                        for _ in range(num_cells):
-                            file.write("0.0\n")    
-                        file.write(str(abs(sum_bx_pos)) + '\n')
-                        file.write(str(abs(sum_bx_neg)) + '\n')
-                        file.write(str(abs(sum_by_pos)) + '\n')
-                        file.write(str(abs(sum_by_neg)) + '\n')
-                        file.write(str(abs(sum_bz_pos)) + '\n')
-                        file.write(str(abs(sum_bz_neg)) + '\n')
-                        # must be divided in blocks of 6 (one value per face of the cube)
-                        file.write("SCALARS boundary_shear_forces_pos float 1" + '\n')
-                        file.write("LOOKUP_TABLE default" + '\n')
-                        for _ in range(num_cells):
-                            file.write("0.0\n")    
-                        file.write(str(sum_bx_pos_y) + '\n')
-                        file.write(str(sum_bx_pos_z) + '\n')
-                        file.write(str(sum_by_pos_x) + '\n')
-                        file.write(str(sum_by_pos_z) + '\n')
-                        file.write(str(sum_bz_pos_x) + '\n')
-                        file.write(str(sum_bz_pos_y) + '\n')
-                        file.write("SCALARS boundary_shear_forces_neg float 1" + '\n')
-                        file.write("LOOKUP_TABLE default" + '\n')
-                        for _ in range(num_cells):
-                            file.write("0.0\n")    
-                        file.write(str(sum_bx_neg_y) + '\n')
-                        file.write(str(sum_bx_neg_z) + '\n')
-                        file.write(str(sum_by_neg_x) + '\n')
-                        file.write(str(sum_by_neg_z) + '\n')
-                        file.write(str(sum_bz_neg_x) + '\n')
-                        file.write(str(sum_bz_neg_y) + '\n')
+        print(
+            f"FA metrics (step {stepCounter:04d}) -> attached={int(attached_count)}/{n_focad} "
+            f"(ratio={attached_ratio:.3f}), mean|F|={mean_force_mag:.4f} nN"
+        )
 
 
-                        file.write("POINT_DATA {} \n".format(8 + N_NODES))  # 8 corners + number of FNODE agents
-
-                        file.write("SCALARS is_corner int 1" + '\n')  # create this variable to remove them from representations
-                        file.write("LOOKUP_TABLE default" + '\n')
-
-                        for ee_ai in elastic_energy:
-                            file.write("{0} \n".format(0))
-                        for _ in range(8):
-                            file.write("1 \n")  # boundary corners
-
-
-                        file.write("SCALARS elastic_energy float 1" + '\n')
-                        file.write("LOOKUP_TABLE default" + '\n')
-                        for ee_ai in elastic_energy:
-                            file.write("{:.4f} \n".format(ee_ai))
-                        for _ in range(8):
-                            file.write("0.0 \n")  # boundary corners
-
-                        file.write("VECTORS velocity float" + '\n')
-                        for v_ai in velocity:
-                            file.write("{:.4f} {:.4f} {:.4f} \n".format(v_ai[0], v_ai[1], v_ai[2]))
-                        for _ in range(8):
-                            file.write("0.0 0.0 0.0 \n")  # boundary corners
-
-                        file.write("VECTORS force float" + '\n')
-                        for f_ai in force:
-                            file.write("{:.4f} {:.4f} {:.4f} \n".format(f_ai[0], f_ai[1], f_ai[2]))
-                        for _ in range(8):
-                            file.write("0.0 0.0 0.0 \n")  # boundary corners
-
-                if INCLUDE_CELLS:
-                    cell_coords = list()
-                    cell_velocity = list()
-                    cell_orientation = list()
-                    cell_alignment = list()
-                    cell_radius = list()
-                    cell_clock = list()
-                    cell_cycle_phase = list()
-                    c_sp_multi = list()  # this is a list of tuples. Each tuple has N_SPECIES elements
-                    file_name = 'cells_t{:04d}.vtk'.format(stepCounter)
-                    file_path = RES_PATH / file_name
-                    cell_agent = FLAMEGPU.agent("CELL")
-                    cell_agent.sortInt("id", pyflamegpu.HostAgentAPI.Asc); # this is critical to ensure cell ids are kept in order for visualization
-                    av = cell_agent.getPopulationData()  # this returns a DeviceAgentVector
-                    for ai in av:
-                        coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
-                        velocity_ai = (ai.getVariableFloat("vx"), ai.getVariableFloat("vy"), ai.getVariableFloat("vz"))
-                        orientation_ai = (ai.getVariableFloat("orx"), ai.getVariableFloat("ory"), ai.getVariableFloat("orz"))
-                        alignment_ai = ai.getVariableFloat("alignment")
-                        radius_ai = ai.getVariableFloat("radius")
-                        clock_ai = ai.getVariableFloat("clock")
-                        cycle_phase_ai = ai.getVariableInt("cycle_phase")
-                        c_sp_multi.append(ai.getVariableArrayFloat("C_sp"))
-                        cell_coords.append(coords_ai)
-                        cell_velocity.append(velocity_ai)
-                        cell_orientation.append(orientation_ai)
-                        cell_alignment.append(alignment_ai)
-                        cell_radius.append(radius_ai)
-                        cell_clock.append(clock_ai)
-                        cell_cycle_phase.append(cycle_phase_ai)
-                    with open(str(file_path), 'w') as file:
-                        for line in self.celldata:
-                            file.write(line + '\n')
-                        file.write("POINTS {} float \n".format(
-                            FLAMEGPU.environment.getPropertyUInt("N_CELLS")))  # number of cell agents
-                        for coords_ai in cell_coords:
-                            file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
-                        file.write("POINT_DATA {} \n".format(
-                            FLAMEGPU.environment.getPropertyUInt("N_CELLS")))  
-                        file.write("SCALARS alignment float 1" + '\n')
-                        file.write("LOOKUP_TABLE default" + '\n')
-                        for a_ai in cell_alignment:
-                            file.write("{:.4f} \n".format(a_ai))                            
-                        file.write("SCALARS radius float 1" + '\n')
-                        file.write("LOOKUP_TABLE default" + '\n')
-                        for r_ai in cell_radius:
-                            file.write("{:.4f} \n".format(r_ai))                            
-                        file.write("SCALARS clock float 1" + '\n')
-                        file.write("LOOKUP_TABLE default" + '\n')
-                        for c_ai in cell_clock:
-                            file.write("{:.4f} \n".format(c_ai))                        
-                        file.write("SCALARS cycle_phase int 1" + '\n')
-                        file.write("LOOKUP_TABLE default" + '\n')
-                        for ccp_ai in cell_cycle_phase:
-                            file.write("{} \n".format(ccp_ai))    
-                        for s in range(N_SPECIES):
-                            file.write("SCALARS concentration_species_{0} float 1 \n".format(s))
-                            file.write("LOOKUP_TABLE default" + '\n')
-                            for c_ai in c_sp_multi:
-                                file.write("{:.4f} \n".format(c_ai[s]))              
-                        file.write("VECTORS velocity float" + '\n')
-                        for v_ai in cell_velocity:
-                            file.write("{:.4f} {:.4f} {:.4f} \n".format(v_ai[0], v_ai[1], v_ai[2]))
-                        file.write("VECTORS orientation float" + '\n')
-                        for o_ai in cell_orientation:
-                            file.write("{:.4f} {:.4f} {:.4f} \n".format(o_ai[0], o_ai[1], o_ai[2]))
-
-                file_name = 'ecm_data_t{:04d}.vtk'.format(stepCounter)
-                if ENSEMBLE:
-                    dir_name = f"BUCKLING_COEFF_D0_{BUCKLING_COEFF_D0:.3f}_STRAIN_STIFFENING_COEFF_DS_{STRAIN_STIFFENING_COEFF_DS:.3f}_CRITICAL_STRAIN_{CRITICAL_STRAIN:.3f}"
-                    # Combine the base directory with the current directory name
-                    file_path = RES_PATH / dir_name / file_name
-                else:
-                    file_path = RES_PATH / file_name
-
-                agent = FLAMEGPU.agent("ECM")
-                # reaction forces, currently unused in ECM agents. FNODE agents bear the load instead
-                sum_bx_pos = 0.0
-                sum_bx_neg = 0.0
-                sum_by_pos = 0.0
-                sum_by_neg = 0.0
-                sum_bz_pos = 0.0
-                sum_bz_neg = 0.0
-                sum_bx_pos_y = 0.0
-                sum_bx_pos_z = 0.0
-                sum_bx_neg_y = 0.0
-                sum_bx_neg_z = 0.0
-                sum_by_pos_x = 0.0
-                sum_by_pos_z = 0.0
-                sum_by_neg_x = 0.0
-                sum_by_neg_z = 0.0
-                sum_bz_pos_x = 0.0
-                sum_bz_pos_y = 0.0
-                sum_bz_neg_x = 0.0
-                sum_bz_neg_y = 0.0
-
-                coords = list()
-                velocity = list()
-                force = list()
-                c_sp_multi = list()  # this is a list of tuples. Each tuple has N_SPECIES elements
-                if HETEROGENEOUS_DIFFUSION:
-                    d_sp_multi = list()  # this is a list of tuples. Each tuple has N_SPECIES elements
-                av = agent.getPopulationData()  # this returns a DeviceAgentVector
-                for ai in av:
-                    coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
-                    velocity_ai = (ai.getVariableFloat("vx"), ai.getVariableFloat("vy"), ai.getVariableFloat("vz"))
-                    force_ai = (ai.getVariableFloat("fx"), ai.getVariableFloat("fy"), ai.getVariableFloat("fz"))
-                    coords.append(coords_ai)
-                    velocity.append(velocity_ai)
-                    force.append(force_ai)
-                    c_sp_multi.append(ai.getVariableArrayFloat("C_sp"))
-                    if HETEROGENEOUS_DIFFUSION:
-                        d_sp_multi.append(ai.getVariableArrayFloat("D_sp"))
-                print("====== SAVING DATA FROM Step {:03d} TO FILE ======".format(stepCounter))
-                with open(str(file_path), 'w') as file:
-                    for line in self.header:
-                        file.write(line + '\n')
-                    for coords_ai in coords:
-                        file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
-                    # Write boundary positions at the end so that corner points don't cover the points underneath
-                    file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[2], coord_boundary[4]))
-                    file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[2], coord_boundary[4]))
-                    file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[3], coord_boundary[4]))
-                    file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[3], coord_boundary[4]))
-                    file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[2], coord_boundary[5]))
-                    file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[2], coord_boundary[5]))
-                    file.write("{} {} {} \n".format(coord_boundary[1], coord_boundary[3], coord_boundary[5]))
-                    file.write("{} {} {} \n".format(coord_boundary[0], coord_boundary[3], coord_boundary[5]))
-                    for line in self.domaindata:
-                        file.write(line + '\n')
-                    file.write("SCALARS boundary_normal_forces float 1" + '\n')
-                    file.write("LOOKUP_TABLE default" + '\n')
-                    file.write(str(sum_bx_pos) + '\n')
-                    file.write(str(sum_bx_neg) + '\n')
-                    file.write(str(sum_by_pos) + '\n')
-                    file.write(str(sum_by_neg) + '\n')
-                    file.write(str(sum_bz_pos) + '\n')
-                    file.write(str(sum_bz_neg) + '\n')
-                    file.write("SCALARS boundary_normal_force_scaling float 1" + '\n')
-                    file.write("LOOKUP_TABLE default" + '\n')
-                    file.write(str(abs(sum_bx_pos)) + '\n')
-                    file.write(str(abs(sum_bx_neg)) + '\n')
-                    file.write(str(abs(sum_by_pos)) + '\n')
-                    file.write(str(abs(sum_by_neg)) + '\n')
-                    file.write(str(abs(sum_bz_pos)) + '\n')
-                    file.write(str(abs(sum_bz_neg)) + '\n')
-                    file.write("VECTORS boundary_normal_force_dir float" + '\n')
-                    file.write("1 0 0 \n" if sum_bx_pos > 0 else "-1 0 0 \n")
-                    file.write("1 0 0 \n" if sum_bx_neg > 0 else "-1 0 0 \n")
-                    file.write("0 1 0 \n" if sum_by_pos > 0 else "0 -1 0 \n")
-                    file.write("0 1 0 \n" if sum_by_neg > 0 else "0 -1 0 \n")
-                    file.write("0 0 1 \n" if sum_bz_pos > 0 else "0 0 -1 \n")
-                    file.write("0 0 1 \n" if sum_bz_neg > 0 else "0 0 -1 \n")
-                    # must be divided in blocks of 6 (one value per face of the cube)
-                    file.write("SCALARS boundary_shear_forces_pos float 1" + '\n')
-                    file.write("LOOKUP_TABLE default" + '\n')
-                    file.write(str(sum_bx_pos_y) + '\n')
-                    file.write(str(sum_bx_pos_z) + '\n')
-                    file.write(str(sum_by_pos_x) + '\n')
-                    file.write(str(sum_by_pos_z) + '\n')
-                    file.write(str(sum_bz_pos_x) + '\n')
-                    file.write(str(sum_bz_pos_y) + '\n')
-                    file.write("SCALARS boundary_shear_forces_neg float 1" + '\n')
-                    file.write("LOOKUP_TABLE default" + '\n')
-                    file.write(str(sum_bx_neg_y) + '\n')
-                    file.write(str(sum_bx_neg_z) + '\n')
-                    file.write(str(sum_by_neg_x) + '\n')
-                    file.write(str(sum_by_neg_z) + '\n')
-                    file.write(str(sum_bz_neg_x) + '\n')
-                    file.write(str(sum_bz_neg_y) + '\n')
-                    file.write("SCALARS boundary_shear_force_scaling_pos float 1" + '\n')
-                    file.write("LOOKUP_TABLE default" + '\n')
-                    file.write(str(abs(sum_bx_pos_y)) + '\n')
-                    file.write(str(abs(sum_bx_pos_z)) + '\n')
-                    file.write(str(abs(sum_by_pos_x)) + '\n')
-                    file.write(str(abs(sum_by_pos_z)) + '\n')
-                    file.write(str(abs(sum_bz_pos_x)) + '\n')
-                    file.write(str(abs(sum_bz_pos_y)) + '\n')
-                    file.write("SCALARS boundary_shear_force_scaling_neg float 1" + '\n')
-                    file.write("LOOKUP_TABLE default" + '\n')
-                    file.write(str(abs(sum_bx_neg_y)) + '\n')
-                    file.write(str(abs(sum_bx_neg_z)) + '\n')
-                    file.write(str(abs(sum_by_neg_x)) + '\n')
-                    file.write(str(abs(sum_by_neg_z)) + '\n')
-                    file.write(str(abs(sum_bz_neg_x)) + '\n')
-                    file.write(str(abs(sum_bz_neg_y)) + '\n')
-
-                    file.write("VECTORS boundary_shear_force_dir_pos float" + '\n')
-                    file.write("0 1 0 \n" if sum_bx_pos_y > 0 else "0 -1 0 \n")
-                    file.write("0 0 1 \n" if sum_bx_pos_z > 0 else "0 0 -1 \n")
-                    file.write("1 0 0 \n" if sum_by_pos_x > 0 else "-1 0 0 \n")
-                    file.write("0 0 1 \n" if sum_by_pos_z > 0 else "0 0 -1 \n")
-                    file.write("1 0 0 \n" if sum_bz_pos_x > 0 else "-1 0 0 \n")
-                    file.write("0 1 0 \n" if sum_bz_pos_y > 0 else "0 -1 0 \n")
-                    file.write("VECTORS boundary_shear_force_dir_neg float" + '\n')
-                    file.write("0 1 0 \n" if sum_bx_neg_y > 0 else "0 -1 0 \n")
-                    file.write("0 0 1 \n" if sum_bx_neg_z > 0 else "0 0 -1 \n")
-                    file.write("1 0 0 \n" if sum_by_neg_x > 0 else "-1 0 0 \n")
-                    file.write("0 0 1 \n" if sum_by_neg_z > 0 else "0 0 -1 \n")
-                    file.write("1 0 0 \n" if sum_bz_neg_x > 0 else "-1 0 0 \n")
-                    file.write("0 1 0 \n" if sum_bz_neg_y > 0 else "0 -1 0 \n")
-
-                    file.write("POINT_DATA {} \n".format(8 + ECM_POPULATION_SIZE))  # 8 corners + number of ECM agents
-
-                    file.write(
-                        "SCALARS is_corner int 1" + '\n')  # create this variable to remove them from representations
-                    file.write("LOOKUP_TABLE default" + '\n')
-
-                    for i in range(ECM_POPULATION_SIZE):
-                        file.write("{0} \n".format(0))
-                    for i in range(8):
-                        file.write("1 \n")  # boundary corners
-
-                    for s in range(N_SPECIES):
-                        file.write("SCALARS concentration_species_{0} float 1 \n".format(s))
-                        file.write("LOOKUP_TABLE default" + '\n')
-
-                        for c_ai in c_sp_multi:
-                            file.write("{:.4f} \n".format(c_ai[s]))
-                        for i in range(8):
-                            file.write("0.0 \n")  # boundary corners
-                    if HETEROGENEOUS_DIFFUSION:
-                        for s in range(N_SPECIES):
-                            file.write("SCALARS diffusion_coeff_{0} float 1 \n".format(s))
-                            file.write("LOOKUP_TABLE default" + '\n')
-
-                            for d_ai in d_sp_multi:
-                                file.write("{:.4f} \n".format(d_ai[s]))
-                            for i in range(8):
-                                file.write("0.0 \n")  # boundary corners
-
-                    file.write("VECTORS velocity float" + '\n')
-                    for v_ai in velocity:
-                        file.write("{:.4f} {:.4f} {:.4f} \n".format(v_ai[0], v_ai[1], v_ai[2]))
-                    for i in range(8):
-                        file.write("0.0 0.0 0.0 \n")  # boundary corners
-
-                    file.write("VECTORS force float" + '\n')
-                    for f_ai in force:
-                        file.write("{:.4f} {:.4f} {:.4f} \n".format(f_ai[0], f_ai[1], f_ai[2]))
-                    for i in range(8):
-                        file.write("0.0 0.0 0.0 \n")  # boundary corners
-
-                print("... succesful save ")
-                print("=================================")
                           
 
 class UpdateBoundaryConcentrationMulti(pyflamegpu.HostFunction):
@@ -1688,7 +1722,12 @@ if MOVING_BOUNDARIES:
     model.addStepFunction(mb)
 
 sdf = SaveDataToFile()
+# SaveDataToFile host function; behavior is controlled by SAVE_DATA_TO_FILE flag.
 model.addStepFunction(sdf)
+
+if INCLUDE_FOCAL_ADHESIONS:
+    fam = ReportFAMetrics()
+    model.addStepFunction(fam)
 
 
 """
@@ -1704,13 +1743,17 @@ model.addStepFunction(sdf)
 # L1: Agent_Locations
 model.newLayer("L1_Agent_Locations").addAgentFunction("BCORNER", "bcorner_output_location_data")
 if INCLUDE_DIFFUSION:
-    model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_output_grid_location_data")
+    model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_grid_location_data")
 if INCLUDE_CELLS:
-    model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_output_location_data")
+    model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_spatial_location_data")
+    if INCLUDE_FOCAL_ADHESIONS:
+        model.newLayer("L1_CELL_Locations_2").addAgentFunction("CELL", "cell_bucket_location_data")  # these functions share data of the same agent, so must be in separate layers
+        model.newLayer("L1_FOCAD_Update_Anchors").addAgentFunction("FOCAD", "focad_anchor_update")
 if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L1_FNODE_Locations_1").addAgentFunction("FNODE", "fnode_spatial_location_data")
     # These functions share data of the same agent, so must be in separate layers
     model.newLayer("L1_FNODE_Locations_2").addAgentFunction("FNODE", "fnode_bucket_location_data")
+    
 
 # L2: Boundary_Interactions  
 if INCLUDE_DIFFUSION:
@@ -1734,12 +1777,21 @@ if INCLUDE_FIBRE_NETWORK:
     # L7_Fibre_Network Mechanical interactions
     model.newLayer("L7_FNODE_Repulsion").addAgentFunction("FNODE", "fnode_fnode_spatial_interaction")
     model.newLayer("L7_FNODE_Network_Mechanics").addAgentFunction("FNODE", "fnode_fnode_bucket_interaction")
+    if INCLUDE_FOCAL_ADHESIONS:
+        model.newLayer("L7_FOCAD_Mechanics").addAgentFunction("FOCAD", "focad_fnode_interaction")
+        # These FOCAD location functions are placed here because they require updated force information to be broadcasted to  FNODE and CELL update functions
+        model.newLayer("L7_FOCAD_Locations_1").addAgentFunction("FOCAD", "focad_spatial_location_data")
+        model.newLayer("L7_FOCAD_Locations_2").addAgentFunction("FOCAD", "focad_bucket_location_data")
+        model.newLayer("L7_FNODE_Force_Update").addAgentFunction("FNODE", "fnode_focad_interaction") 
+        model.newLayer("L7_CELL_Stress_Update").addAgentFunction("CELL", "cell_update_stress") 
 
 # L8_Agent_Movement
 if INCLUDE_CELLS:
     model.newLayer("L8_CELL_Movement").addAgentFunction("CELL", "cell_move")
 if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L8_FNODE_Movement").addAgentFunction("FNODE", "fnode_move")
+if INCLUDE_FOCAL_ADHESIONS:
+    model.newLayer("L8_FOCAD_Movement").addAgentFunction("FOCAD", "focad_move")
 # If boundaries are not moving, the ECM grid does not need to be updated
 if MOVING_BOUNDARIES:
     model.newLayer("L8_BCORNER_Movement").addAgentFunction("BCORNER", "bcorner_move")
@@ -1791,6 +1843,22 @@ if INCLUDE_FIBRE_NETWORK:
     fnode_agent_log.logStandardDevFloat("f_by_neg")
     fnode_agent_log.logStandardDevFloat("f_bz_pos")
     fnode_agent_log.logStandardDevFloat("f_bz_neg")
+
+if INCLUDE_FOCAL_ADHESIONS:
+    focad_agent_log = logging_config.agent("FOCAD")
+    focad_agent_log.logCount()
+    focad_agent_log.logSumInt("attached")
+    focad_agent_log.logSumInt("is_front")
+    focad_agent_log.logSumInt("is_rear")
+    focad_agent_log.logSumInt("attached_front")
+    focad_agent_log.logSumInt("attached_rear")
+    focad_agent_log.logSumFloat("f_mag")
+    focad_agent_log.logSumFloat("frontness_front")
+    focad_agent_log.logSumFloat("frontness_rear")
+    focad_agent_log.logSumFloat("k_on_eff_front")
+    focad_agent_log.logSumFloat("k_on_eff_rear")
+    focad_agent_log.logSumFloat("k_off_0_eff_front")
+    focad_agent_log.logSumFloat("k_off_0_eff_rear")
 
 step_log = pyflamegpu.StepLoggingConfig(logging_config)
 step_log.setFrequency(1) # if 1, data will be logged every step
@@ -1957,6 +2025,8 @@ def manageLogs(steps, is_ensemble, idx):
                                    ("fzpos_x", float), ("fzpos_y", float), ("fzneg_x", float), ("fzneg_y", float)])
     BFORCE_OVER_TIME = []
     BFORCE_SHEAR_OVER_TIME = []
+    FOCAD_METRICS_OVER_TIME = []
+    FOCAD_POLARITY_METRICS_OVER_TIME = []
 
     if INCLUDE_FIBRE_NETWORK:
         for step in steps:
@@ -1997,6 +2067,85 @@ def manageLogs(steps, is_ensemble, idx):
                     # BFORCE_SHEAR_OVER_TIME = BFORCE_SHEAR_OVER_TIME.append(step_bforce_shear, ignore_index=True) # deprecated
                     BFORCE_SHEAR_OVER_TIME = pd.concat([BFORCE_SHEAR_OVER_TIME, step_bforce_shear], ignore_index=True)
                 counter += 1
+
+    if INCLUDE_FOCAL_ADHESIONS:
+        FMET = make_dataclass("FMET", [("attached", float), ("total", float), ("attached_ratio", float), ("mean_f_mag", float)])
+        FPOL = make_dataclass(
+            "FPOL",
+            [
+                ("front_count", float),
+                ("rear_count", float),
+                ("front_attached", float),
+                ("rear_attached", float),
+                ("front_attached_ratio", float),
+                ("rear_attached_ratio", float),
+                ("frontness_front_mean", float),
+                ("frontness_rear_mean", float),
+                ("k_on_eff_front_mean", float),
+                ("k_on_eff_rear_mean", float),
+                ("k_off_0_eff_front_mean", float),
+                ("k_off_0_eff_rear_mean", float),
+            ],
+        )
+        for step in steps:
+            stepcount = step.getStepCount()
+            if stepcount % SAVE_EVERY_N_STEPS == 0 or stepcount == 1:
+                focad_agents = step.getAgent("FOCAD")
+                n_focad = focad_agents.getCount()
+                attached = focad_agents.getSumInt("attached")
+                total_f_mag = focad_agents.getSumFloat("f_mag")
+                ratio = (attached / n_focad) if n_focad > 0 else 0.0
+                mean_f_mag = (total_f_mag / n_focad) if n_focad > 0 else 0.0
+                step_fmet = pd.DataFrame([FMET(attached, n_focad, ratio, mean_f_mag)])
+                if len(FOCAD_METRICS_OVER_TIME) == 0:
+                    FOCAD_METRICS_OVER_TIME = step_fmet
+                else:
+                    FOCAD_METRICS_OVER_TIME = pd.concat([FOCAD_METRICS_OVER_TIME, step_fmet], ignore_index=True)
+
+                front_count = focad_agents.getSumInt("is_front")
+                rear_count = focad_agents.getSumInt("is_rear")
+                front_attached = focad_agents.getSumInt("attached_front")
+                rear_attached = focad_agents.getSumInt("attached_rear")
+
+                front_attached_ratio = (front_attached / front_count) if front_count > 0 else 0.0
+                rear_attached_ratio = (rear_attached / rear_count) if rear_count > 0 else 0.0
+
+                frontness_front_sum = focad_agents.getSumFloat("frontness_front")
+                frontness_rear_sum = focad_agents.getSumFloat("frontness_rear")
+
+                k_on_eff_front_sum = focad_agents.getSumFloat("k_on_eff_front")
+                k_on_eff_rear_sum = focad_agents.getSumFloat("k_on_eff_rear")
+
+                k_off_0_eff_front_sum = focad_agents.getSumFloat("k_off_0_eff_front")
+                k_off_0_eff_rear_sum = focad_agents.getSumFloat("k_off_0_eff_rear")
+
+                frontness_front_mean = (frontness_front_sum / front_count) if front_count > 0 else 0.0
+                frontness_rear_mean = (frontness_rear_sum / rear_count) if rear_count > 0 else 0.0
+                k_on_eff_front_mean = (k_on_eff_front_sum / front_count) if front_count > 0 else 0.0
+                k_on_eff_rear_mean = (k_on_eff_rear_sum / rear_count) if rear_count > 0 else 0.0
+                k_off_0_eff_front_mean = (k_off_0_eff_front_sum / front_count) if front_count > 0 else 0.0
+                k_off_0_eff_rear_mean = (k_off_0_eff_rear_sum / rear_count) if rear_count > 0 else 0.0
+
+                step_fpol = pd.DataFrame([
+                    FPOL(
+                        front_count,
+                        rear_count,
+                        front_attached,
+                        rear_attached,
+                        front_attached_ratio,
+                        rear_attached_ratio,
+                        frontness_front_mean,
+                        frontness_rear_mean,
+                        k_on_eff_front_mean,
+                        k_on_eff_rear_mean,
+                        k_off_0_eff_front_mean,
+                        k_off_0_eff_rear_mean,
+                    )
+                ])
+                if len(FOCAD_POLARITY_METRICS_OVER_TIME) == 0:
+                    FOCAD_POLARITY_METRICS_OVER_TIME = step_fpol
+                else:
+                    FOCAD_POLARITY_METRICS_OVER_TIME = pd.concat([FOCAD_POLARITY_METRICS_OVER_TIME, step_fpol], ignore_index=True)
     if not is_ensemble:
         print()
         print("============================")
@@ -2019,6 +2168,16 @@ def manageLogs(steps, is_ensemble, idx):
         print("STRAIN OVER TIME")
         print(OSCILLATORY_STRAIN_OVER_TIME)
         print()
+        if INCLUDE_FOCAL_ADHESIONS and len(FOCAD_METRICS_OVER_TIME) > 0:
+            print("============================")
+            print("FA METRICS OVER TIME")
+            print(FOCAD_METRICS_OVER_TIME)
+            print()
+        if INCLUDE_FOCAL_ADHESIONS and len(FOCAD_POLARITY_METRICS_OVER_TIME) > 0:
+            print("============================")
+            print("FA POLARITY METRICS OVER TIME")
+            print(FOCAD_POLARITY_METRICS_OVER_TIME)
+            print()
     # Saving pickle
     if SAVE_PICKLE:
         file_name = f'output_data_{idx}.pickle'
@@ -2027,6 +2186,8 @@ def manageLogs(steps, is_ensemble, idx):
             pickle.dump({'BPOS_OVER_TIME': BPOS_OVER_TIME,
                          'BFORCE_OVER_TIME': BFORCE_OVER_TIME,
                          'BFORCE_SHEAR_OVER_TIME': BFORCE_SHEAR_OVER_TIME,
+                         'FOCAD_METRICS_OVER_TIME': FOCAD_METRICS_OVER_TIME,
+                         'FOCAD_POLARITY_METRICS_OVER_TIME': FOCAD_POLARITY_METRICS_OVER_TIME,
                          'POISSON_RATIO_OVER_TIME': POISSON_RATIO_OVER_TIME,
                          'OSCILLATORY_STRAIN_OVER_TIME': OSCILLATORY_STRAIN_OVER_TIME,
                          'MODEL_CONFIG': MODEL_CONFIG,
