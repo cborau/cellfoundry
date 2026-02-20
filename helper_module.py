@@ -849,6 +849,18 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
         focad_k_off_0 = list()
         focad_f_c = list()
         focad_k_reinf = list()
+        focad_f_mag = list()
+        focad_is_front = list()
+        focad_is_rear = list()
+        focad_attached_front = list()
+        focad_attached_rear = list()
+        focad_frontness_front = list()
+        focad_frontness_rear = list()
+        focad_k_on_eff_front = list()
+        focad_k_on_eff_rear = list()
+        focad_k_off_0_eff_front = list()
+        focad_k_off_0_eff_rear = list()
+        focad_linc_prev_total_length = list()
         focad_x_i = list()
         focad_y_i = list()
         focad_z_i = list()
@@ -898,6 +910,18 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             focad_k_off_0.append(ai.getVariableFloat("k_off_0"))
             focad_f_c.append(ai.getVariableFloat("f_c"))
             focad_k_reinf.append(ai.getVariableFloat("k_reinf"))
+            focad_f_mag.append(ai.getVariableFloat("f_mag"))
+            focad_is_front.append(ai.getVariableInt("is_front"))
+            focad_is_rear.append(ai.getVariableInt("is_rear"))
+            focad_attached_front.append(ai.getVariableInt("attached_front"))
+            focad_attached_rear.append(ai.getVariableInt("attached_rear"))
+            focad_frontness_front.append(ai.getVariableFloat("frontness_front"))
+            focad_frontness_rear.append(ai.getVariableFloat("frontness_rear"))
+            focad_k_on_eff_front.append(ai.getVariableFloat("k_on_eff_front"))
+            focad_k_on_eff_rear.append(ai.getVariableFloat("k_on_eff_rear"))
+            focad_k_off_0_eff_front.append(ai.getVariableFloat("k_off_0_eff_front"))
+            focad_k_off_0_eff_rear.append(ai.getVariableFloat("k_off_0_eff_rear"))
+            focad_linc_prev_total_length.append(ai.getVariableFloat("linc_prev_total_length"))
 
         with open(str(file_path), 'w') as file:
             for line in save_context["focaladhesionsdata"]:
@@ -954,14 +978,69 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             for v in focad_age:
                 file.write("{:.4f} \n".format(v))
 
+            file.write("SCALARS f_mag float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_f_mag:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS is_front int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_is_front:
+                file.write("{} \n".format(int(v)))
+
+            file.write("SCALARS is_rear int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_is_rear:
+                file.write("{} \n".format(int(v)))
+
+            file.write("SCALARS attached_front int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_attached_front:
+                file.write("{} \n".format(int(v)))
+
+            file.write("SCALARS attached_rear int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_attached_rear:
+                file.write("{} \n".format(int(v)))
+
+            file.write("SCALARS frontness_front float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_frontness_front:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS frontness_rear float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_frontness_rear:
+                file.write("{:.4f} \n".format(v))
+
             file.write("SCALARS k_on float 1\n")
             file.write("LOOKUP_TABLE default\n")
             for v in focad_k_on:
                 file.write("{:.4f} \n".format(v))
 
+            file.write("SCALARS k_on_eff_front float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_k_on_eff_front:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS k_on_eff_rear float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_k_on_eff_rear:
+                file.write("{:.4f} \n".format(v))
+
             file.write("SCALARS k_off_0 float 1\n")
             file.write("LOOKUP_TABLE default\n")
             for v in focad_k_off_0:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS k_off_0_eff_front float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_k_off_0_eff_front:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS k_off_0_eff_rear float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_k_off_0_eff_rear:
                 file.write("{:.4f} \n".format(v))
 
             file.write("SCALARS f_c float 1\n")
@@ -972,6 +1051,11 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             file.write("SCALARS k_reinf float 1\n")
             file.write("LOOKUP_TABLE default\n")
             for v in focad_k_reinf:
+                file.write("{:.4f} \n".format(v))
+
+            file.write("SCALARS linc_prev_total_length float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for v in focad_linc_prev_total_length:
                 file.write("{:.4f} \n".format(v))
 
             file.write("SCALARS x_i float 1\n")
@@ -1483,6 +1567,7 @@ class ModelParameterConfig:
         max_search_radius_fnodes: float = None,
         # Diffusion
         include_diffusion: bool = None,
+        heterogeneous_diffusion: bool = None,
         n_species: int = None,
         diffusion_coeff_multi: list = None,
         boundary_conc_init_multi: list = None,
@@ -1523,14 +1608,32 @@ class ModelParameterConfig:
         init_n_focad_per_cell: int = None,
         n_anchor_points: int = None,
         max_search_radius_focad: float = None,
+        max_focad_arm_length: float = None,
         focad_rest_length_0: float = None,
+        focad_min_rest_length: float = None,
         focad_k_fa: float = None,
         focad_f_max: float = None,
         focad_v_c: float = None,
         focad_k_on: float = None,
         focad_k_off_0: float = None,
         focad_f_c: float = None,
+        use_catch_bond: bool = None,
+        catch_bond_catch_scale: float = None,
+        catch_bond_slip_scale: float = None,
+        catch_bond_f_catch: float = None,
+        catch_bond_f_slip: float = None,
         focad_k_reinf: float = None,
+        focad_f_reinf: float = None,
+        focad_k_fa_max: float = None,
+        focad_k_fa_decay: float = None,
+        focad_polarity_kon_front_gain: float = None,
+        focad_polarity_koff_front_reduction: float = None,
+        focad_polarity_koff_rear_gain: float = None,
+        focad_mobility_mu: float = None,
+        include_linc_coupling: bool = None,
+        linc_k_elast: float = None,
+        linc_d_dumping: float = None,
+        linc_rest_length: float = None,
         # Nucleus mechanics
         nucleus_e: float = None,
         nucleus_nu: float = None,
@@ -1594,6 +1697,7 @@ class ModelParameterConfig:
         self.FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE = fibre_node_boundary_equilibrium_distance
         self.MAX_SEARCH_RADIUS_FNODES = max_search_radius_fnodes
         self.INCLUDE_DIFFUSION = include_diffusion
+        self.HETEROGENEOUS_DIFFUSION = heterogeneous_diffusion
         self.N_SPECIES = n_species
         self.DIFFUSION_COEFF_MULTI = diffusion_coeff_multi
         self.BOUNDARY_CONC_INIT_MULTI = boundary_conc_init_multi
@@ -1632,14 +1736,32 @@ class ModelParameterConfig:
         self.INIT_N_FOCAD_PER_CELL = init_n_focad_per_cell
         self.N_ANCHOR_POINTS = n_anchor_points
         self.MAX_SEARCH_RADIUS_FOCAD = max_search_radius_focad
+        self.MAX_FOCAD_ARM_LENGTH = max_focad_arm_length
         self.FOCAD_REST_LENGTH_0 = focad_rest_length_0
+        self.FOCAD_MIN_REST_LENGTH = focad_min_rest_length
         self.FOCAD_K_FA = focad_k_fa
         self.FOCAD_F_MAX = focad_f_max
         self.FOCAD_V_C = focad_v_c
         self.FOCAD_K_ON = focad_k_on
         self.FOCAD_K_OFF_0 = focad_k_off_0
         self.FOCAD_F_C = focad_f_c
+        self.USE_CATCH_BOND = use_catch_bond
+        self.CATCH_BOND_CATCH_SCALE = catch_bond_catch_scale
+        self.CATCH_BOND_SLIP_SCALE = catch_bond_slip_scale
+        self.CATCH_BOND_F_CATCH = catch_bond_f_catch
+        self.CATCH_BOND_F_SLIP = catch_bond_f_slip
         self.FOCAD_K_REINF = focad_k_reinf
+        self.FOCAD_F_REINF = focad_f_reinf
+        self.FOCAD_K_FA_MAX = focad_k_fa_max
+        self.FOCAD_K_FA_DECAY = focad_k_fa_decay
+        self.FOCAD_POLARITY_KON_FRONT_GAIN = focad_polarity_kon_front_gain
+        self.FOCAD_POLARITY_KOFF_FRONT_REDUCTION = focad_polarity_koff_front_reduction
+        self.FOCAD_POLARITY_KOFF_REAR_GAIN = focad_polarity_koff_rear_gain
+        self.FOCAD_MOBILITY_MU = focad_mobility_mu
+        self.INCLUDE_LINC_COUPLING = include_linc_coupling
+        self.LINC_K_ELAST = linc_k_elast
+        self.LINC_D_DUMPING = linc_d_dumping
+        self.LINC_REST_LENGTH = linc_rest_length
         self.NUCLEUS_E = nucleus_e
         self.NUCLEUS_NU = nucleus_nu
         self.NUCLEUS_TAU = nucleus_tau
@@ -1674,7 +1796,7 @@ class ModelParameterConfig:
         if self.INCLUDE_FOCAL_ADHESIONS and self.N_CELLS is not None and self.INIT_N_FOCAD_PER_CELL is not None:
             focad_count = self.N_CELLS * self.INIT_N_FOCAD_PER_CELL
             print(
-                f"INCLUDE_FOCAL_ADHESIONS: True | FOCAD_PER_CELL: {self.INIT_N_FOCAD_PER_CELL} | FOCAD_COUNT: {focad_count}"
+                f"INCLUDE_FOCAL_ADHESIONS: True | FOCAD_PER_CELL: {self.INIT_N_FOCAD_PER_CELL} | FOCAD_COUNT: {focad_count} | LINC: {self.INCLUDE_LINC_COUPLING}"
             )
         else:
             print(f"INCLUDE_FOCAL_ADHESIONS: {self.INCLUDE_FOCAL_ADHESIONS}")
@@ -1720,9 +1842,10 @@ class ModelParameterConfig:
                 "unknown" if self.UNSTABLE_DIFFUSION is None else self.UNSTABLE_DIFFUSION
             )
             print(
-                "Diffusion: enabled | Species: {0} | Coefficients: {1} | Unstable: {2}".format(
+                "Diffusion: enabled | Species: {0} | Coefficients: {1} | Mode: {2} | Unstable: {3}".format(
                     self.N_SPECIES,
                     coeff_text,
+                    "heterogeneous" if self.HETEROGENEOUS_DIFFUSION else "homogeneous",
                     unstable_text,
                 )
             )
@@ -1770,6 +1893,28 @@ class ModelParameterConfig:
             print(f" - FOCAD_PER_CELL: {self.INIT_N_FOCAD_PER_CELL}")
             print(f" - FOCAD_COUNT: {focad_count}")
             print(f" - Search radius: {self.MAX_SEARCH_RADIUS_FOCAD}")
+            print(f" - Rest length (L0, min): {self.FOCAD_REST_LENGTH_0}, {self.FOCAD_MIN_REST_LENGTH}")
+            print(f" - Stiffness (k_fa, k_fa_max): {self.FOCAD_K_FA}, {self.FOCAD_K_FA_MAX}")
+            print(f" - Bond model: {'catch' if self.USE_CATCH_BOND else 'slip'}")
+            if self.USE_CATCH_BOND:
+                print(
+                    f"   · Catch params (catch_scale, slip_scale, F_catch, F_slip): "
+                    f"{self.CATCH_BOND_CATCH_SCALE}, {self.CATCH_BOND_SLIP_SCALE}, "
+                    f"{self.CATCH_BOND_F_CATCH}, {self.CATCH_BOND_F_SLIP}"
+                )
+            else:
+                print(f"   · Slip param F_c: {self.FOCAD_F_C}")
+            print(f" - Reinforcement (k_reinf, f_reinf, decay): {self.FOCAD_K_REINF}, {self.FOCAD_F_REINF}, {self.FOCAD_K_FA_DECAY}")
+            print(
+                f" - Polarity gains (kon_front, koff_front_red, koff_rear_gain): "
+                f"{self.FOCAD_POLARITY_KON_FRONT_GAIN}, {self.FOCAD_POLARITY_KOFF_FRONT_REDUCTION}, {self.FOCAD_POLARITY_KOFF_REAR_GAIN}"
+            )
+            print(f" - Mobility (durotaxis traction coupling): {self.FOCAD_MOBILITY_MU}")
+            print(f" - LINC coupling: {self.INCLUDE_LINC_COUPLING}")
+            if self.INCLUDE_LINC_COUPLING:
+                print(
+                    f"   · LINC (k, d, L0): {self.LINC_K_ELAST}, {self.LINC_D_DUMPING}, {self.LINC_REST_LENGTH}"
+                )
 
         print()
         print(f"TOTAL NUMBER OF AGENTS: {total_number_of_agents}")
@@ -2030,6 +2175,7 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         fibre_node_boundary_equilibrium_distance=ns.get("FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE"),
         max_search_radius_fnodes=ns.get("MAX_SEARCH_RADIUS_FNODES"),
         include_diffusion=ns.get("INCLUDE_DIFFUSION"),
+        heterogeneous_diffusion=ns.get("HETEROGENEOUS_DIFFUSION"),
         n_species=ns.get("N_SPECIES"),
         diffusion_coeff_multi=ns.get("DIFFUSION_COEFF_MULTI"),
         boundary_conc_init_multi=ns.get("BOUNDARY_CONC_INIT_MULTI"),
@@ -2068,14 +2214,32 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         init_n_focad_per_cell=ns.get("INIT_N_FOCAD_PER_CELL"),
         n_anchor_points=ns.get("N_ANCHOR_POINTS"),
         max_search_radius_focad=ns.get("MAX_SEARCH_RADIUS_FOCAD"),
+        max_focad_arm_length=ns.get("MAX_FOCAD_ARM_LENGTH"),
         focad_rest_length_0=ns.get("FOCAD_REST_LENGTH_0"),
+        focad_min_rest_length=ns.get("FOCAD_MIN_REST_LENGTH"),
         focad_k_fa=ns.get("FOCAD_K_FA"),
         focad_f_max=ns.get("FOCAD_F_MAX"),
         focad_v_c=ns.get("FOCAD_V_C"),
         focad_k_on=ns.get("FOCAD_K_ON"),
         focad_k_off_0=ns.get("FOCAD_K_OFF_0"),
         focad_f_c=ns.get("FOCAD_F_C"),
+        use_catch_bond=ns.get("USE_CATCH_BOND"),
+        catch_bond_catch_scale=ns.get("CATCH_BOND_CATCH_SCALE"),
+        catch_bond_slip_scale=ns.get("CATCH_BOND_SLIP_SCALE"),
+        catch_bond_f_catch=ns.get("CATCH_BOND_F_CATCH"),
+        catch_bond_f_slip=ns.get("CATCH_BOND_F_SLIP"),
         focad_k_reinf=ns.get("FOCAD_K_REINF"),
+        focad_f_reinf=ns.get("FOCAD_F_REINF"),
+        focad_k_fa_max=ns.get("FOCAD_K_FA_MAX"),
+        focad_k_fa_decay=ns.get("FOCAD_K_FA_DECAY"),
+        focad_polarity_kon_front_gain=ns.get("FOCAD_POLARITY_KON_FRONT_GAIN"),
+        focad_polarity_koff_front_reduction=ns.get("FOCAD_POLARITY_KOFF_FRONT_REDUCTION"),
+        focad_polarity_koff_rear_gain=ns.get("FOCAD_POLARITY_KOFF_REAR_GAIN"),
+        focad_mobility_mu=ns.get("FOCAD_MOBILITY_MU"),
+        include_linc_coupling=ns.get("INCLUDE_LINC_COUPLING"),
+        linc_k_elast=ns.get("LINC_K_ELAST"),
+        linc_d_dumping=ns.get("LINC_D_DUMPING"),
+        linc_rest_length=ns.get("LINC_REST_LENGTH"),
         nucleus_e=ns.get("NUCLEUS_E"),
         nucleus_nu=ns.get("NUCLEUS_NU"),
         nucleus_tau=ns.get("NUCLEUS_TAU"),

@@ -61,6 +61,11 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   const float FOCAD_F_REINF = FLAMEGPU->environment.getProperty<float>("FOCAD_F_REINF");
   const float FOCAD_K_FA_MAX = FLAMEGPU->environment.getProperty<float>("FOCAD_K_FA_MAX");
   const float FOCAD_K_FA_DECAY = FLAMEGPU->environment.getProperty<float>("FOCAD_K_FA_DECAY");
+  const uint32_t USE_CATCH_BOND = FLAMEGPU->environment.getProperty<uint32_t>("USE_CATCH_BOND");
+  const float CATCH_BOND_CATCH_SCALE = FLAMEGPU->environment.getProperty<float>("CATCH_BOND_CATCH_SCALE");
+  const float CATCH_BOND_SLIP_SCALE = FLAMEGPU->environment.getProperty<float>("CATCH_BOND_SLIP_SCALE");
+  const float CATCH_BOND_F_CATCH = FLAMEGPU->environment.getProperty<float>("CATCH_BOND_F_CATCH");
+  const float CATCH_BOND_F_SLIP = FLAMEGPU->environment.getProperty<float>("CATCH_BOND_F_SLIP");
   const uint32_t INCLUDE_LINC_COUPLING = FLAMEGPU->environment.getProperty<uint32_t>("INCLUDE_LINC_COUPLING");
   const float LINC_K_ELAST = FLAMEGPU->environment.getProperty<float>("LINC_K_ELAST");
   const float LINC_D_DUMPING = FLAMEGPU->environment.getProperty<float>("LINC_D_DUMPING");
@@ -329,12 +334,24 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   agent_fz = -Fmag * uz;
 
   // -------------------------
-  // 3b) Stochastic force-dependent detachment (slip bond)
-  //     koff(F)=k_off_0*exp(|F|/F_C), Poff=1-exp(-koff*dt)
+  // 3b) Stochastic force-dependent detachment
+  //     Slip:  koff(F)=k_off_0*exp(|F|/F_C)
+  //     Catch: koff(F)=k_off_0*(a_c*exp(-|F|/F_catch) + a_s*exp(|F|/F_slip))
   // -------------------------
   if (agent_attached) {
     const float fc_safe = fmaxf(agent_f_c, 1.0e-12f);
-    const float k_off = k_off_0_eff * expf(fabsf(Fmag) / fc_safe);
+    const float absF = fabsf(Fmag);
+    float k_off = 0.0f;
+    if (USE_CATCH_BOND) {
+      const float f_catch_safe = fmaxf(CATCH_BOND_F_CATCH, 1.0e-12f);
+      const float f_slip_safe = fmaxf(CATCH_BOND_F_SLIP, 1.0e-12f);
+      const float catch_term = fmaxf(0.0f, CATCH_BOND_CATCH_SCALE) * expf(-absF / f_catch_safe);
+      const float slip_term = fmaxf(0.0f, CATCH_BOND_SLIP_SCALE) * expf(absF / f_slip_safe);
+      k_off = k_off_0_eff * (catch_term + slip_term);
+    } else {
+      k_off = k_off_0_eff * expf(absF / fc_safe);
+    }
+    k_off = fmaxf(0.0f, k_off);
     const float p_off = 1.0f - expf(-k_off * TIME_STEP);
     const float r_off = FLAMEGPU->random.uniform<float>(0.0, 1.0f);
 

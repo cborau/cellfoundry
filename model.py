@@ -22,7 +22,6 @@ from helper_module import compute_expected_boundary_pos_from_corners, getRandomV
 # Add cell-fnode repulsion
 # Add FOCAD interaction with other FOCADs from other cells?
 # Include new FOCAD agent generation? (e.g. when a cell starts migrating, it generates new FOCAD agents at its leading edge, which then try to find fibres to attach to. When a FOCAD agent detaches, it can be removed from the simulation or moved back to the cell center to be reused later)
-# Add FOCAD growth and disassembly dynamics (e.g. increase k_fa with time when attached to a fibre, decrease it when not attached, add max lifetime, etc.)
 # Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
 # Add matrix degradation / deposition. Easy: Modifying FNODE properties, Complex: removing / adding FNODE agents (which would require updating the connectivity matrix)
 
@@ -231,6 +230,13 @@ FOCAD_K_ON = 5.0 # [1/s] TEMP(debug attach): high binding rate to force attachme
 FOCAD_K_OFF_0 = 0.0002 # [1/s] TEMP(debug attach): low baseline detachment to retain attachments. Reasonable baseline: 0.003 [1/s]
 FOCAD_F_C = 5.0 # [nN] Force scale controlling force sensitivity in koff(F) (catch/slip style). Typical range: ~2–10 nN. Sets how quickly detachment probability changes as traction builds.
 # Example (simple slip): koff(F)=K_OFF_0*exp(|F|/F_C) => faster turnover under high force.
+USE_CATCH_BOND = True  # If True, use a two-pathway catch+slip off-rate instead of pure slip-bond.
+CATCH_BOND_CATCH_SCALE = 4.0  # Multiplier of K_OFF_0 for catch branch (larger -> stronger stabilization window).
+CATCH_BOND_SLIP_SCALE = 0.2  # Multiplier of K_OFF_0 for slip branch (larger -> faster high-force failure).
+CATCH_BOND_F_CATCH = 2.0  # [nN] Force scale for catch branch exp(-|F|/F_catch).
+CATCH_BOND_F_SLIP = 4.0  # [nN] Force scale for slip branch exp(+|F|/F_slip).
+# Suggested starting point when USE_CATCH_BOND=True (to avoid over-stabilization):
+#   FOCAD_K_ON ~ 0.02-0.1 [1/s], FOCAD_K_OFF_0 ~ 0.001-0.01 [1/s], FOCAD_K_REINF <= 0.001 [1/s].
 FOCAD_K_REINF = 0.001 # [1/s] Reinforcement rate for adhesion strengthening. Timescale ~1/K_REINF = 1000 s (~17 min). E.g. something like k_fa <- k_fa + K_REINF * g(|F|) * DT, adhesions gradually stiffen over tens of minutes when they carry load.
 FOCAD_F_REINF = 1.0 # [nN] Force scale for reinforcement saturation: g(F)=F/(F+F_REINF).
 FOCAD_K_FA_MAX = 50.0 # [nN/um] Upper bound for reinforced adhesion stiffness.
@@ -569,6 +575,11 @@ env.newPropertyFloat("FOCAD_V_C", FOCAD_V_C)
 env.newPropertyFloat("FOCAD_K_ON", FOCAD_K_ON)
 env.newPropertyFloat("FOCAD_K_OFF_0", FOCAD_K_OFF_0)
 env.newPropertyFloat("FOCAD_F_C", FOCAD_F_C)
+env.newPropertyUInt("USE_CATCH_BOND", USE_CATCH_BOND)
+env.newPropertyFloat("CATCH_BOND_CATCH_SCALE", CATCH_BOND_CATCH_SCALE)
+env.newPropertyFloat("CATCH_BOND_SLIP_SCALE", CATCH_BOND_SLIP_SCALE)
+env.newPropertyFloat("CATCH_BOND_F_CATCH", CATCH_BOND_F_CATCH)
+env.newPropertyFloat("CATCH_BOND_F_SLIP", CATCH_BOND_F_SLIP)
 env.newPropertyFloat("FOCAD_K_REINF", FOCAD_K_REINF)
 env.newPropertyFloat("FOCAD_F_REINF", FOCAD_F_REINF)
 env.newPropertyFloat("FOCAD_K_FA_MAX", FOCAD_K_FA_MAX)
@@ -1027,18 +1038,18 @@ if INCLUDE_FOCAL_ADHESIONS:
     FOCAD_agent.newVariableFloat("k_off_0")
     FOCAD_agent.newVariableFloat("f_c")
     FOCAD_agent.newVariableFloat("k_reinf")
-    FOCAD_agent.newVariableFloat("f_mag", 0.0)
-    FOCAD_agent.newVariableInt("is_front", 0)
-    FOCAD_agent.newVariableInt("is_rear", 0)
-    FOCAD_agent.newVariableInt("attached_front", 0)
-    FOCAD_agent.newVariableInt("attached_rear", 0)
-    FOCAD_agent.newVariableFloat("frontness_front", 0.0)
-    FOCAD_agent.newVariableFloat("frontness_rear", 0.0)
-    FOCAD_agent.newVariableFloat("k_on_eff_front", 0.0)
-    FOCAD_agent.newVariableFloat("k_on_eff_rear", 0.0)
-    FOCAD_agent.newVariableFloat("k_off_0_eff_front", 0.0)
-    FOCAD_agent.newVariableFloat("k_off_0_eff_rear", 0.0)
-    FOCAD_agent.newVariableFloat("linc_prev_total_length", 0.0)
+    FOCAD_agent.newVariableFloat("f_mag", 0.0)  # |F_FA| traction magnitude [nN] at current step
+    FOCAD_agent.newVariableInt("is_front", 0)  # 1 if adhesion is classified in the cell front hemisphere, else 0
+    FOCAD_agent.newVariableInt("is_rear", 0)  # 1 if adhesion is classified in the cell rear hemisphere, else 0
+    FOCAD_agent.newVariableInt("attached_front", 0)  # 1 if attached and in front; diagnostic aggregate helper
+    FOCAD_agent.newVariableInt("attached_rear", 0)  # 1 if attached and in rear; diagnostic aggregate helper
+    FOCAD_agent.newVariableFloat("frontness_front", 0.0)  # frontness score used for front-biased kinetics (front branch) -> Polarity score p in [-1,1] from orientation vs anchor direction (cell center -> anchor)
+    FOCAD_agent.newVariableFloat("frontness_rear", 0.0)  # rearness/frontness-derived score used for rear-biased kinetics
+    FOCAD_agent.newVariableFloat("k_on_eff_front", 0.0)  # effective attachment rate used for front-side update [1/s]
+    FOCAD_agent.newVariableFloat("k_on_eff_rear", 0.0)  # effective attachment rate used for rear-side update [1/s]
+    FOCAD_agent.newVariableFloat("k_off_0_eff_front", 0.0)  # effective baseline detachment rate at front [1/s]
+    FOCAD_agent.newVariableFloat("k_off_0_eff_rear", 0.0)  # effective baseline detachment rate at rear [1/s]
+    FOCAD_agent.newVariableFloat("linc_prev_total_length", 0.0)  # previous-step LINC internal length state for BE Kelvin-Voigt-in-series solve [um]
 
 
     FOCAD_agent.newRTCFunctionFile("focad_bucket_location_data", focad_bucket_location_data_file).setMessageOutput("focad_bucket_location_message")
