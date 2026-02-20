@@ -37,12 +37,14 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   const float agent_ory = FLAMEGPU->getVariable<float>("ory");
   const float agent_orz = FLAMEGPU->getVariable<float>("orz");
 
-  const uint8_t agent_active = FLAMEGPU->getVariable<uint8_t>("active");     // actomyosin engaged
+  uint8_t agent_active = FLAMEGPU->getVariable<uint8_t>("active");     // actomyosin engaged
+  uint8_t agent_fa_state = FLAMEGPU->getVariable<uint8_t>("fa_state"); // [1: nascent] [2: mature] [3: disassembling]
   const float   agent_v_c = FLAMEGPU->getVariable<float>("v_c");          // um/s rest-length shortening
   int agent_attached  = FLAMEGPU->getVariable<int>("attached");
   int agent_fnode_id = FLAMEGPU->getVariable<int>("fnode_id");
 
   float agent_age = FLAMEGPU->getVariable<float>("age");
+  float agent_detached_age = FLAMEGPU->getVariable<float>("detached_age");
 
   // Outputs (force stored on FOCAD to be applied to FNODE later)
   float agent_fx = 0.0f;
@@ -61,6 +63,10 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   const float FOCAD_F_REINF = FLAMEGPU->environment.getProperty<float>("FOCAD_F_REINF");
   const float FOCAD_K_FA_MAX = FLAMEGPU->environment.getProperty<float>("FOCAD_K_FA_MAX");
   const float FOCAD_K_FA_DECAY = FLAMEGPU->environment.getProperty<float>("FOCAD_K_FA_DECAY");
+  const float FOCAD_F_MATURE = FLAMEGPU->environment.getProperty<float>("FOCAD_F_MATURE");
+  const float FOCAD_T_NASCENT_MAX = FLAMEGPU->environment.getProperty<float>("FOCAD_T_NASCENT_MAX");
+  const float FOCAD_T_DETACHED_GRACE = FLAMEGPU->environment.getProperty<float>("FOCAD_T_DETACHED_GRACE");
+  const float FOCAD_T_DISASSEMBLY = FLAMEGPU->environment.getProperty<float>("FOCAD_T_DISASSEMBLY");
   const uint32_t USE_CATCH_BOND = FLAMEGPU->environment.getProperty<uint32_t>("USE_CATCH_BOND");
   const float CATCH_BOND_CATCH_SCALE = FLAMEGPU->environment.getProperty<float>("CATCH_BOND_CATCH_SCALE");
   const float CATCH_BOND_SLIP_SCALE = FLAMEGPU->environment.getProperty<float>("CATCH_BOND_SLIP_SCALE");
@@ -106,6 +112,15 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   float agent_f_mag = 0.0f;
 
   // -------------------------
+  // 0) Update detached timer before interaction logic
+  // -------------------------
+  if (agent_attached) {
+    agent_detached_age = 0.0f;
+  } else {
+    agent_detached_age += TIME_STEP;
+  }
+
+  // -------------------------
   // 1) Attachment: if not attached, find closest FNODE in search radius
   // -------------------------
   float message_x = 0.0f;
@@ -119,13 +134,14 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   }
 
   if (agent_attached == 0) {
-    float best_r2 = MAX_SEARCH_RADIUS_FOCAD * MAX_SEARCH_RADIUS_FOCAD;
-    int   best_id = -1;
-    float best_x = 0.0f;
-    float best_y = 0.0f;
-    float best_z = 0.0f;
+    if (agent_fa_state != 3) {
+      float best_r2 = MAX_SEARCH_RADIUS_FOCAD * MAX_SEARCH_RADIUS_FOCAD;
+      int   best_id = -1;
+      float best_x = 0.0f;
+      float best_y = 0.0f;
+      float best_z = 0.0f;
 
-    for (const auto &message : FLAMEGPU->message_in(agent_x, agent_y, agent_z)) {
+      for (const auto &message : FLAMEGPU->message_in(agent_x, agent_y, agent_z)) {
       const float nx = message.getVariable<float>("x");
       const float ny = message.getVariable<float>("y");
       const float nz = message.getVariable<float>("z");
@@ -136,20 +152,37 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
       const float dz = nz - agent_z;
       const float r2 = dx*dx + dy*dy + dz*dz;
 
-      if (r2 < best_r2) {
-        best_r2 = r2;
-        best_id = nid;
-        best_x = nx;
-        best_y = ny;
-        best_z = nz;
+        if (r2 < best_r2) {
+          best_r2 = r2;
+          best_id = nid;
+          best_x = nx;
+          best_y = ny;
+          best_z = nz;
+        }
       }
-    }
+      }
 
-    if (best_id >= 0) {
-      const float p_on = 1.0f - expf(-k_on_eff * TIME_STEP);
-      const float r_on = FLAMEGPU->random.uniform<float>(0.0f, 1.0f);
-      if (r_on >= p_on) {
+      if (best_id >= 0) {
+        const float p_on = 1.0f - expf(-k_on_eff * TIME_STEP);
+        const float r_on = FLAMEGPU->random.uniform<float>(0.0f, 1.0f);
+        if (r_on >= p_on) {
+          // Detached turnover while failing to reattach
+          if (agent_fa_state == 1 && (agent_age + agent_detached_age) >= FOCAD_T_NASCENT_MAX) {
+            agent_fa_state = 3;
+          }
+          if (agent_detached_age >= FOCAD_T_DETACHED_GRACE) {
+            agent_fa_state = 3;
+          }
+          if (agent_fa_state == 3) {
+            agent_active = 0;
+          }
+          if (agent_fa_state == 3 && agent_detached_age >= FOCAD_T_DISASSEMBLY) {
+            return flamegpu::DEAD;
+          }
+
         FLAMEGPU->setVariable<int>("attached", agent_attached);
+        FLAMEGPU->setVariable<uint8_t>("active", agent_active);
+        FLAMEGPU->setVariable<uint8_t>("fa_state", agent_fa_state);
         FLAMEGPU->setVariable<float>("k_fa", agent_k_fa);
         FLAMEGPU->setVariable<float>("linc_prev_total_length", agent_linc_prev_total_length);
         FLAMEGPU->setVariable<float>("fx", 0.0f);
@@ -167,36 +200,53 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
         FLAMEGPU->setVariable<float>("k_off_0_eff_front", k_off_0_eff_front);
         FLAMEGPU->setVariable<float>("k_off_0_eff_rear", k_off_0_eff_rear);
         FLAMEGPU->setVariable<float>("age", agent_age);
+        FLAMEGPU->setVariable<float>("detached_age", agent_detached_age);
         return flamegpu::ALIVE;
-      }
+        }
 
-      // Attach to closest node
-      agent_attached = 1;
-      agent_fnode_id = best_id;
-      message_x = best_x;
-      message_y = best_y; 
-      message_z = best_z;
-      agent_x = message_x;
-      agent_y = message_y;
-      agent_z = message_z;
+        // Attach to closest node
+        agent_attached = 1;
+        agent_fnode_id = best_id;
+        message_x = best_x;
+        message_y = best_y; 
+        message_z = best_z;
+        agent_x = message_x;
+        agent_y = message_y;
+        agent_z = message_z;
 
-      // Initialize rest lengths so the adhesion starts unstrained even if yi is far from nucleus
-      const float dx0 = message_x - agent_x_i;
-      const float dy0 = message_y - agent_y_i;
-      const float dz0 = message_z - agent_z_i;
-      const float ell0 = sqrtf(dx0*dx0 + dy0*dy0 + dz0*dz0);
+        // Initialize rest lengths so the adhesion starts unstrained even if yi is far from nucleus
+        const float dx0 = message_x - agent_x_i;
+        const float dy0 = message_y - agent_y_i;
+        const float dz0 = message_z - agent_z_i;
+        const float ell0 = sqrtf(dx0*dx0 + dy0*dy0 + dz0*dz0);
 
-      agent_rest_length_0 = ell0;
-      agent_rest_length   = ell0;
-      agent_age = 0.0f;  // reset age on attachment
-      // Internal Kelvin-Voigt state: previous LINC element length L0^n.
-      // With rest_length initialized to ell0, zero-force split implies initial L0 ~= 0.
-      agent_linc_prev_total_length = 0.0f;
-      // printf("focad_fnode -- FOCAD %d (cell %d) attached to FNODE %d at distance %.4f um with initial rest length %.4f um\n", agent_focad_id, agent_cell_id, agent_fnode_id, sqrtf(best_r2), ell0);
-    } else {
-      // Not attached and no node found, keep force = 0 and exit early
-      // printf("focad_fnode -- FOCAD %d (cell %d) not attached, no FNODE found within search radius.\n", agent_focad_id, agent_cell_id);
+        agent_rest_length_0 = ell0;
+        agent_rest_length   = ell0;
+        agent_age = 0.0f;  // reset age on attachment
+        agent_detached_age = 0.0f;
+        // Internal Kelvin-Voigt state: previous LINC element length L0^n.
+        // With rest_length initialized to ell0, zero-force split implies initial L0 ~= 0.
+        agent_linc_prev_total_length = 0.0f;
+        // printf("focad_fnode -- FOCAD %d (cell %d) attached to FNODE %d at distance %.4f um with initial rest length %.4f um\n", agent_focad_id, agent_cell_id, agent_fnode_id, sqrtf(best_r2), ell0);
+      } else {
+        // Not attached and no node found, keep force = 0 and exit early
+        // printf("focad_fnode -- FOCAD %d (cell %d) not attached, no FNODE found within search radius.\n", agent_focad_id, agent_cell_id);
+        if (agent_fa_state == 1 && (agent_age + agent_detached_age) >= FOCAD_T_NASCENT_MAX) {
+          agent_fa_state = 3;
+        }
+        if (agent_detached_age >= FOCAD_T_DETACHED_GRACE) {
+          agent_fa_state = 3;
+        }
+        if (agent_fa_state == 3) {
+          agent_active = 0;
+        }
+        if (agent_fa_state == 3 && agent_detached_age >= FOCAD_T_DISASSEMBLY) {
+          return flamegpu::DEAD;
+        }
+
       FLAMEGPU->setVariable<int>("attached", agent_attached);
+      FLAMEGPU->setVariable<uint8_t>("active", agent_active);
+      FLAMEGPU->setVariable<uint8_t>("fa_state", agent_fa_state);
       FLAMEGPU->setVariable<float>("k_fa", agent_k_fa);
       FLAMEGPU->setVariable<float>("linc_prev_total_length", agent_linc_prev_total_length);
       FLAMEGPU->setVariable<float>("fx", 0.0f);
@@ -214,8 +264,15 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
       FLAMEGPU->setVariable<float>("k_off_0_eff_front", k_off_0_eff_front);
       FLAMEGPU->setVariable<float>("k_off_0_eff_rear", k_off_0_eff_rear);
       FLAMEGPU->setVariable<float>("age", agent_age);
+      FLAMEGPU->setVariable<float>("detached_age", agent_detached_age);
       // keep x,y,z as-is
       return flamegpu::ALIVE;
+      }
+    } else {
+      // Disassembling and detached: skip re-attachment attempts.
+      message_x = agent_x;
+      message_y = agent_y;
+      message_z = agent_z;
     }
   } else {
     // Already attached: FOCAD position == FNODE position.
@@ -374,6 +431,33 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   }
 
   // -------------------------
+  // 3c) FOCAD state machine (maturation + disassembly)
+  // -------------------------
+  if (agent_attached && agent_fa_state == 1 && Fmag >= FOCAD_F_MATURE) {
+    agent_fa_state = 2;
+  }
+
+  if (!agent_attached) {
+    if (agent_fa_state == 1 && (agent_age + agent_detached_age) >= FOCAD_T_NASCENT_MAX) {
+      agent_fa_state = 3;
+    }
+    if (agent_detached_age >= FOCAD_T_DETACHED_GRACE) {
+      agent_fa_state = 3;
+    }
+  }
+
+  if (agent_fa_state == 3) {
+    agent_active = 0;
+  }
+
+  // -------------------------
+  // 3d) FOCAD destruction rule
+  // -------------------------
+  if (agent_fa_state == 3 && agent_detached_age >= FOCAD_T_DISASSEMBLY) {
+    return flamegpu::DEAD;
+  }
+
+  // -------------------------
   // 4) Update bookkeeping
   // -------------------------
   if (agent_attached) {
@@ -393,6 +477,8 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   FLAMEGPU->setVariable<float>("linc_prev_total_length", agent_linc_prev_total_length);
 
   FLAMEGPU->setVariable<int>("attached", agent_attached);
+  FLAMEGPU->setVariable<uint8_t>("active", agent_active);
+  FLAMEGPU->setVariable<uint8_t>("fa_state", agent_fa_state);
   FLAMEGPU->setVariable<int>("fnode_id", agent_fnode_id);
 
   FLAMEGPU->setVariable<float>("fx", agent_fx);
@@ -412,6 +498,7 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   FLAMEGPU->setVariable<float>("k_off_0_eff_front", k_off_0_eff_front);
   FLAMEGPU->setVariable<float>("k_off_0_eff_rear", k_off_0_eff_rear);
   FLAMEGPU->setVariable<float>("age", agent_age);
+  FLAMEGPU->setVariable<float>("detached_age", agent_detached_age);
 
   return flamegpu::ALIVE;
 }

@@ -244,6 +244,10 @@ FOCAD_K_FA_DECAY = 0.0 # [1/s] Optional decay towards baseline FOCAD_K_FA when u
 FOCAD_POLARITY_KON_FRONT_GAIN = 2.0  # [-] Frontness gain for attachment probability (k_on).
 FOCAD_POLARITY_KOFF_FRONT_REDUCTION = 0.5  # [-] Fractional reduction of k_off_0 at the front.
 FOCAD_POLARITY_KOFF_REAR_GAIN = 1.0  # [-] Fractional increase of k_off_0 at the rear.
+FOCAD_F_MATURE = 1.0  # [nN] force threshold to transition nascent->mature
+FOCAD_T_NASCENT_MAX = 120.0  # [s] max nascent lifetime before disassembly if unresolved
+FOCAD_T_DETACHED_GRACE = 30.0  # [s] detached grace before disassembly
+FOCAD_T_DISASSEMBLY = 20.0  # [s] time spent detached in disassembling state before deletion
 # +====================================================================+
 # | LINC coupling between cell nucleus and FOCAD                       |
 # +====================================================================+
@@ -587,6 +591,10 @@ env.newPropertyFloat("FOCAD_K_FA_DECAY", FOCAD_K_FA_DECAY)
 env.newPropertyFloat("FOCAD_POLARITY_KON_FRONT_GAIN", FOCAD_POLARITY_KON_FRONT_GAIN)
 env.newPropertyFloat("FOCAD_POLARITY_KOFF_FRONT_REDUCTION", FOCAD_POLARITY_KOFF_FRONT_REDUCTION)
 env.newPropertyFloat("FOCAD_POLARITY_KOFF_REAR_GAIN", FOCAD_POLARITY_KOFF_REAR_GAIN)
+env.newPropertyFloat("FOCAD_F_MATURE", FOCAD_F_MATURE)
+env.newPropertyFloat("FOCAD_T_NASCENT_MAX", FOCAD_T_NASCENT_MAX)
+env.newPropertyFloat("FOCAD_T_DETACHED_GRACE", FOCAD_T_DETACHED_GRACE)
+env.newPropertyFloat("FOCAD_T_DISASSEMBLY", FOCAD_T_DISASSEMBLY)
 env.newPropertyUInt("INCLUDE_LINC_COUPLING", INCLUDE_LINC_COUPLING)
 env.newPropertyFloat("LINC_K_ELAST", LINC_K_ELAST)
 env.newPropertyFloat("LINC_D_DUMPING", LINC_D_DUMPING)
@@ -783,6 +791,7 @@ if INCLUDE_CELLS:
         FOCAD_bucket_location_message.newVariableFloat("v_c")
         FOCAD_bucket_location_message.newVariableUInt8("fa_state")
         FOCAD_bucket_location_message.newVariableFloat("age")
+        FOCAD_bucket_location_message.newVariableFloat("detached_age")
         FOCAD_bucket_location_message.newVariableFloat("k_on")
         FOCAD_bucket_location_message.newVariableFloat("k_off_0")
         FOCAD_bucket_location_message.newVariableFloat("f_c")
@@ -1034,6 +1043,7 @@ if INCLUDE_FOCAL_ADHESIONS:
     FOCAD_agent.newVariableFloat("v_c")
     FOCAD_agent.newVariableUInt8("fa_state")
     FOCAD_agent.newVariableFloat("age")
+    FOCAD_agent.newVariableFloat("detached_age", 0.0)
     FOCAD_agent.newVariableFloat("k_on")
     FOCAD_agent.newVariableFloat("k_off_0")
     FOCAD_agent.newVariableFloat("f_c")
@@ -1362,6 +1372,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableFloat("v_c", FOCAD_V_C)
                     instance.setVariableUInt8("fa_state", 1) # [1: nascent] [2: mature] [3: disassembling]
                     instance.setVariableFloat("age", 0.0)
+                    instance.setVariableFloat("detached_age", 0.0)
                     instance.setVariableFloat("k_on", FOCAD_K_ON)
                     instance.setVariableFloat("k_off_0", FOCAD_K_OFF_0)
                     instance.setVariableFloat("f_c", FOCAD_F_C)

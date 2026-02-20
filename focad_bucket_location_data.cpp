@@ -27,6 +27,7 @@ FLAMEGPU_AGENT_FUNCTION(focad_bucket_location_data, flamegpu::MessageNone, flame
   FLAMEGPU->message_out.setVariable<float>("v_c", FLAMEGPU->getVariable<float>("v_c"));
   FLAMEGPU->message_out.setVariable<uint8_t>("fa_state", FLAMEGPU->getVariable<uint8_t>("fa_state"));
   FLAMEGPU->message_out.setVariable<float>("age", FLAMEGPU->getVariable<float>("age"));
+  FLAMEGPU->message_out.setVariable<float>("detached_age", FLAMEGPU->getVariable<float>("detached_age"));
   FLAMEGPU->message_out.setVariable<float>("k_on", FLAMEGPU->getVariable<float>("k_on"));
   FLAMEGPU->message_out.setVariable<float>("k_off_0", FLAMEGPU->getVariable<float>("k_off_0"));
   FLAMEGPU->message_out.setVariable<float>("f_c", FLAMEGPU->getVariable<float>("f_c"));
