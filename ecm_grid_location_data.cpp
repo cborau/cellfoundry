@@ -1,4 +1,16 @@
-// exposes i,j,k position of the ECM grid agents
+/**
+ * ecm_grid_location_data
+ *
+ * Purpose:
+ *   Publish ECM voxel-centered state into the Array3D message for neighborhood reads.
+ *
+ * Inputs:
+ *   - ECM grid coordinates and linear index
+ *   - Mechanical and diffusion-related voxel variables
+ *
+ * Outputs:
+ *   - MessageArray3D entry indexed by (grid_i, grid_j, grid_k)
+ */
 FLAMEGPU_AGENT_FUNCTION(ecm_grid_location_data, flamegpu::MessageNone, flamegpu::MessageArray3D) {
   FLAMEGPU->message_out.setIndex(FLAMEGPU->getVariable<uint8_t>("grid_i"), FLAMEGPU->getVariable<uint8_t>("grid_j"), FLAMEGPU->getVariable<uint8_t>("grid_k"));
   FLAMEGPU->message_out.setVariable<int>("id", FLAMEGPU->getVariable<int>("id"));

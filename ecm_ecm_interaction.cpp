@@ -34,10 +34,26 @@ FLAMEGPU_DEVICE_FUNCTION float getAngleBetweenVec(const float x1, const float y1
   return angle; //in radians
 }
 
+/**
+ * ecm_ecm_interaction
+ *
+ * Purpose:
+ *   Execute ECM voxel-to-voxel mechanical coupling and multi-species diffusion
+ *   on the same neighborhood pass.
+ *
+ * Inputs:
+ *   - Array3D ECM neighborhood messages (positions, velocities, concentrations)
+ *   - Environment controls for diffusion mode, timestep, and mechanics
+ *
+ * Outputs:
+ *   - Updated ECM mechanical forces (fx, fy, fz)
+ *   - Updated concentration state C_sp and C_SP_MACRO entries
+ *
+ * Notes:
+ *   Includes the semi-implicit diffusion branch used to prevent unstable Euler
+ *   blow-up when diffusion CFL-like conditions are violated.
+ */
 FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu::MessageNone) {
-  // This function serves two main purposes:
-  // 1- Compute the forces between ECM agents and their neighbours, modelled as springs with elastic and dumping components. This is only used to adapt the grid distance when boundaries are moving. No foces are transmitted elsewhere. 
-  // 2- Compute the diffusion of species in the ECM, solving the diffusion equation with a finite difference scheme. Both standard Forward Euler and a semi-implicit (damped) update are implemented, as Forward Euler can become unstable for large time steps, small grid distances, or large diffusion coefficients.
   
   // Agent array variables
   const uint8_t N_SPECIES = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.

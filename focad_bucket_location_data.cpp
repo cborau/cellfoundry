@@ -1,3 +1,15 @@
+/**
+ * focad_bucket_location_data
+ *
+ * Purpose:
+ *   Publish full FOCAD state for bucket-keyed readers (mainly CELL/FOCAD coupling steps).
+ *
+ * Inputs:
+ *   - FOCAD identifiers, kinematics, mechanics, lifecycle flags and timers
+ *
+ * Outputs:
+ *   - MessageBucket keyed by cell_id with adhesion state and force data
+ */
 FLAMEGPU_AGENT_FUNCTION(focad_bucket_location_data, flamegpu::MessageNone, flamegpu::MessageBucket) {
   FLAMEGPU->message_out.setVariable<int>("id", FLAMEGPU->getVariable<int>("id"));
   FLAMEGPU->message_out.setVariable<int>("fnode_id", FLAMEGPU->getVariable<int>("fnode_id"));

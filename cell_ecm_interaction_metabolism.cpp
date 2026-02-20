@@ -1,4 +1,18 @@
-// defines interactions with ECM agents and computes metabolism of species
+/**
+ * cell_ecm_interaction_metabolism
+ *
+ * Purpose:
+ *   Couple each CELL to its nearest ECM voxel for species exchange and run
+ *   intracellular metabolic reactions with mass-consistent updates.
+ *
+ * Inputs:
+ *   - CELL position/volume and metabolic rate arrays
+ *   - ECM voxel concentration fields read from Array3D
+ *
+ * Outputs:
+ *   - Updated CELL species amounts/concentrations
+ *   - Atomic updates to ECM concentration macro-property (C_SP_MACRO)
+ */
 FLAMEGPU_AGENT_FUNCTION(cell_ecm_interaction_metabolism, flamegpu::MessageArray3D, flamegpu::MessageNone) {
   //Get agent variables (agent calling the function)
   int agent_id = FLAMEGPU->getVariable<int>("id");

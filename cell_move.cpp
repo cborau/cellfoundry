@@ -29,9 +29,20 @@ FLAMEGPU_DEVICE_FUNCTION void normalize3(float &x, float &y, float &z) {
   }
 }
 
-// -----------------------------------------------------------------------------
-// computes CELL agent movement
-// -----------------------------------------------------------------------------
+/**
+ * cell_move
+ *
+ * Purpose:
+ *   Update CELL velocity/orientation-driven migration by combining Brownian,
+ *   chemotactic, and durotactic components, then advance position.
+ *
+ * Inputs:
+ *   - CELL kinematic state, stress/strain eigensystem, chemotaxis sensitivities
+ *   - Environment controls for chemotaxis/durotaxis and timestep
+ *
+ * Outputs:
+ *   - Updated CELL position, velocity, orientation-aligned motion state
+ */
 FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone) {
   //Get agent variables (agent calling the function)
   int agent_id = FLAMEGPU->getVariable<int>("id");

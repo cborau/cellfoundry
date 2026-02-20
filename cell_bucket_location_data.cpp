@@ -1,3 +1,15 @@
+/**
+ * cell_bucket_location_data
+ *
+ * Purpose:
+ *   Export CELL state required by bucket-based readers (e.g., focal adhesion updates).
+ *
+ * Inputs:
+ *   - CELL variables: id, position, orientation, anchor arrays
+ *
+ * Outputs:
+ *   - MessageBucket keyed by CELL id containing anchor geometry and pose
+ */
 FLAMEGPU_AGENT_FUNCTION(cell_bucket_location_data, flamegpu::MessageNone, flamegpu::MessageBucket) {
   FLAMEGPU->message_out.setVariable<int>("id", FLAMEGPU->getVariable<int>("id"));
   FLAMEGPU->message_out.setVariable<float>("x", FLAMEGPU->getVariable<float>("x"));

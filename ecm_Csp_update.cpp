@@ -1,4 +1,20 @@
-// updates internal values by reading a Macro property, previously modified by CELL agents
+/**
+ * ecm_Csp_update
+ *
+ * Purpose:
+ *   Refresh each ECM voxel concentration array from the global macro property buffer.
+ *
+ * Inputs:
+ *   - Agent variable: grid_lin_id
+ *   - Environment macro property: C_SP_MACRO
+ *
+ * Outputs:
+ *   - Updated per-agent C_sp array
+ *
+ * Notes:
+ *   This is the synchronization bridge from macro-level concentration updates
+ *   back into per-agent concentration variables.
+ */
 FLAMEGPU_AGENT_FUNCTION(ecm_Csp_update, flamegpu::MessageNone, flamegpu::MessageNone) {
   
   //Get agent variables (agent calling the function)

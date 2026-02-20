@@ -1,3 +1,17 @@
+/**
+ * fnode_boundary_interaction
+ *
+ * Purpose:
+ *   Compute boundary reaction forces on FNODE agents near domain boundaries,
+ *   including optional elastic and damping contributions per face.
+ *
+ * Inputs:
+ *   - FNODE position/velocity
+ *   - Boundary coordinates, stiffness/damping, and movement settings
+ *
+ * Outputs:
+ *   - boundary_fx, boundary_fy, boundary_fz stored on each FNODE
+ */
 FLAMEGPU_AGENT_FUNCTION(fnode_boundary_interaction, flamegpu::MessageNone, flamegpu::MessageNone) {
   // Agent properties in local register
   int id = FLAMEGPU->getVariable<int>("id");

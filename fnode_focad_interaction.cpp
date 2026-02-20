@@ -1,15 +1,20 @@
-// Mirror function to focad_fnode_interaction.
-// Reads the force from the focal adhesion and adds it to the current FNODE.
-// The calling FNODE agent checks the closest FOCAD agent, and if that FOCAD:
-//   - has fnode_id == this FNODE id
-//   - is attached == 1
-//   - is active   == 1
-// then the FNODE adds the adhesion force (fx,fy,fz) stored in the FOCAD.
-//
-// Notes:
-// - This assumes focad_fnode_interaction has already stored (fx,fy,fz) in the FOCAD,
-//   where (fx,fy,fz) is the force that should be applied to the FNODE.
-// - The force direction is already "pull FNODE towards xi".
+/**
+ * fnode_focad_interaction
+ *
+ * Purpose:
+ *   Transfer precomputed FOCAD traction forces onto the corresponding FNODE.
+ *
+ * Inputs:
+ *   - Spatial FOCAD messages containing force and attachment status
+ *   - FNODE id/position/force state
+ *
+ * Outputs:
+ *   - Updated FNODE force components (fx, fy, fz)
+ *
+ * Notes:
+ *   This function is scheduled after focad_fnode_interaction, which computes
+ *   and stores the adhesion force on each FOCAD agent.
+ */
 FLAMEGPU_AGENT_FUNCTION(fnode_focad_interaction, flamegpu::MessageSpatial3D, flamegpu::MessageNone) {
   // -------------------------
   // Get FNODE agent variables (agent calling the function)

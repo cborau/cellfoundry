@@ -1,3 +1,10 @@
+/**
+ * boundPosition
+ *
+ * Purpose:
+ *   Clamp FNODE coordinates near boundaries and update clamp state flags based
+ *   on contact and configuration flags.
+ */
 FLAMEGPU_HOST_DEVICE_FUNCTION void boundPosition(int id, float &x, float &y, float &z, 
         uint8_t &cxpos, uint8_t &cxneg, uint8_t &cypos, uint8_t &cyneg, uint8_t &czpos, uint8_t &czneg, 
         const float bxpos, const float bxneg, const float bypos, const float byneg, const float bzpos, const float bzneg,
@@ -80,6 +87,20 @@ FLAMEGPU_HOST_DEVICE_FUNCTION void boundPosition(int id, float &x, float &y, flo
   //   printf("Boundposition DESPUES agent %d position %2.4f, %2.4f, %2.4f ->  boundary pos: [%2.4f, %2.4f, %2.4f, %2.4f, %2.4f, %2.4f], clamping: [%d, %d, %d, %d, %d, %d] \n", id, x, y, z, bxpos, bxneg, bypos, byneg, bzpos, bzneg, cxpos, cxneg, cypos, cyneg, czpos, czneg);
   //}
 }
+/**
+ * fnode_move
+ *
+ * Purpose:
+ *   Update FNODE positions/velocities under internal, boundary, and transmitted
+ *   forces while enforcing clamp and sliding boundary behavior.
+ *
+ * Inputs:
+ *   - FNODE force channels (network + boundary), current kinematics, clamp flags
+ *   - Boundary movement/clamping parameters from the environment
+ *
+ * Outputs:
+ *   - Updated node kinematics, clamp state, and boundary force contributions
+ */
 FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone) {
   
   int id = FLAMEGPU->getVariable<int>("id");

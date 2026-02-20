@@ -33,7 +33,19 @@ FLAMEGPU_DEVICE_FUNCTION float getAngleBetweenVec(const float x1, const float y1
   
   return angle; //in radians
 }
-// This function computes the interaction between cells
+/**
+ * fnode_fnode_spatial_interaction
+ *
+ * Purpose:
+ *   Apply short-range repulsion between nearby FNODE agents to prevent overlap.
+ *
+ * Inputs:
+ *   - Spatial FNODE neighbor messages
+ *   - Environment parameters: MAX_SEARCH_RADIUS_FNODES, FIBRE_NODE_REPULSION_K
+ *
+ * Outputs:
+ *   - Updated repulsive force components (fx, fy, fz) on each FNODE
+ */
 FLAMEGPU_AGENT_FUNCTION(fnode_fnode_spatial_interaction, flamegpu::MessageSpatial3D, flamegpu::MessageNone) {
   // Agent properties in local register
   int id = FLAMEGPU->getVariable<int>("id");

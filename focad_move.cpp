@@ -1,3 +1,18 @@
+/**
+ * focad_move
+ *
+ * Purpose:
+ *   Update focal adhesion positions by either following attached FNODEs or
+ *   executing bounded exploratory motion when detached/inactive.
+ *
+ * Inputs:
+ *   - FOCAD state: attachment flags, anchor position, velocity, fnode_id
+ *   - FNODE bucket messages (for attached movement)
+ *   - Domain and adhesion motion constraints from environment
+ *
+ * Outputs:
+ *   - Updated FOCAD position/velocity within boundary limits
+ */
 FLAMEGPU_AGENT_FUNCTION(focad_move, flamegpu::MessageBucket, flamegpu::MessageNone) {
   //Get agent variables (agent calling the function)
   int agent_id = FLAMEGPU->getVariable<int>("id");

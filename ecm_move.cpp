@@ -1,3 +1,10 @@
+/**
+ * boundPosition
+ *
+ * Purpose:
+ *   Clamp ECM agent coordinates against moving boundaries and update per-axis
+ *   clamp flags when contact conditions are met.
+ */
 FLAMEGPU_HOST_DEVICE_FUNCTION void boundPosition(int id, float &x, float &y, float &z, 
         uint8_t &cxpos, uint8_t &cxneg, uint8_t &cypos, uint8_t &cyneg, uint8_t &czpos, uint8_t &czneg, 
         const float bxpos, const float bxneg, const float bypos, const float byneg, const float bzpos, const float bzneg,
@@ -81,6 +88,19 @@ FLAMEGPU_HOST_DEVICE_FUNCTION void boundPosition(int id, float &x, float &y, flo
   //}
 }
 
+/**
+ * ecm_move
+ *
+ * Purpose:
+ *   Advance ECM agent motion from accumulated forces, then enforce boundary
+ *   clamping/sliding rules and boundary-driven kinematics.
+ *
+ * Inputs:
+ *   - ECM force, velocity, clamp state, and boundary/environment parameters
+ *
+ * Outputs:
+ *   - Updated position, velocity, clamp flags, and boundary force channels
+ */
 FLAMEGPU_AGENT_FUNCTION(ecm_move, flamegpu::MessageNone, flamegpu::MessageNone) {
   
   int id = FLAMEGPU->getVariable<int>("id");

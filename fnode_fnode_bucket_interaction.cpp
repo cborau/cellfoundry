@@ -51,8 +51,20 @@ FLAMEGPU_DEVICE_FUNCTION void getMaxForceDir(float &dx, float &dy, float &dz,flo
     dz = 1.0;
   }
 }
-
-
+/**
+ * fnode_fnode_bucket_interaction
+ *
+ * Purpose:
+ *   Compute spring-damper forces along explicit FNODE connectivity links and
+ *   accumulate network mechanical metrics (extension/compression/elastic energy).
+ *
+ * Inputs:
+ *   - Bucket messages keyed by linked node ids
+ *   - Connectivity arrays and per-link equilibrium distances
+ *
+ * Outputs:
+ *   - Updated FNODE force components and mechanical summary variables
+ */
 FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket, flamegpu::MessageNone) {
   // Current simulation step
   const unsigned int CURRENT_STEP = FLAMEGPU->getStepCounter();

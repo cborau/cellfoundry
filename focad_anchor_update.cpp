@@ -1,17 +1,20 @@
-// FOCAD agent updates its anchor point on the nucleus surface (xi) using bucket messages from CELL.
-// - The calling agent is FOCAD
-// - Receives MessageBucket from CELL agents
-// - Reads the bucket with index = agent_cell_id
-// - Updates FOCAD nucleus center (x_c,y_c,z_c) from the CELL
-// - Loops through all CELL anchors (a fixed-size list) and selects the closest anchor to the FOCAD position (x,y,z)
-// - Updates FOCAD (x_i,y_i,z_i) with that closest anchor position
-//
-// Assumptions / required message fields from CELL bucket message:
-// - "id" (CELL id, to sanity check)
-// - "x_c","y_c","z_c" (cell nucleus center)
-// - Anchor arrays, size = N_ANCHOR_POINTS (compile-time constant):
-//     "x_i","y_i","z_i" as variable arrays in the message
-//
+/**
+ * focad_anchor_update
+ *
+ * Purpose:
+ *   Re-anchor each FOCAD agent to a CELL nucleus anchor point read from
+ *   bucket messages keyed by cell_id.
+ *
+ * Inputs:
+ *   - MessageBucket from CELL containing nucleus pose and anchor arrays
+ *   - Current FOCAD position and cell association
+ *
+ * Outputs:
+ *   - Updated FOCAD nucleus center/orientation and selected anchor (x_i,y_i,z_i)
+ *
+ * Notes:
+ *   If no fixed anchor_id exists, the closest anchor point is selected each step.
+ */
 FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::MessageNone) {
   
   const uint8_t N_ANCHOR_POINTS = 100; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.

@@ -1,3 +1,15 @@
+/**
+ * focad_spatial_location_data
+ *
+ * Purpose:
+ *   Broadcast active adhesion position/force state for local spatial interaction queries.
+ *
+ * Inputs:
+ *   - FOCAD variables: id, x,y,z, fx,fy,fz, fnode_id, attached, active
+ *
+ * Outputs:
+ *   - MessageSpatial3D payload consumed by FNODE-side force transfer
+ */
 FLAMEGPU_AGENT_FUNCTION(focad_spatial_location_data, flamegpu::MessageNone, flamegpu::MessageSpatial3D) {
   FLAMEGPU->message_out.setVariable<int>("id", FLAMEGPU->getVariable<int>("id"));
   FLAMEGPU->message_out.setVariable<float>("x", FLAMEGPU->getVariable<float>("x"));
