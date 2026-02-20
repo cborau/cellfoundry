@@ -26,11 +26,12 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   // Mechanics parameters/state
   float  agent_rest_length_0 = FLAMEGPU->getVariable<float>("rest_length_0");  // L0 at creation
   float  agent_rest_length = FLAMEGPU->getVariable<float>("rest_length");    // L(t)
-  const float agent_k_fa = FLAMEGPU->getVariable<float>("k_fa");
+  float agent_k_fa = FLAMEGPU->getVariable<float>("k_fa");
   const float agent_f_max = FLAMEGPU->getVariable<float>("f_max");         // WARNING: 0 means "no cap" 
   const float agent_k_on = FLAMEGPU->getVariable<float>("k_on");
   const float agent_k_off_0 = FLAMEGPU->getVariable<float>("k_off_0");
   const float agent_f_c = FLAMEGPU->getVariable<float>("f_c");
+  const float agent_k_reinf = FLAMEGPU->getVariable<float>("k_reinf");
   const float agent_orx = FLAMEGPU->getVariable<float>("orx");
   const float agent_ory = FLAMEGPU->getVariable<float>("ory");
   const float agent_orz = FLAMEGPU->getVariable<float>("orz");
@@ -55,6 +56,10 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   const float FOCAD_POLARITY_KON_FRONT_GAIN = FLAMEGPU->environment.getProperty<float>("FOCAD_POLARITY_KON_FRONT_GAIN");
   const float FOCAD_POLARITY_KOFF_FRONT_REDUCTION = FLAMEGPU->environment.getProperty<float>("FOCAD_POLARITY_KOFF_FRONT_REDUCTION");
   const float FOCAD_POLARITY_KOFF_REAR_GAIN = FLAMEGPU->environment.getProperty<float>("FOCAD_POLARITY_KOFF_REAR_GAIN");
+  const float FOCAD_K_FA_0 = FLAMEGPU->environment.getProperty<float>("FOCAD_K_FA");
+  const float FOCAD_F_REINF = FLAMEGPU->environment.getProperty<float>("FOCAD_F_REINF");
+  const float FOCAD_K_FA_MAX = FLAMEGPU->environment.getProperty<float>("FOCAD_K_FA_MAX");
+  const float FOCAD_K_FA_DECAY = FLAMEGPU->environment.getProperty<float>("FOCAD_K_FA_DECAY");
 
   // Prevent L->0 forever
   const float FOCAD_MIN_REST_LENGTH = FLAMEGPU->environment.getProperty<float>("FOCAD_MIN_REST_LENGTH");
@@ -79,6 +84,15 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   k_off_scale = fmaxf(0.05f, k_off_scale);
   const float k_off_0_eff = agent_k_off_0 * k_off_scale;
 
+  const int is_front = frontness > 0.0f ? 1 : 0;
+  const int is_rear = frontness < 0.0f ? 1 : 0;
+  const float frontness_front = is_front ? frontness : 0.0f;
+  const float frontness_rear = is_rear ? frontness : 0.0f;
+  const float k_on_eff_front = is_front ? k_on_eff : 0.0f;
+  const float k_on_eff_rear = is_rear ? k_on_eff : 0.0f;
+  const float k_off_0_eff_front = is_front ? k_off_0_eff : 0.0f;
+  const float k_off_0_eff_rear = is_rear ? k_off_0_eff : 0.0f;
+
   float agent_f_mag = 0.0f;
 
   // -------------------------
@@ -87,6 +101,13 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   float message_x = 0.0f;
   float message_y = 0.0f;
   float message_z = 0.0f;   // FNODE position (to be determined)
+
+  // Optional decay towards baseline while detached
+  if (agent_attached == 0 && FOCAD_K_FA_DECAY > 0.0f) {
+    agent_k_fa = agent_k_fa - TIME_STEP * FOCAD_K_FA_DECAY * (agent_k_fa - FOCAD_K_FA_0);
+    agent_k_fa = fmaxf(FOCAD_K_FA_0, agent_k_fa);
+  }
+
   if (agent_attached == 0) {
     float best_r2 = MAX_SEARCH_RADIUS_FOCAD * MAX_SEARCH_RADIUS_FOCAD;
     int   best_id = -1;
@@ -119,10 +140,21 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
       const float r_on = FLAMEGPU->random.uniform<float>(0.0f, 1.0f);
       if (r_on >= p_on) {
         FLAMEGPU->setVariable<int>("attached", agent_attached);
+        FLAMEGPU->setVariable<float>("k_fa", agent_k_fa);
         FLAMEGPU->setVariable<float>("fx", 0.0f);
         FLAMEGPU->setVariable<float>("fy", 0.0f);
         FLAMEGPU->setVariable<float>("fz", 0.0f);
         FLAMEGPU->setVariable<float>("f_mag", 0.0f);
+        FLAMEGPU->setVariable<int>("is_front", is_front);
+        FLAMEGPU->setVariable<int>("is_rear", is_rear);
+        FLAMEGPU->setVariable<int>("attached_front", 0);
+        FLAMEGPU->setVariable<int>("attached_rear", 0);
+        FLAMEGPU->setVariable<float>("frontness_front", frontness_front);
+        FLAMEGPU->setVariable<float>("frontness_rear", frontness_rear);
+        FLAMEGPU->setVariable<float>("k_on_eff_front", k_on_eff_front);
+        FLAMEGPU->setVariable<float>("k_on_eff_rear", k_on_eff_rear);
+        FLAMEGPU->setVariable<float>("k_off_0_eff_front", k_off_0_eff_front);
+        FLAMEGPU->setVariable<float>("k_off_0_eff_rear", k_off_0_eff_rear);
         FLAMEGPU->setVariable<float>("age", agent_age);
         return flamegpu::ALIVE;
       }
@@ -151,10 +183,21 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
       // Not attached and no node found, keep force = 0 and exit early
       // printf("focad_fnode -- FOCAD %d (cell %d) not attached, no FNODE found within search radius.\n", agent_focad_id, agent_cell_id);
       FLAMEGPU->setVariable<int>("attached", agent_attached);
+      FLAMEGPU->setVariable<float>("k_fa", agent_k_fa);
       FLAMEGPU->setVariable<float>("fx", 0.0f);
       FLAMEGPU->setVariable<float>("fy", 0.0f);
       FLAMEGPU->setVariable<float>("fz", 0.0f);
       FLAMEGPU->setVariable<float>("f_mag", 0.0f);
+      FLAMEGPU->setVariable<int>("is_front", is_front);
+      FLAMEGPU->setVariable<int>("is_rear", is_rear);
+      FLAMEGPU->setVariable<int>("attached_front", 0);
+      FLAMEGPU->setVariable<int>("attached_rear", 0);
+      FLAMEGPU->setVariable<float>("frontness_front", frontness_front);
+      FLAMEGPU->setVariable<float>("frontness_rear", frontness_rear);
+      FLAMEGPU->setVariable<float>("k_on_eff_front", k_on_eff_front);
+      FLAMEGPU->setVariable<float>("k_on_eff_rear", k_on_eff_rear);
+      FLAMEGPU->setVariable<float>("k_off_0_eff_front", k_off_0_eff_front);
+      FLAMEGPU->setVariable<float>("k_off_0_eff_rear", k_off_0_eff_rear);
       FLAMEGPU->setVariable<float>("age", agent_age);
       // keep x,y,z as-is
       return flamegpu::ALIVE;
@@ -202,6 +245,13 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   }
   agent_f_mag = Fmag;
 
+  // Phase 4: load-dependent reinforcement (bounded)
+  if (agent_attached && agent_k_reinf > 0.0f && FOCAD_K_FA_MAX > 0.0f) {
+    const float f_reinf_safe = fmaxf(FOCAD_F_REINF, 1.0e-12f);
+    const float gF = Fmag / (Fmag + f_reinf_safe);
+    agent_k_fa = fminf(FOCAD_K_FA_MAX, agent_k_fa + TIME_STEP * agent_k_reinf * gF);
+  }
+
   // Direction from xi -> message_i (avoid divide by 0)
   float inv_ell = 0.0f;
   if (ell > 1e-12f) inv_ell = 1.0f / ell;
@@ -239,6 +289,12 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
     }
   }
 
+  // Optional post-detachment decay towards baseline
+  if (agent_attached == 0 && FOCAD_K_FA_DECAY > 0.0f) {
+    agent_k_fa = agent_k_fa - TIME_STEP * FOCAD_K_FA_DECAY * (agent_k_fa - FOCAD_K_FA_0);
+    agent_k_fa = fmaxf(FOCAD_K_FA_0, agent_k_fa);
+  }
+
   // -------------------------
   // 4) Update bookkeeping
   // -------------------------
@@ -255,6 +311,7 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
 
   FLAMEGPU->setVariable<float>("rest_length_0", agent_rest_length_0);
   FLAMEGPU->setVariable<float>("rest_length", agent_rest_length);
+  FLAMEGPU->setVariable<float>("k_fa", agent_k_fa);
 
   FLAMEGPU->setVariable<int>("attached", agent_attached);
   FLAMEGPU->setVariable<int>("fnode_id", agent_fnode_id);
@@ -265,6 +322,16 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   // printf("focad_fnode -- FOCAD %d (cell %d) force on FNODE %d: (%.3f, %.3f, %.3f) nN\n", agent_focad_id, agent_cell_id, agent_fnode_id, agent_fx, agent_fy, agent_fz);
 
   FLAMEGPU->setVariable<float>("f_mag", agent_f_mag);
+  FLAMEGPU->setVariable<int>("is_front", is_front);
+  FLAMEGPU->setVariable<int>("is_rear", is_rear);
+  FLAMEGPU->setVariable<int>("attached_front", (agent_attached && is_front) ? 1 : 0);
+  FLAMEGPU->setVariable<int>("attached_rear", (agent_attached && is_rear) ? 1 : 0);
+  FLAMEGPU->setVariable<float>("frontness_front", frontness_front);
+  FLAMEGPU->setVariable<float>("frontness_rear", frontness_rear);
+  FLAMEGPU->setVariable<float>("k_on_eff_front", k_on_eff_front);
+  FLAMEGPU->setVariable<float>("k_on_eff_rear", k_on_eff_rear);
+  FLAMEGPU->setVariable<float>("k_off_0_eff_front", k_off_0_eff_front);
+  FLAMEGPU->setVariable<float>("k_off_0_eff_rear", k_off_0_eff_rear);
   FLAMEGPU->setVariable<float>("age", agent_age);
 
   return flamegpu::ALIVE;

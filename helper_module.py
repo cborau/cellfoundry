@@ -1201,27 +1201,27 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
                 file.write("SCALARS eps_norm float 1\n")
                 file.write("LOOKUP_TABLE default\n")
                 for v in eps_norm:
-                    file.write("{:.6e}\n".format(v))
+                    file.write("{:.6f}\n".format(v))
 
                 file.write("SCALARS sig_norm float 1\n")
                 file.write("LOOKUP_TABLE default\n")
                 for v in sig_norm:
-                    file.write("{:.6e}\n".format(v))
+                    file.write("{:.6f}\n".format(v))
 
                 file.write("SCALARS sig_hydro float 1\n")
                 file.write("LOOKUP_TABLE default\n")
                 for v in sig_hydro:
-                    file.write("{:.6e}\n".format(v))
+                    file.write("{:.6f}\n".format(v))
 
                 file.write("SCALARS sig_dev_norm float 1\n")
                 file.write("LOOKUP_TABLE default\n")
                 for v in sig_dev_norm:
-                    file.write("{:.6e}\n".format(v))
+                    file.write("{:.6f}\n".format(v))
 
                 file.write("SCALARS eps_max float 1\n")
                 file.write("LOOKUP_TABLE default\n")
                 for v in eps_max:
-                    file.write("{:.6e}\n".format(v))
+                    file.write("{:.6f}\n".format(v))
 
                 file.write("SCALARS ar_proxy float 1\n")
                 file.write("LOOKUP_TABLE default\n")

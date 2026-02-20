@@ -232,6 +232,9 @@ FOCAD_K_OFF_0 = 0.0002 # [1/s] TEMP(debug attach): low baseline detachment to re
 FOCAD_F_C = 5.0 # [nN] Force scale controlling force sensitivity in koff(F) (catch/slip style). Typical range: ~2–10 nN. Sets how quickly detachment probability changes as traction builds.
 # Example (simple slip): koff(F)=K_OFF_0*exp(|F|/F_C) => faster turnover under high force.
 FOCAD_K_REINF = 0.001 # [1/s] Reinforcement rate for adhesion strengthening. Timescale ~1/K_REINF = 1000 s (~17 min). E.g. something like k_fa <- k_fa + K_REINF * g(|F|) * DT, adhesions gradually stiffen over tens of minutes when they carry load.
+FOCAD_F_REINF = 1.0 # [nN] Force scale for reinforcement saturation: g(F)=F/(F+F_REINF).
+FOCAD_K_FA_MAX = 50.0 # [nN/um] Upper bound for reinforced adhesion stiffness.
+FOCAD_K_FA_DECAY = 0.0 # [1/s] Optional decay towards baseline FOCAD_K_FA when unloaded/detached. 0 disables decay.
 FOCAD_POLARITY_KON_FRONT_GAIN = 2.0  # [-] Frontness gain for attachment probability (k_on).
 FOCAD_POLARITY_KOFF_FRONT_REDUCTION = 0.5  # [-] Fractional reduction of k_off_0 at the front.
 FOCAD_POLARITY_KOFF_REAR_GAIN = 1.0  # [-] Fractional increase of k_off_0 at the rear.
@@ -560,6 +563,9 @@ env.newPropertyFloat("FOCAD_K_ON", FOCAD_K_ON)
 env.newPropertyFloat("FOCAD_K_OFF_0", FOCAD_K_OFF_0)
 env.newPropertyFloat("FOCAD_F_C", FOCAD_F_C)
 env.newPropertyFloat("FOCAD_K_REINF", FOCAD_K_REINF)
+env.newPropertyFloat("FOCAD_F_REINF", FOCAD_F_REINF)
+env.newPropertyFloat("FOCAD_K_FA_MAX", FOCAD_K_FA_MAX)
+env.newPropertyFloat("FOCAD_K_FA_DECAY", FOCAD_K_FA_DECAY)
 env.newPropertyFloat("FOCAD_POLARITY_KON_FRONT_GAIN", FOCAD_POLARITY_KON_FRONT_GAIN)
 env.newPropertyFloat("FOCAD_POLARITY_KOFF_FRONT_REDUCTION", FOCAD_POLARITY_KOFF_FRONT_REDUCTION)
 env.newPropertyFloat("FOCAD_POLARITY_KOFF_REAR_GAIN", FOCAD_POLARITY_KOFF_REAR_GAIN)
@@ -1011,6 +1017,16 @@ if INCLUDE_FOCAL_ADHESIONS:
     FOCAD_agent.newVariableFloat("f_c")
     FOCAD_agent.newVariableFloat("k_reinf")
     FOCAD_agent.newVariableFloat("f_mag", 0.0)
+    FOCAD_agent.newVariableInt("is_front", 0)
+    FOCAD_agent.newVariableInt("is_rear", 0)
+    FOCAD_agent.newVariableInt("attached_front", 0)
+    FOCAD_agent.newVariableInt("attached_rear", 0)
+    FOCAD_agent.newVariableFloat("frontness_front", 0.0)
+    FOCAD_agent.newVariableFloat("frontness_rear", 0.0)
+    FOCAD_agent.newVariableFloat("k_on_eff_front", 0.0)
+    FOCAD_agent.newVariableFloat("k_on_eff_rear", 0.0)
+    FOCAD_agent.newVariableFloat("k_off_0_eff_front", 0.0)
+    FOCAD_agent.newVariableFloat("k_off_0_eff_rear", 0.0)
 
 
     FOCAD_agent.newRTCFunctionFile("focad_bucket_location_data", focad_bucket_location_data_file).setMessageOutput("focad_bucket_location_message")
@@ -1328,6 +1344,16 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableFloat("f_c", FOCAD_F_C)
                     instance.setVariableFloat("k_reinf", FOCAD_K_REINF)
                     instance.setVariableFloat("f_mag", 0.0)
+                    instance.setVariableInt("is_front", 0)
+                    instance.setVariableInt("is_rear", 0)
+                    instance.setVariableInt("attached_front", 0)
+                    instance.setVariableInt("attached_rear", 0)
+                    instance.setVariableFloat("frontness_front", 0.0)
+                    instance.setVariableFloat("frontness_rear", 0.0)
+                    instance.setVariableFloat("k_on_eff_front", 0.0)
+                    instance.setVariableFloat("k_on_eff_rear", 0.0)
+                    instance.setVariableFloat("k_off_0_eff_front", 0.0)
+                    instance.setVariableFloat("k_off_0_eff_rear", 0.0)
             
             FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
 
@@ -1787,7 +1813,17 @@ if INCLUDE_FOCAL_ADHESIONS:
     focad_agent_log = logging_config.agent("FOCAD")
     focad_agent_log.logCount()
     focad_agent_log.logSumInt("attached")
+    focad_agent_log.logSumInt("is_front")
+    focad_agent_log.logSumInt("is_rear")
+    focad_agent_log.logSumInt("attached_front")
+    focad_agent_log.logSumInt("attached_rear")
     focad_agent_log.logSumFloat("f_mag")
+    focad_agent_log.logSumFloat("frontness_front")
+    focad_agent_log.logSumFloat("frontness_rear")
+    focad_agent_log.logSumFloat("k_on_eff_front")
+    focad_agent_log.logSumFloat("k_on_eff_rear")
+    focad_agent_log.logSumFloat("k_off_0_eff_front")
+    focad_agent_log.logSumFloat("k_off_0_eff_rear")
 
 step_log = pyflamegpu.StepLoggingConfig(logging_config)
 step_log.setFrequency(1) # if 1, data will be logged every step
@@ -1955,6 +1991,7 @@ def manageLogs(steps, is_ensemble, idx):
     BFORCE_OVER_TIME = []
     BFORCE_SHEAR_OVER_TIME = []
     FOCAD_METRICS_OVER_TIME = []
+    FOCAD_POLARITY_METRICS_OVER_TIME = []
 
     if INCLUDE_FIBRE_NETWORK:
         for step in steps:
@@ -1998,6 +2035,23 @@ def manageLogs(steps, is_ensemble, idx):
 
     if INCLUDE_FOCAL_ADHESIONS:
         FMET = make_dataclass("FMET", [("attached", float), ("total", float), ("attached_ratio", float), ("mean_f_mag", float)])
+        FPOL = make_dataclass(
+            "FPOL",
+            [
+                ("front_count", float),
+                ("rear_count", float),
+                ("front_attached", float),
+                ("rear_attached", float),
+                ("front_attached_ratio", float),
+                ("rear_attached_ratio", float),
+                ("frontness_front_mean", float),
+                ("frontness_rear_mean", float),
+                ("k_on_eff_front_mean", float),
+                ("k_on_eff_rear_mean", float),
+                ("k_off_0_eff_front_mean", float),
+                ("k_off_0_eff_rear_mean", float),
+            ],
+        )
         for step in steps:
             stepcount = step.getStepCount()
             if stepcount % SAVE_EVERY_N_STEPS == 0 or stepcount == 1:
@@ -2012,6 +2066,51 @@ def manageLogs(steps, is_ensemble, idx):
                     FOCAD_METRICS_OVER_TIME = step_fmet
                 else:
                     FOCAD_METRICS_OVER_TIME = pd.concat([FOCAD_METRICS_OVER_TIME, step_fmet], ignore_index=True)
+
+                front_count = focad_agents.getSumInt("is_front")
+                rear_count = focad_agents.getSumInt("is_rear")
+                front_attached = focad_agents.getSumInt("attached_front")
+                rear_attached = focad_agents.getSumInt("attached_rear")
+
+                front_attached_ratio = (front_attached / front_count) if front_count > 0 else 0.0
+                rear_attached_ratio = (rear_attached / rear_count) if rear_count > 0 else 0.0
+
+                frontness_front_sum = focad_agents.getSumFloat("frontness_front")
+                frontness_rear_sum = focad_agents.getSumFloat("frontness_rear")
+
+                k_on_eff_front_sum = focad_agents.getSumFloat("k_on_eff_front")
+                k_on_eff_rear_sum = focad_agents.getSumFloat("k_on_eff_rear")
+
+                k_off_0_eff_front_sum = focad_agents.getSumFloat("k_off_0_eff_front")
+                k_off_0_eff_rear_sum = focad_agents.getSumFloat("k_off_0_eff_rear")
+
+                frontness_front_mean = (frontness_front_sum / front_count) if front_count > 0 else 0.0
+                frontness_rear_mean = (frontness_rear_sum / rear_count) if rear_count > 0 else 0.0
+                k_on_eff_front_mean = (k_on_eff_front_sum / front_count) if front_count > 0 else 0.0
+                k_on_eff_rear_mean = (k_on_eff_rear_sum / rear_count) if rear_count > 0 else 0.0
+                k_off_0_eff_front_mean = (k_off_0_eff_front_sum / front_count) if front_count > 0 else 0.0
+                k_off_0_eff_rear_mean = (k_off_0_eff_rear_sum / rear_count) if rear_count > 0 else 0.0
+
+                step_fpol = pd.DataFrame([
+                    FPOL(
+                        front_count,
+                        rear_count,
+                        front_attached,
+                        rear_attached,
+                        front_attached_ratio,
+                        rear_attached_ratio,
+                        frontness_front_mean,
+                        frontness_rear_mean,
+                        k_on_eff_front_mean,
+                        k_on_eff_rear_mean,
+                        k_off_0_eff_front_mean,
+                        k_off_0_eff_rear_mean,
+                    )
+                ])
+                if len(FOCAD_POLARITY_METRICS_OVER_TIME) == 0:
+                    FOCAD_POLARITY_METRICS_OVER_TIME = step_fpol
+                else:
+                    FOCAD_POLARITY_METRICS_OVER_TIME = pd.concat([FOCAD_POLARITY_METRICS_OVER_TIME, step_fpol], ignore_index=True)
     if not is_ensemble:
         print()
         print("============================")
@@ -2039,6 +2138,11 @@ def manageLogs(steps, is_ensemble, idx):
             print("FA METRICS OVER TIME")
             print(FOCAD_METRICS_OVER_TIME)
             print()
+        if INCLUDE_FOCAL_ADHESIONS and len(FOCAD_POLARITY_METRICS_OVER_TIME) > 0:
+            print("============================")
+            print("FA POLARITY METRICS OVER TIME")
+            print(FOCAD_POLARITY_METRICS_OVER_TIME)
+            print()
     # Saving pickle
     if SAVE_PICKLE:
         file_name = f'output_data_{idx}.pickle'
@@ -2048,6 +2152,7 @@ def manageLogs(steps, is_ensemble, idx):
                          'BFORCE_OVER_TIME': BFORCE_OVER_TIME,
                          'BFORCE_SHEAR_OVER_TIME': BFORCE_SHEAR_OVER_TIME,
                          'FOCAD_METRICS_OVER_TIME': FOCAD_METRICS_OVER_TIME,
+                         'FOCAD_POLARITY_METRICS_OVER_TIME': FOCAD_POLARITY_METRICS_OVER_TIME,
                          'POISSON_RATIO_OVER_TIME': POISSON_RATIO_OVER_TIME,
                          'OSCILLATORY_STRAIN_OVER_TIME': OSCILLATORY_STRAIN_OVER_TIME,
                          'MODEL_CONFIG': MODEL_CONFIG,
