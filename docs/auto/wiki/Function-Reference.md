@@ -6,9 +6,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 bcorner_move.cpp
 
-### 🔹 [bcorner_move](../../../bcorner_move.cpp#L17)
+### 🔹 [bcorner_move](https://github.com/cborau/cellfoundry/blob/master/bcorner_move.cpp)
 **Type:** `agent`  
-**Source:** [Open bcorner_move.cpp:17](../../../bcorner_move.cpp#L17)
+**Source:** [Open bcorner_move.cpp](https://github.com/cborau/cellfoundry/blob/master/bcorner_move.cpp)
 
 - 🔸 **Purpose:** Synchronize each BCORNER agent position with the current domain boundary coordinates.
 - ⬇️ **Inputs:**
@@ -22,9 +22,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 bcorner_output_location_data.cpp
 
-### 🔹 [bcorner_output_location_data](../../../bcorner_output_location_data.cpp#L13)
+### 🔹 [bcorner_output_location_data](https://github.com/cborau/cellfoundry/blob/master/bcorner_output_location_data.cpp)
 **Type:** `agent`  
-**Source:** [Open bcorner_output_location_data.cpp:13](../../../bcorner_output_location_data.cpp#L13)
+**Source:** [Open bcorner_output_location_data.cpp](https://github.com/cborau/cellfoundry/blob/master/bcorner_output_location_data.cpp)
 
 - 🔸 **Purpose:** Publish BCORNER identifiers and coordinates to spatial messages.
 - ⬇️ **Inputs:**
@@ -35,9 +35,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 cell_bucket_location_data.cpp
 
-### 🔹 [cell_bucket_location_data](../../../cell_bucket_location_data.cpp#L13)
+### 🔹 [cell_bucket_location_data](https://github.com/cborau/cellfoundry/blob/master/cell_bucket_location_data.cpp)
 **Type:** `agent`  
-**Source:** [Open cell_bucket_location_data.cpp:13](../../../cell_bucket_location_data.cpp#L13)
+**Source:** [Open cell_bucket_location_data.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_bucket_location_data.cpp)
 
 - 🔸 **Purpose:** Export CELL state required by bucket-based readers (e.g., focal adhesion updates).
 - ⬇️ **Inputs:**
@@ -48,9 +48,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 cell_ecm_interaction_metabolism.cpp
 
-### 🔹 [cell_ecm_interaction_metabolism](../../../cell_ecm_interaction_metabolism.cpp#L16)
+### 🔹 [cell_ecm_interaction_metabolism](https://github.com/cborau/cellfoundry/blob/master/cell_ecm_interaction_metabolism.cpp)
 **Type:** `agent`  
-**Source:** [Open cell_ecm_interaction_metabolism.cpp:16](../../../cell_ecm_interaction_metabolism.cpp#L16)
+**Source:** [Open cell_ecm_interaction_metabolism.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_ecm_interaction_metabolism.cpp)
 
 - 🔸 **Purpose:** Couple each CELL to its nearest ECM voxel for species exchange and run intracellular metabolic reactions with mass-consistent updates.
 - ⬇️ **Inputs:**
@@ -63,9 +63,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 cell_move.cpp
 
-### 🔹 [cell_move](../../../cell_move.cpp#L46)
+### 🔹 [cell_move](https://github.com/cborau/cellfoundry/blob/master/cell_move.cpp)
 **Type:** `agent`  
-**Source:** [Open cell_move.cpp:46](../../../cell_move.cpp#L46)
+**Source:** [Open cell_move.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_move.cpp)
 
 - 🔸 **Purpose:** Update CELL velocity/orientation-driven migration by combining Brownian, chemotactic, and durotactic components, then advance position.
 - ⬇️ **Inputs:**
@@ -77,9 +77,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 cell_spatial_location_data.cpp
 
-### 🔹 [cell_spatial_location_data](../../../cell_spatial_location_data.cpp#L14)
+### 🔹 [cell_spatial_location_data](https://github.com/cborau/cellfoundry/blob/master/cell_spatial_location_data.cpp)
 **Type:** `agent`  
-**Source:** [Open cell_spatial_location_data.cpp:14](../../../cell_spatial_location_data.cpp#L14)
+**Source:** [Open cell_spatial_location_data.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_spatial_location_data.cpp)
 
 - 🔸 **Purpose:** Broadcast CELL kinematics and metabolic parameters over a spatial message list.
 - ⬇️ **Inputs:**
@@ -91,44 +91,44 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 cell_update_stress.cpp
 
-### 🔹 [clampf](../../../cell_update_stress.cpp#L6)
+### 🔹 [clampf](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
 **Type:** `helper`  
-**Source:** [Open cell_update_stress.cpp:6](../../../cell_update_stress.cpp#L6)
+**Source:** [Open cell_update_stress.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
 
 - 🔸 **Purpose:** Clamps a scalar to the closed interval [lo, hi].
 - - -
 
-### 🔹 [safeInv](../../../cell_update_stress.cpp#L16)
+### 🔹 [safeInv](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
 **Type:** `helper`  
-**Source:** [Open cell_update_stress.cpp:16](../../../cell_update_stress.cpp#L16)
+**Source:** [Open cell_update_stress.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
 
 - 🔸 **Purpose:** Returns 1/x when |x| > eps, otherwise returns 0.
 - - -
 
-### 🔹 [normalize3](../../../cell_update_stress.cpp#L25)
+### 🔹 [normalize3](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
 **Type:** `helper`  
-**Source:** [Open cell_update_stress.cpp:25](../../../cell_update_stress.cpp#L25)
+**Source:** [Open cell_update_stress.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
 
 - 🔸 **Purpose:** Normalizes a 3D vector in-place; if near-zero, sets a default unit vector.
 - - -
 
-### 🔹 [swapf](../../../cell_update_stress.cpp#L44)
+### 🔹 [swapf](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
 **Type:** `helper`  
-**Source:** [Open cell_update_stress.cpp:44](../../../cell_update_stress.cpp#L44)
+**Source:** [Open cell_update_stress.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
 
 - 🔸 **Purpose:** Swaps two floats by reference.
 - - -
 
-### 🔹 [swap_col3](../../../cell_update_stress.cpp#L55)
+### 🔹 [swap_col3](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
 **Type:** `helper`  
-**Source:** [Open cell_update_stress.cpp:55](../../../cell_update_stress.cpp#L55)
+**Source:** [Open cell_update_stress.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
 
 - 🔸 **Purpose:** Swaps two columns of a 3x3 matrix (used for eigenvector column reordering).
 - - -
 
-### 🔹 [eig_sym_3x3](../../../cell_update_stress.cpp#L78)
+### 🔹 [eig_sym_3x3](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
 **Type:** `helper`  
-**Source:** [Open cell_update_stress.cpp:78](../../../cell_update_stress.cpp#L78)
+**Source:** [Open cell_update_stress.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
 
 - 🔸 **Purpose:** Jacobi eigendecomposition for a real symmetric 3x3 matrix:
 - ⬆️ **Outputs:**
@@ -136,18 +136,18 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - Corresponding eigenvectors (v1, v2, v3)
 - - -
 
-### 🔹 [cell_update_stress](../../../cell_update_stress.cpp#L198)
+### 🔹 [cell_update_stress](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
 **Type:** `agent`  
-**Source:** [Open cell_update_stress.cpp:198](../../../cell_update_stress.cpp#L198)
+**Source:** [Open cell_update_stress.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
 
 - 🔸 **Purpose:** Reads all focal adhesion (FOCAD) messages in a bucket keyed by this cell id.
 - - -
 
 ## 📄 ecm_Csp_update.cpp
 
-### 🔹 [ecm_Csp_update](../../../ecm_Csp_update.cpp#L18)
+### 🔹 [ecm_Csp_update](https://github.com/cborau/cellfoundry/blob/master/ecm_Csp_update.cpp)
 **Type:** `agent`  
-**Source:** [Open ecm_Csp_update.cpp:18](../../../ecm_Csp_update.cpp#L18)
+**Source:** [Open ecm_Csp_update.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_Csp_update.cpp)
 
 - 🔸 **Purpose:** Refresh each ECM voxel concentration array from the global macro property buffer.
 - ⬇️ **Inputs:**
@@ -162,9 +162,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 ecm_Dsp_update.cpp
 
-### 🔹 [ecm_Dsp_update](../../../ecm_Dsp_update.cpp#L33)
+### 🔹 [ecm_Dsp_update](https://github.com/cborau/cellfoundry/blob/master/ecm_Dsp_update.cpp)
 **Type:** `agent`  
-**Source:** [Open ecm_Dsp_update.cpp:33](../../../ecm_Dsp_update.cpp#L33)
+**Source:** [Open ecm_Dsp_update.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_Dsp_update.cpp)
 
 - 🔸 **Purpose:** Compute local FNODE crowding around each ECM voxel and downscale diffusion coefficients to represent heterogeneous transport in dense regions.
 - ⬇️ **Inputs:**
@@ -176,9 +176,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 ecm_boundary_concentration_conditions.cpp
 
-### 🔹 [ecm_boundary_concentration_conditions](../../../ecm_boundary_concentration_conditions.cpp#L14)
+### 🔹 [ecm_boundary_concentration_conditions](https://github.com/cborau/cellfoundry/blob/master/ecm_boundary_concentration_conditions.cpp)
 **Type:** `agent`  
-**Source:** [Open ecm_boundary_concentration_conditions.cpp:14](../../../ecm_boundary_concentration_conditions.cpp#L14)
+**Source:** [Open ecm_boundary_concentration_conditions.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_boundary_concentration_conditions.cpp)
 
 - 🔸 **Purpose:** Apply boundary concentration conditions to ECM agents located near domain faces.
 - ⬇️ **Inputs:**
@@ -190,9 +190,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 ecm_ecm_interaction.cpp
 
-### 🔹 [ecm_ecm_interaction](../../../ecm_ecm_interaction.cpp#L56)
+### 🔹 [ecm_ecm_interaction](https://github.com/cborau/cellfoundry/blob/master/ecm_ecm_interaction.cpp)
 **Type:** `agent`  
-**Source:** [Open ecm_ecm_interaction.cpp:56](../../../ecm_ecm_interaction.cpp#L56)
+**Source:** [Open ecm_ecm_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_ecm_interaction.cpp)
 
 - 🔸 **Purpose:** Execute ECM voxel-to-voxel mechanical coupling and multi-species diffusion on the same neighborhood pass.
 - ⬇️ **Inputs:**
@@ -208,9 +208,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 ecm_grid_location_data.cpp
 
-### 🔹 [ecm_grid_location_data](../../../ecm_grid_location_data.cpp#L14)
+### 🔹 [ecm_grid_location_data](https://github.com/cborau/cellfoundry/blob/master/ecm_grid_location_data.cpp)
 **Type:** `agent`  
-**Source:** [Open ecm_grid_location_data.cpp:14](../../../ecm_grid_location_data.cpp#L14)
+**Source:** [Open ecm_grid_location_data.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_grid_location_data.cpp)
 
 - 🔸 **Purpose:** Publish ECM voxel-centered state into the Array3D message for neighborhood reads.
 - ⬇️ **Inputs:**
@@ -222,16 +222,16 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 ecm_move.cpp
 
-### 🔹 [boundPosition](../../../ecm_move.cpp#L8)
+### 🔹 [boundPosition](https://github.com/cborau/cellfoundry/blob/master/ecm_move.cpp)
 **Type:** `helper`  
-**Source:** [Open ecm_move.cpp:8](../../../ecm_move.cpp#L8)
+**Source:** [Open ecm_move.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_move.cpp)
 
 - 🔸 **Purpose:** Clamp ECM agent coordinates against moving boundaries and update per-axis clamp flags when contact conditions are met.
 - - -
 
-### 🔹 [ecm_move](../../../ecm_move.cpp#L104)
+### 🔹 [ecm_move](https://github.com/cborau/cellfoundry/blob/master/ecm_move.cpp)
 **Type:** `agent`  
-**Source:** [Open ecm_move.cpp:104](../../../ecm_move.cpp#L104)
+**Source:** [Open ecm_move.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_move.cpp)
 
 - 🔸 **Purpose:** Advance ECM agent motion from accumulated forces, then enforce boundary clamping/sliding rules and boundary-driven kinematics.
 - ⬇️ **Inputs:**
@@ -242,9 +242,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 fnode_boundary_interaction.cpp
 
-### 🔹 [fnode_boundary_interaction](../../../fnode_boundary_interaction.cpp#L15)
+### 🔹 [fnode_boundary_interaction](https://github.com/cborau/cellfoundry/blob/master/fnode_boundary_interaction.cpp)
 **Type:** `agent`  
-**Source:** [Open fnode_boundary_interaction.cpp:15](../../../fnode_boundary_interaction.cpp#L15)
+**Source:** [Open fnode_boundary_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/fnode_boundary_interaction.cpp)
 
 - 🔸 **Purpose:** Compute boundary reaction forces on FNODE agents near domain boundaries, including optional elastic and damping contributions per face.
 - ⬇️ **Inputs:**
@@ -256,9 +256,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 fnode_bucket_location_data.cpp
 
-### 🔹 [fnode_bucket_location_data](../../../fnode_bucket_location_data.cpp#L14)
+### 🔹 [fnode_bucket_location_data](https://github.com/cborau/cellfoundry/blob/master/fnode_bucket_location_data.cpp)
 **Type:** `agent`  
-**Source:** [Open fnode_bucket_location_data.cpp:14](../../../fnode_bucket_location_data.cpp#L14)
+**Source:** [Open fnode_bucket_location_data.cpp](https://github.com/cborau/cellfoundry/blob/master/fnode_bucket_location_data.cpp)
 
 - 🔸 **Purpose:** Export FNODE state and connectivity arrays into a bucket message keyed by node id.
 - ⬇️ **Inputs:**
@@ -270,9 +270,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 fnode_fnode_bucket_interaction.cpp
 
-### 🔹 [fnode_fnode_bucket_interaction](../../../fnode_fnode_bucket_interaction.cpp#L68)
+### 🔹 [fnode_fnode_bucket_interaction](https://github.com/cborau/cellfoundry/blob/master/fnode_fnode_bucket_interaction.cpp)
 **Type:** `agent`  
-**Source:** [Open fnode_fnode_bucket_interaction.cpp:68](../../../fnode_fnode_bucket_interaction.cpp#L68)
+**Source:** [Open fnode_fnode_bucket_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/fnode_fnode_bucket_interaction.cpp)
 
 - 🔸 **Purpose:** Compute spring-damper forces along explicit FNODE connectivity links and accumulate network mechanical metrics (extension/compression/elastic energy).
 - ⬇️ **Inputs:**
@@ -284,9 +284,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 fnode_fnode_spatial_interaction.cpp
 
-### 🔹 [fnode_fnode_spatial_interaction](../../../fnode_fnode_spatial_interaction.cpp#L49)
+### 🔹 [fnode_fnode_spatial_interaction](https://github.com/cborau/cellfoundry/blob/master/fnode_fnode_spatial_interaction.cpp)
 **Type:** `agent`  
-**Source:** [Open fnode_fnode_spatial_interaction.cpp:49](../../../fnode_fnode_spatial_interaction.cpp#L49)
+**Source:** [Open fnode_fnode_spatial_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/fnode_fnode_spatial_interaction.cpp)
 
 - 🔸 **Purpose:** Apply short-range repulsion between nearby FNODE agents to prevent overlap.
 - ⬇️ **Inputs:**
@@ -298,9 +298,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 fnode_focad_interaction.cpp
 
-### 🔹 [fnode_focad_interaction](../../../fnode_focad_interaction.cpp#L18)
+### 🔹 [fnode_focad_interaction](https://github.com/cborau/cellfoundry/blob/master/fnode_focad_interaction.cpp)
 **Type:** `agent`  
-**Source:** [Open fnode_focad_interaction.cpp:18](../../../fnode_focad_interaction.cpp#L18)
+**Source:** [Open fnode_focad_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/fnode_focad_interaction.cpp)
 
 - 🔸 **Purpose:** Transfer precomputed FOCAD traction forces onto the corresponding FNODE.
 - ⬇️ **Inputs:**
@@ -315,16 +315,16 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 fnode_move.cpp
 
-### 🔹 [boundPosition](../../../fnode_move.cpp#L8)
+### 🔹 [boundPosition](https://github.com/cborau/cellfoundry/blob/master/fnode_move.cpp)
 **Type:** `helper`  
-**Source:** [Open fnode_move.cpp:8](../../../fnode_move.cpp#L8)
+**Source:** [Open fnode_move.cpp](https://github.com/cborau/cellfoundry/blob/master/fnode_move.cpp)
 
 - 🔸 **Purpose:** Clamp FNODE coordinates near boundaries and update clamp state flags based on contact and configuration flags.
 - - -
 
-### 🔹 [fnode_move](../../../fnode_move.cpp#L104)
+### 🔹 [fnode_move](https://github.com/cborau/cellfoundry/blob/master/fnode_move.cpp)
 **Type:** `agent`  
-**Source:** [Open fnode_move.cpp:104](../../../fnode_move.cpp#L104)
+**Source:** [Open fnode_move.cpp](https://github.com/cborau/cellfoundry/blob/master/fnode_move.cpp)
 
 - 🔸 **Purpose:** Update FNODE positions/velocities under internal, boundary, and transmitted forces while enforcing clamp and sliding boundary behavior.
 - ⬇️ **Inputs:**
@@ -336,9 +336,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 fnode_spatial_location_data.cpp
 
-### 🔹 [fnode_spatial_location_data](../../../fnode_spatial_location_data.cpp#L13)
+### 🔹 [fnode_spatial_location_data](https://github.com/cborau/cellfoundry/blob/master/fnode_spatial_location_data.cpp)
 **Type:** `agent`  
-**Source:** [Open fnode_spatial_location_data.cpp:13](../../../fnode_spatial_location_data.cpp#L13)
+**Source:** [Open fnode_spatial_location_data.cpp](https://github.com/cborau/cellfoundry/blob/master/fnode_spatial_location_data.cpp)
 
 - 🔸 **Purpose:** Broadcast FNODE position for spatial proximity queries.
 - ⬇️ **Inputs:**
@@ -349,9 +349,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 focad_anchor_update.cpp
 
-### 🔹 [focad_anchor_update](../../../focad_anchor_update.cpp#L18)
+### 🔹 [focad_anchor_update](https://github.com/cborau/cellfoundry/blob/master/focad_anchor_update.cpp)
 **Type:** `agent`  
-**Source:** [Open focad_anchor_update.cpp:18](../../../focad_anchor_update.cpp#L18)
+**Source:** [Open focad_anchor_update.cpp](https://github.com/cborau/cellfoundry/blob/master/focad_anchor_update.cpp)
 
 - 🔸 **Purpose:** Re-anchor each FOCAD agent to a CELL nucleus anchor point read from bucket messages keyed by cell_id.
 - ⬇️ **Inputs:**
@@ -365,9 +365,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 focad_bucket_location_data.cpp
 
-### 🔹 [focad_bucket_location_data](../../../focad_bucket_location_data.cpp#L13)
+### 🔹 [focad_bucket_location_data](https://github.com/cborau/cellfoundry/blob/master/focad_bucket_location_data.cpp)
 **Type:** `agent`  
-**Source:** [Open focad_bucket_location_data.cpp:13](../../../focad_bucket_location_data.cpp#L13)
+**Source:** [Open focad_bucket_location_data.cpp](https://github.com/cborau/cellfoundry/blob/master/focad_bucket_location_data.cpp)
 
 - 🔸 **Purpose:** Publish full FOCAD state for bucket-keyed readers (mainly CELL/FOCAD coupling steps).
 - ⬇️ **Inputs:**
@@ -378,9 +378,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 focad_fnode_interaction.cpp
 
-### 🔹 [focad_fnode_interaction](../../../focad_fnode_interaction.cpp#L20)
+### 🔹 [focad_fnode_interaction](https://github.com/cborau/cellfoundry/blob/master/focad_fnode_interaction.cpp)
 **Type:** `agent`  
-**Source:** [Open focad_fnode_interaction.cpp:20](../../../focad_fnode_interaction.cpp#L20)
+**Source:** [Open focad_fnode_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/focad_fnode_interaction.cpp)
 
 - 🔸 **Purpose:** Manage FOCAD-FNODE attachment dynamics and compute traction forces stored on FOCAD for subsequent FNODE-side force transfer.
 - ⬇️ **Inputs:**
@@ -395,9 +395,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 focad_move.cpp
 
-### 🔹 [focad_move](../../../focad_move.cpp#L16)
+### 🔹 [focad_move](https://github.com/cborau/cellfoundry/blob/master/focad_move.cpp)
 **Type:** `agent`  
-**Source:** [Open focad_move.cpp:16](../../../focad_move.cpp#L16)
+**Source:** [Open focad_move.cpp](https://github.com/cborau/cellfoundry/blob/master/focad_move.cpp)
 
 - 🔸 **Purpose:** Update focal adhesion positions by either following attached FNODEs or executing bounded exploratory motion when detached/inactive.
 - ⬇️ **Inputs:**
@@ -410,9 +410,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 focad_spatial_location_data.cpp
 
-### 🔹 [focad_spatial_location_data](../../../focad_spatial_location_data.cpp#L13)
+### 🔹 [focad_spatial_location_data](https://github.com/cborau/cellfoundry/blob/master/focad_spatial_location_data.cpp)
 **Type:** `agent`  
-**Source:** [Open focad_spatial_location_data.cpp:13](../../../focad_spatial_location_data.cpp#L13)
+**Source:** [Open focad_spatial_location_data.cpp](https://github.com/cborau/cellfoundry/blob/master/focad_spatial_location_data.cpp)
 
 - 🔸 **Purpose:** Broadcast active adhesion position/force state for local spatial interaction queries.
 - ⬇️ **Inputs:**
@@ -423,9 +423,9 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 handy_device_functions_template.cpp
 
-### 🔹 [vec3CrossProd](../../../handy_device_functions_template.cpp#L15)
+### 🔹 [vec3CrossProd](https://github.com/cborau/cellfoundry/blob/master/handy_device_functions_template.cpp)
 **Type:** `helper`  
-**Source:** [Open handy_device_functions_template.cpp:15](../../../handy_device_functions_template.cpp#L15)
+**Source:** [Open handy_device_functions_template.cpp](https://github.com/cborau/cellfoundry/blob/master/handy_device_functions_template.cpp)
 
 - 🔸 **Purpose:** Provide reusable device-side vector algebra helpers for interaction kernels.
 - 📝 **Notes:**
