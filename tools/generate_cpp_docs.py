@@ -332,21 +332,7 @@ def main() -> int:
     parser.add_argument("--check", action="store_true", help="Fail if generated files are not up-to-date")
     parser.add_argument("--github-ref", default=GITHUB_REF, help="Git reference for source links (e.g. main, master, v1.0.0)")
     parser.add_argument("--github-repo", default=GITHUB_REPO, help="GitHub repository URL used in source links")
-    parser.add_argument(
-        "--wiki-repo-dir",
-        default=None,
-        help="Optional path to a checked-out GitHub wiki repo (e.g. ../cellfoundry.wiki). If set, wiki pages are written there too.",
-    )
-    parser.add_argument(
-        "--wiki-only",
-        action="store_true",
-        help="Only write wiki pages (skip docs/auto wiki outputs). Requires --wiki-repo-dir.",
-    )
     args = parser.parse_args()
-
-    if args.wiki_only and not args.wiki_repo_dir:
-        print("--wiki-only requires --wiki-repo-dir")
-        return 2
 
     cpp_files = sorted([p for p in ROOT.glob("*.cpp") if p.is_file()])
     all_docs: Dict[str, List[FunctionDoc]] = {}
@@ -356,42 +342,25 @@ def main() -> int:
         all_docs[cpp.name] = docs
 
     github_repo = args.github_repo.rstrip("/")
-    reference_md = render_reference(all_docs, github_repo, args.github_ref)
     wiki_reference_md = render_reference(all_docs, github_repo, args.github_ref)
     wiki_home_md = render_wiki_home()
     wiki_what_md = render_what_is_cellfoundry(github_repo, args.github_ref)
     wiki_editor_md = render_model_editor_page(github_repo, args.github_ref)
     wiki_post_md = render_post_processing_page(github_repo, args.github_ref)
 
-    out_ref = ROOT / "docs" / "auto" / "Function-Reference.md"
     out_wiki_ref = ROOT / "docs" / "auto" / "wiki" / "Function-Reference.md"
     out_wiki_home = ROOT / "docs" / "auto" / "wiki" / "Home.md"
     out_wiki_what = ROOT / "docs" / "auto" / "wiki" / "What-is-CellFoundry.md"
     out_wiki_editor = ROOT / "docs" / "auto" / "wiki" / "Model-Editor.md"
     out_wiki_post = ROOT / "docs" / "auto" / "wiki" / "Post-Processing.md"
 
-    wiki_pages = [
-        ("Function-Reference.md", wiki_reference_md),
-        ("Home.md", wiki_home_md),
-        ("What-is-CellFoundry.md", wiki_what_md),
-        ("Model-Editor.md", wiki_editor_md),
-        ("Post-Processing.md", wiki_post_md),
-    ]
-
-    outputs: Dict[pathlib.Path, str] = {}
-
-    if not args.wiki_only:
-        outputs[out_ref] = reference_md
-        outputs[out_wiki_ref] = wiki_reference_md
-        outputs[out_wiki_home] = wiki_home_md
-        outputs[out_wiki_what] = wiki_what_md
-        outputs[out_wiki_editor] = wiki_editor_md
-        outputs[out_wiki_post] = wiki_post_md
-
-    if args.wiki_repo_dir:
-        wiki_repo_root = pathlib.Path(args.wiki_repo_dir).expanduser().resolve()
-        for filename, content in wiki_pages:
-            outputs[wiki_repo_root / filename] = content
+    outputs: Dict[pathlib.Path, str] = {
+        out_wiki_ref: wiki_reference_md,
+        out_wiki_home: wiki_home_md,
+        out_wiki_what: wiki_what_md,
+        out_wiki_editor: wiki_editor_md,
+        out_wiki_post: wiki_post_md,
+    }
 
     changed = []
     for path, content in outputs.items():
