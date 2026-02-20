@@ -320,12 +320,33 @@ def write_if_changed(path: pathlib.Path, content: str) -> bool:
     return True
 
 
+def display_path(path: pathlib.Path) -> str:
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate docs from FLAMEGPU C++ docblocks")
     parser.add_argument("--check", action="store_true", help="Fail if generated files are not up-to-date")
     parser.add_argument("--github-ref", default=GITHUB_REF, help="Git reference for source links (e.g. main, master, v1.0.0)")
     parser.add_argument("--github-repo", default=GITHUB_REPO, help="GitHub repository URL used in source links")
+    parser.add_argument(
+        "--wiki-repo-dir",
+        default=None,
+        help="Optional path to a checked-out GitHub wiki repo (e.g. ../cellfoundry.wiki). If set, wiki pages are written there too.",
+    )
+    parser.add_argument(
+        "--wiki-only",
+        action="store_true",
+        help="Only write wiki pages (skip docs/auto wiki outputs). Requires --wiki-repo-dir.",
+    )
     args = parser.parse_args()
+
+    if args.wiki_only and not args.wiki_repo_dir:
+        print("--wiki-only requires --wiki-repo-dir")
+        return 2
 
     cpp_files = sorted([p for p in ROOT.glob("*.cpp") if p.is_file()])
     all_docs: Dict[str, List[FunctionDoc]] = {}
@@ -349,18 +370,34 @@ def main() -> int:
     out_wiki_editor = ROOT / "docs" / "auto" / "wiki" / "Model-Editor.md"
     out_wiki_post = ROOT / "docs" / "auto" / "wiki" / "Post-Processing.md"
 
+    wiki_pages = [
+        ("Function-Reference.md", wiki_reference_md),
+        ("Home.md", wiki_home_md),
+        ("What-is-CellFoundry.md", wiki_what_md),
+        ("Model-Editor.md", wiki_editor_md),
+        ("Post-Processing.md", wiki_post_md),
+    ]
+
+    outputs: Dict[pathlib.Path, str] = {}
+
+    if not args.wiki_only:
+        outputs[out_ref] = reference_md
+        outputs[out_wiki_ref] = wiki_reference_md
+        outputs[out_wiki_home] = wiki_home_md
+        outputs[out_wiki_what] = wiki_what_md
+        outputs[out_wiki_editor] = wiki_editor_md
+        outputs[out_wiki_post] = wiki_post_md
+
+    if args.wiki_repo_dir:
+        wiki_repo_root = pathlib.Path(args.wiki_repo_dir).expanduser().resolve()
+        for filename, content in wiki_pages:
+            outputs[wiki_repo_root / filename] = content
+
     changed = []
-    for path, content in [
-        (out_ref, reference_md),
-        (out_wiki_ref, wiki_reference_md),
-        (out_wiki_home, wiki_home_md),
-        (out_wiki_what, wiki_what_md),
-        (out_wiki_editor, wiki_editor_md),
-        (out_wiki_post, wiki_post_md),
-    ]:
+    for path, content in outputs.items():
         did_change = write_if_changed(path, content)
         if did_change:
-            changed.append(str(path.relative_to(ROOT)))
+            changed.append(display_path(path))
 
     if args.check and changed:
         print("Generated documentation is out of date:")
