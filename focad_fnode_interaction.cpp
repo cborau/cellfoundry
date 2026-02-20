@@ -32,6 +32,7 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   const float agent_k_off_0 = FLAMEGPU->getVariable<float>("k_off_0");
   const float agent_f_c = FLAMEGPU->getVariable<float>("f_c");
   const float agent_k_reinf = FLAMEGPU->getVariable<float>("k_reinf");
+  float agent_linc_prev_total_length = FLAMEGPU->getVariable<float>("linc_prev_total_length");  // Stores previous LINC element length L0^n
   const float agent_orx = FLAMEGPU->getVariable<float>("orx");
   const float agent_ory = FLAMEGPU->getVariable<float>("ory");
   const float agent_orz = FLAMEGPU->getVariable<float>("orz");
@@ -60,6 +61,10 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   const float FOCAD_F_REINF = FLAMEGPU->environment.getProperty<float>("FOCAD_F_REINF");
   const float FOCAD_K_FA_MAX = FLAMEGPU->environment.getProperty<float>("FOCAD_K_FA_MAX");
   const float FOCAD_K_FA_DECAY = FLAMEGPU->environment.getProperty<float>("FOCAD_K_FA_DECAY");
+  const uint32_t INCLUDE_LINC_COUPLING = FLAMEGPU->environment.getProperty<uint32_t>("INCLUDE_LINC_COUPLING");
+  const float LINC_K_ELAST = FLAMEGPU->environment.getProperty<float>("LINC_K_ELAST");
+  const float LINC_D_DUMPING = FLAMEGPU->environment.getProperty<float>("LINC_D_DUMPING");
+  const float LINC_REST_LENGTH = FLAMEGPU->environment.getProperty<float>("LINC_REST_LENGTH");
 
   // Prevent L->0 forever
   const float FOCAD_MIN_REST_LENGTH = FLAMEGPU->environment.getProperty<float>("FOCAD_MIN_REST_LENGTH");
@@ -141,6 +146,7 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
       if (r_on >= p_on) {
         FLAMEGPU->setVariable<int>("attached", agent_attached);
         FLAMEGPU->setVariable<float>("k_fa", agent_k_fa);
+        FLAMEGPU->setVariable<float>("linc_prev_total_length", agent_linc_prev_total_length);
         FLAMEGPU->setVariable<float>("fx", 0.0f);
         FLAMEGPU->setVariable<float>("fy", 0.0f);
         FLAMEGPU->setVariable<float>("fz", 0.0f);
@@ -178,12 +184,16 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
       agent_rest_length_0 = ell0;
       agent_rest_length   = ell0;
       agent_age = 0.0f;  // reset age on attachment
+      // Internal Kelvin-Voigt state: previous LINC element length L0^n.
+      // With rest_length initialized to ell0, zero-force split implies initial L0 ~= 0.
+      agent_linc_prev_total_length = 0.0f;
       // printf("focad_fnode -- FOCAD %d (cell %d) attached to FNODE %d at distance %.4f um with initial rest length %.4f um\n", agent_focad_id, agent_cell_id, agent_fnode_id, sqrtf(best_r2), ell0);
     } else {
       // Not attached and no node found, keep force = 0 and exit early
       // printf("focad_fnode -- FOCAD %d (cell %d) not attached, no FNODE found within search radius.\n", agent_focad_id, agent_cell_id);
       FLAMEGPU->setVariable<int>("attached", agent_attached);
       FLAMEGPU->setVariable<float>("k_fa", agent_k_fa);
+      FLAMEGPU->setVariable<float>("linc_prev_total_length", agent_linc_prev_total_length);
       FLAMEGPU->setVariable<float>("fx", 0.0f);
       FLAMEGPU->setVariable<float>("fy", 0.0f);
       FLAMEGPU->setVariable<float>("fz", 0.0f);
@@ -231,13 +241,64 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   const float dz = message_z - agent_z_i;
   const float ell = sqrtf(dx*dx + dy*dy + dz*dz);  
 
-  // extension = max(0, ell - L)
-  const float ext = fmaxf(0.0f, ell - agent_rest_length);
+  float Fmag = 0.0f;
+  if (INCLUDE_LINC_COUPLING) {
+    // -----------------------------
+    // Model: (Kelvin–Voigt LINC) in series with (FOCAD spring)
+    //
+    // Endpoints:
+    //   agent_x_i,agent_y_i,agent_z_i  -> x0 (left, LINC base)
+    //   message_x,message_y,message_z  -> x2 (right, FOCAD end)
+    //
+    // Geometry:
+    //   ell = |x2 - x0| = total current length
+    //
+    // Rest lengths:
+    //   agent_rest_length   -> ℓ_FOCAD
+    //   LINC_REST_LENGTH    -> ℓ_LINC
+    //
+    // Stiffness:
+    //   agent_k_fa          -> k_FOCAD
+    //   LINC_K_ELAST        -> k_LINC
+    //
+    // Damping:
+    //   LINC_D_DUMPING      -> d_LINC (dashpot inside LINC element)
+    //
+    // Internal state per link:
+    //   agent_linc_prev_total_length stores L0^n = previous LINC element length
+    // -----------------------------
+    const float linc_k = fmaxf(LINC_K_ELAST, 1.0e-12f);
+    const float k_fa = fmaxf(agent_k_fa, 1.0e-12f);
+    const float dt = fmaxf(TIME_STEP, 1.0e-12f);
+    const float d_linc = fmaxf(LINC_D_DUMPING, 0.0f);
 
-  // printf("focad_fnode -- FOCAD %d, message_pos (%.4f, %.4f, %.4f) um, agent_rest_length = %.4f um, ell0 = %.4f um, ell = %.4f um, diff = %.4f um, extension = %.4f um\n", agent_focad_id, message_x, message_y, message_z, agent_rest_length, agent_rest_length_0, ell, ell - agent_rest_length, ext);
+    // L0^n: previous LINC element length (internal state)
+    const float L0_prev = agent_linc_prev_total_length;
 
-  // |F| = k_fa * extension
-  float Fmag = agent_k_fa * ext;
+    // Backward-Euler solve enforcing force continuity in series
+    // D = k_FA + k_LINC + d_LINC/dt
+    const float denom = k_fa + linc_k + d_linc / dt;
+    float L0 = (k_fa * (ell - agent_rest_length) + linc_k * LINC_REST_LENGTH + (d_linc / dt) * L0_prev) / denom;
+
+    // Safety clamp
+    L0 = fmaxf(0.0f, fminf(ell, L0));
+
+    // Force from FA spring at n+1
+    const float ext_fa = (ell - L0) - agent_rest_length;
+    float F = k_fa * ext_fa;
+
+    // Tension-only behavior
+    if (F < 0.0f) F = 0.0f;
+
+    Fmag = F;
+
+    // Update internal state for next step
+    agent_linc_prev_total_length = L0;
+  } else {
+    // Legacy behavior: extension = max(0, ell - L), |F| = k_fa*extension
+    const float ext = fmaxf(0.0f, ell - agent_rest_length);
+    Fmag = agent_k_fa * ext;
+  }
 
   // Optional cap to avoid runaway
   if (agent_f_max > 0.0f) {
@@ -312,6 +373,7 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   FLAMEGPU->setVariable<float>("rest_length_0", agent_rest_length_0);
   FLAMEGPU->setVariable<float>("rest_length", agent_rest_length);
   FLAMEGPU->setVariable<float>("k_fa", agent_k_fa);
+  FLAMEGPU->setVariable<float>("linc_prev_total_length", agent_linc_prev_total_length);
 
   FLAMEGPU->setVariable<int>("attached", agent_attached);
   FLAMEGPU->setVariable<int>("fnode_id", agent_fnode_id);

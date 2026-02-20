@@ -39,7 +39,7 @@ DEBUG_PRINTING = False
 PAUSE_EVERY_STEP = False  # If True, the visualization stops every step until P is pressed
 SAVE_PICKLE = True  # If True, dumps model configuration into a pickle file for post-processing
 SHOW_PLOTS = False  # Show plots at the end of the simulation
-SAVE_DATA_TO_FILE = False  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
+SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
 SAVE_EVERY_N_STEPS = 1 # Affects both the .vtk files and the Dataframes storing boundary data
 
 CURR_PATH = pathlib.Path().absolute()
@@ -188,7 +188,7 @@ INCLUDE_CELL_CELL_INTERACTION = False
 INCLUDE_CELL_CYCLE = False
 PERIODIC_BOUNDARIES_FOR_CELLS = False
 CELL_ORIENTATION_RATE = 1.0  # [1/s] TODO: check whether cell reorient themselves faster than ECM
-N_CELLS = 1
+N_CELLS = 50
 CELL_K_ELAST = 2.0  # [nN/um]
 CELL_D_DUMPING = 0.4  # [nN·s/um]
 CELL_RADIUS = 8.412 #ECM_ECM_EQUILIBRIUM_DISTANCE / 2 # [um]
@@ -238,6 +238,13 @@ FOCAD_K_FA_DECAY = 0.0 # [1/s] Optional decay towards baseline FOCAD_K_FA when u
 FOCAD_POLARITY_KON_FRONT_GAIN = 2.0  # [-] Frontness gain for attachment probability (k_on).
 FOCAD_POLARITY_KOFF_FRONT_REDUCTION = 0.5  # [-] Fractional reduction of k_off_0 at the front.
 FOCAD_POLARITY_KOFF_REAR_GAIN = 1.0  # [-] Fractional increase of k_off_0 at the rear.
+# +====================================================================+
+# | LINC coupling between cell nucleus and FOCAD                       |
+# +====================================================================+
+INCLUDE_LINC_COUPLING = False
+LINC_K_ELAST = 10.0 # [nN/um] Effective LINC stiffness in series with FOCAD stiffness.
+LINC_D_DUMPING = 0.0 # [nN·s/um] Optional damping along FOCAD-LINC axis.
+LINC_REST_LENGTH = 0.0 # [um] Rest length of virtual LINC segment.
 
 # +====================================================================+
 # | NUCLEAR MECHANICS  (ONLY USED IF FOCAL ADHESIONS ARE INCLUDED)     |
@@ -569,6 +576,10 @@ env.newPropertyFloat("FOCAD_K_FA_DECAY", FOCAD_K_FA_DECAY)
 env.newPropertyFloat("FOCAD_POLARITY_KON_FRONT_GAIN", FOCAD_POLARITY_KON_FRONT_GAIN)
 env.newPropertyFloat("FOCAD_POLARITY_KOFF_FRONT_REDUCTION", FOCAD_POLARITY_KOFF_FRONT_REDUCTION)
 env.newPropertyFloat("FOCAD_POLARITY_KOFF_REAR_GAIN", FOCAD_POLARITY_KOFF_REAR_GAIN)
+env.newPropertyUInt("INCLUDE_LINC_COUPLING", INCLUDE_LINC_COUPLING)
+env.newPropertyFloat("LINC_K_ELAST", LINC_K_ELAST)
+env.newPropertyFloat("LINC_D_DUMPING", LINC_D_DUMPING)
+env.newPropertyFloat("LINC_REST_LENGTH", LINC_REST_LENGTH)
 
 # Nucleus mechanical properties
 env.newPropertyFloat("NUCLEUS_E", NUCLEUS_E)
@@ -1027,6 +1038,7 @@ if INCLUDE_FOCAL_ADHESIONS:
     FOCAD_agent.newVariableFloat("k_on_eff_rear", 0.0)
     FOCAD_agent.newVariableFloat("k_off_0_eff_front", 0.0)
     FOCAD_agent.newVariableFloat("k_off_0_eff_rear", 0.0)
+    FOCAD_agent.newVariableFloat("linc_prev_total_length", 0.0)
 
 
     FOCAD_agent.newRTCFunctionFile("focad_bucket_location_data", focad_bucket_location_data_file).setMessageOutput("focad_bucket_location_message")
@@ -1354,6 +1366,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableFloat("k_on_eff_rear", 0.0)
                     instance.setVariableFloat("k_off_0_eff_front", 0.0)
                     instance.setVariableFloat("k_off_0_eff_rear", 0.0)
+                    instance.setVariableFloat("linc_prev_total_length", 0.0)
             
             FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
 
