@@ -15,6 +15,7 @@ class FunctionDoc:
     file: str
     kind: str
     name: str
+    line: int
     purpose: str
     inputs: List[str]
     outputs: List[str]
@@ -42,32 +43,33 @@ def parse_sections(lines: List[str]) -> Tuple[str, List[str], List[str], List[st
 
     section = None
     for idx, line in enumerate(lines):
-        low = line.lower()
+        text = line.strip()
+        low = text.lower()
         if low.startswith("purpose:"):
             section = "purpose"
-            purpose = line.split(":", 1)[1].strip()
+            purpose = text.split(":", 1)[1].strip()
             continue
         if low.startswith("inputs:"):
             section = "inputs"
-            rest = line.split(":", 1)[1].strip()
+            rest = text.split(":", 1)[1].strip()
             if rest:
                 inputs.append(rest)
             continue
         if low.startswith("outputs:"):
             section = "outputs"
-            rest = line.split(":", 1)[1].strip()
+            rest = text.split(":", 1)[1].strip()
             if rest:
                 outputs.append(rest)
             continue
         if low.startswith("notes:"):
             section = "notes"
-            rest = line.split(":", 1)[1].strip()
+            rest = text.split(":", 1)[1].strip()
             if rest:
                 notes.append(rest)
             continue
 
-        if line.startswith("-"):
-            item = line[1:].strip()
+        if text.startswith("-"):
+            item = text[1:].strip()
             if section == "inputs":
                 inputs.append(item)
             elif section == "outputs":
@@ -80,11 +82,11 @@ def parse_sections(lines: List[str]) -> Tuple[str, List[str], List[str], List[st
 
         if section == "purpose":
             if purpose:
-                purpose = f"{purpose} {line}".strip()
+                purpose = f"{purpose} {text}".strip()
             else:
-                purpose = line
+                purpose = text
         elif section == "notes":
-            notes.append(line)
+            notes.append(text)
 
     if not purpose:
         fallback_lines = [
@@ -128,6 +130,7 @@ def parse_file(path: pathlib.Path) -> List[FunctionDoc]:
     for m in pattern.finditer(text):
         raw_doc = m.group(1)
         signature = m.group(2)
+        signature_line = text.count("\n", 0, m.start(2)) + 1
 
         name, kind = extract_name_and_kind(signature)
         lines = clean_docblock(raw_doc)
@@ -138,6 +141,7 @@ def parse_file(path: pathlib.Path) -> List[FunctionDoc]:
                 file=path.name,
                 kind=kind,
                 name=name,
+                line=signature_line,
                 purpose=purpose or "(not specified)",
                 inputs=inputs,
                 outputs=outputs,
@@ -148,28 +152,35 @@ def parse_file(path: pathlib.Path) -> List[FunctionDoc]:
     return docs
 
 
-def render_reference(all_docs: Dict[str, List[FunctionDoc]]) -> str:
+def render_reference(all_docs: Dict[str, List[FunctionDoc]], source_prefix: str) -> str:
     out: List[str] = []
     out.append("# C++ Function Reference\n")
     out.append("Generated automatically from Doxygen-style docblocks in `.cpp` files.\n")
+    out.append(
+        "**Legend:** 🔸 Purpose  |  ⬇️ Inputs  |  ⬆️ Outputs  |  📝 Notes  |  🔗 Click function names to open source\n"
+    )
 
     for file_name in sorted(all_docs.keys()):
         entries = all_docs[file_name]
         if not entries:
             continue
-        out.append(f"## {file_name}\n")
+        out.append(f"## 📄 {file_name}\n")
         for entry in entries:
-            out.append(f"### {entry.name} ({entry.kind})\n")
-            out.append(f"- **Purpose:** {entry.purpose}")
+            source_link = f"{source_prefix}{entry.file}#L{entry.line}"
+            out.append(f"### 🔹 [{entry.name}]({source_link})")
+            out.append(f"**Type:** `{entry.kind}`  ")
+            out.append(f"**Source:** [Open {entry.file}:{entry.line}]({source_link})\n")
+            out.append(f"- 🔸 **Purpose:** {entry.purpose}")
             if entry.inputs:
-                out.append("- **Inputs:**")
+                out.append("- ⬇️ **Inputs:**")
                 out.extend([f"  - {x}" for x in entry.inputs])
             if entry.outputs:
-                out.append("- **Outputs:**")
+                out.append("- ⬆️ **Outputs:**")
                 out.extend([f"  - {x}" for x in entry.outputs])
             if entry.notes:
-                out.append("- **Notes:**")
+                out.append("- 📝 **Notes:**")
                 out.extend([f"  - {x}" for x in entry.notes])
+            out.append("- - -")
             out.append("")
     return "\n".join(out).rstrip() + "\n"
 
@@ -204,7 +215,8 @@ def main() -> int:
         docs = parse_file(cpp)
         all_docs[cpp.name] = docs
 
-    reference_md = render_reference(all_docs)
+    reference_md = render_reference(all_docs, "../../")
+    wiki_reference_md = render_reference(all_docs, "../../../")
     wiki_home_md = render_wiki_home()
 
     out_ref = ROOT / "docs" / "auto" / "Function-Reference.md"
@@ -214,7 +226,7 @@ def main() -> int:
     changed = []
     for path, content in [
         (out_ref, reference_md),
-        (out_wiki_ref, reference_md),
+        (out_wiki_ref, wiki_reference_md),
         (out_wiki_home, wiki_home_md),
     ]:
         did_change = write_if_changed(path, content)
