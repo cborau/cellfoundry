@@ -174,7 +174,6 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
           best_z = nz;
         }
       }
-      }
 
       if (best_id >= 0) {
         const float p_on = 1.0f - expf(-k_on_eff * TIME_STEP);

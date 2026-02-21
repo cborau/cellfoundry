@@ -16,6 +16,7 @@ import random
 import os
 import pickle
 import matplotlib.pyplot as plt
+import check_hard_coded_values
 from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary
 
 # TODO LIST:
@@ -41,7 +42,7 @@ SHOW_PLOTS = False  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
 SAVE_EVERY_N_STEPS = 1 # Affects both the .vtk files and the Dataframes storing boundary data
 
-CURR_PATH = pathlib.Path().absolute()
+CURR_PATH = pathlib.Path(__file__).resolve().parent
 RES_PATH = CURR_PATH / 'result_files'
 RES_PATH.mkdir(parents=True, exist_ok=True)
 EPSILON = 0.0000000001
@@ -313,6 +314,18 @@ OSCILLATORY_STRAIN_OVER_TIME = pd.DataFrame([OSOT(0)])
 # Checking for incompatible conditions
 # ----------------------------------------------------------------------
 critical_error = False
+try:
+    hard_coded_check_exit_code = check_hard_coded_values.main([
+        "--model-file", str(CURR_PATH / "model.py"),
+        "--scan-root", str(CURR_PATH),
+        "--fail-on-mismatch",
+    ])
+    if hard_coded_check_exit_code != 0:
+        print("ERROR: hard-coded value consistency check found mismatches or failed")
+        critical_error = True
+except Exception as e:
+    print(f"WARNING: failed to execute hard-coded value consistency check: {e}\nSkipping this check. If execution fails later due to hard-coded value mismatches, please run the check separately and fix the issues")
+
 msg_poisson = "WARNING: poisson ratio directions are not well defined or might not make sense due to boundary conditions \n"
 if (BOUNDARY_DISP_RATES[0] != 0.0 or BOUNDARY_DISP_RATES[1] != 0.0) and POISSON_DIRS[1] != 0:
     print(msg_poisson)
