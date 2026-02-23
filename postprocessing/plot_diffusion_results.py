@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-from vtk_timeseries_loader import load_vtk_series, ts_by_point_id, ts_nearest_point, plot_vars_over_time
+from tools.vtk_timeseries_loader import load_vtk_series, ts_by_point_id, ts_nearest_point, plot_vars_over_time
 
 folder = "./result_files"
 
