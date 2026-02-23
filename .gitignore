@@ -9,3 +9,4 @@ result_files/output_data_0.pickle
 *.pvsm
 *.png
 *.csv
+*.tex
