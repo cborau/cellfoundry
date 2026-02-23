@@ -1,0 +1,12 @@
+# CellFoundry Python requirements (for development tools)
+# Core scientific and plotting libraries used by example scripts
+pandas
+numpy
+matplotlib
+PySide6
+scipy
+
+# Note: `pyflamegpu` must be installed from the FLAME GPU wheelhouse
+# because it is provided as prebuilt wheels matching CUDA versions.
+# Example (see README for CUDA-specific wheel):
+# python -m pip install --extra-index-url https://whl.flamegpu.com/whl/cuda124-vis/ pyflamegpu
