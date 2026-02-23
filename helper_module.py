@@ -274,16 +274,17 @@ def print_focad_birth_calibration_summary(
     kmax,
     refractory_s,
     k_sigma,
+    hill_sigma,
     k_c,
-    hill_n,
+    hill_conc,
     species_index,
 ):
     """
     Print a compact calibration summary for CELL-driven FOCAD birth dynamics.
 
     Birth model in cell_focad_update:
-      h_sigma = sigma_+ / (k_sigma + sigma_+)
-      h_c     = C^n / (k_c^n + C^n)
+      h_sigma = sigma_+^m_sigma / (k_sigma^m_sigma + sigma_+^m_sigma)
+      h_c     = C^n_conc / (k_c^n_conc + C^n_conc)
       h_birth = h_sigma * h_c
       k_birth = k0 + kmax * h_birth
       p_step  = 1 - exp(-k_birth * dt)
@@ -335,7 +336,10 @@ def print_focad_birth_calibration_summary(
     print(f"species index for biochemical gate = {species_index}")
     print(f"target count bounds: n_min = {n_min}, n_max = {n_max} (init = {init_n})")
     print(f"kinetic rates: k0 = {k0:.4g} 1/s, kmax = {kmax:.4g} 1/s")
-    print(f"gate half-saturation: k_sigma = {k_sigma:.4g} kPa, k_c = {k_c:.4g}, hill_n = {hill_n:.4g}")
+    print(
+        f"gate half-saturation: k_sigma = {k_sigma:.4g} kPa (hill_sigma = {hill_sigma:.4g}), "
+        f"k_c = {k_c:.4g} (hill_conc = {hill_conc:.4g})"
+    )
     print(f"k_birth range = [{k_birth_min:.4g}, {k_birth_max:.4g}] 1/s")
     print(f"p_step range = [{p_step_min:.4g}, {p_step_max:.4g}] per step")
     print(f"expected births per cell per minute (rate-only) = [{births_per_min_min:.4g}, {births_per_min_max:.4g}]")

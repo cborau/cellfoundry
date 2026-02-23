@@ -239,8 +239,9 @@ FLAMEGPU_AGENT_FUNCTION(cell_focad_update, flamegpu::MessageBucket, flamegpu::Me
   const float FOCAD_BIRTH_K_0 = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_K_0");
   const float FOCAD_BIRTH_K_MAX = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_K_MAX");
   const float FOCAD_BIRTH_K_SIGMA = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_K_SIGMA");
+  const float FOCAD_BIRTH_HILL_SIGMA = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_HILL_SIGMA");
   const float FOCAD_BIRTH_K_C = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_K_C");
-  const float FOCAD_BIRTH_HILL_N = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_HILL_N");
+  const float FOCAD_BIRTH_HILL_CONC = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_HILL_CONC");
   const float FOCAD_BIRTH_REFRACTORY = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_REFRACTORY");
   const float FOCAD_REST_LENGTH_0 = FLAMEGPU->environment.getProperty<float>("FOCAD_REST_LENGTH_0");
   const float FOCAD_K_FA = FLAMEGPU->environment.getProperty<float>("FOCAD_K_FA");
@@ -563,12 +564,15 @@ FLAMEGPU_AGENT_FUNCTION(cell_focad_update, flamegpu::MessageBucket, flamegpu::Me
     const float c = fmaxf(0.0f, c_raw);
     const float sigma_pos = fmaxf(0.0f, sig_l1);
 
-    const float hs_denom = fmaxf(1e-12f, FOCAD_BIRTH_K_SIGMA + sigma_pos);
-    const float h_sigma = sigma_pos / hs_denom;
+    const float hill_sigma = fmaxf(1.0f, FOCAD_BIRTH_HILL_SIGMA);
+    const float sigma_pow = powf(sigma_pos, hill_sigma);
+    const float ks_pow = powf(fmaxf(1e-12f, FOCAD_BIRTH_K_SIGMA), hill_sigma);
+    const float hs_denom = fmaxf(1e-12f, ks_pow + sigma_pow);
+    const float h_sigma = sigma_pow / hs_denom;
 
-    const float hill_n = fmaxf(1.0f, FOCAD_BIRTH_HILL_N);
-    const float c_pow = powf(c, hill_n);
-    const float kc_pow = powf(fmaxf(1e-12f, FOCAD_BIRTH_K_C), hill_n);
+    const float hill_conc = fmaxf(1.0f, FOCAD_BIRTH_HILL_CONC);
+    const float c_pow = powf(c, hill_conc);
+    const float kc_pow = powf(fmaxf(1e-12f, FOCAD_BIRTH_K_C), hill_conc);
     const float hc_denom = fmaxf(1e-12f, kc_pow + c_pow);
     const float h_c = c_pow / hc_denom;
 

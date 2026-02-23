@@ -255,9 +255,10 @@ FOCAD_BIRTH_N_MIN = 2  # minimum target adhesions per cell
 FOCAD_BIRTH_N_MAX = 3 * INIT_N_FOCAD_PER_CELL  # hard cap / maximum target adhesions per cell
 FOCAD_BIRTH_K_0 = 0.001  # [1/s] baseline birth rate
 FOCAD_BIRTH_K_MAX = 0.03  # [1/s] max stress/biochemical-driven birth gain
-FOCAD_BIRTH_K_SIGMA = 0.5  # [kPa] stress half-saturation for birth gate
+FOCAD_BIRTH_K_SIGMA = 0.1  # [kPa] stress half-saturation for birth gate
+FOCAD_BIRTH_HILL_SIGMA = 1.0  # Hill exponent for stress gate
 FOCAD_BIRTH_K_C = 5.0  # concentration half-saturation for birth gate
-FOCAD_BIRTH_HILL_N = 2.0  # Hill exponent for concentration gate
+FOCAD_BIRTH_HILL_CONC = 2.0  # Hill exponent for concentration gate
 FOCAD_BIRTH_REFRACTORY = 20.0  # [s] minimum time between consecutive births per cell
 # +====================================================================+
 # | LINC coupling between cell nucleus and FOCAD                       |
@@ -444,8 +445,9 @@ if INCLUDE_CELLS and INCLUDE_FOCAL_ADHESIONS and ENABLE_FOCAD_BIRTH:
         kmax=FOCAD_BIRTH_K_MAX,
         refractory_s=FOCAD_BIRTH_REFRACTORY,
         k_sigma=FOCAD_BIRTH_K_SIGMA,
+        hill_sigma=FOCAD_BIRTH_HILL_SIGMA,
         k_c=FOCAD_BIRTH_K_C,
-        hill_n=FOCAD_BIRTH_HILL_N,
+        hill_conc=FOCAD_BIRTH_HILL_CONC,
         species_index=FOCAD_BIRTH_SPECIES_INDEX,
     )
 
@@ -646,8 +648,9 @@ env.newPropertyUInt("FOCAD_BIRTH_N_MAX", FOCAD_BIRTH_N_MAX)
 env.newPropertyFloat("FOCAD_BIRTH_K_0", FOCAD_BIRTH_K_0)
 env.newPropertyFloat("FOCAD_BIRTH_K_MAX", FOCAD_BIRTH_K_MAX)
 env.newPropertyFloat("FOCAD_BIRTH_K_SIGMA", FOCAD_BIRTH_K_SIGMA)
+env.newPropertyFloat("FOCAD_BIRTH_HILL_SIGMA", FOCAD_BIRTH_HILL_SIGMA)
 env.newPropertyFloat("FOCAD_BIRTH_K_C", FOCAD_BIRTH_K_C)
-env.newPropertyFloat("FOCAD_BIRTH_HILL_N", FOCAD_BIRTH_HILL_N)
+env.newPropertyFloat("FOCAD_BIRTH_HILL_CONC", FOCAD_BIRTH_HILL_CONC)
 env.newPropertyFloat("FOCAD_BIRTH_REFRACTORY", FOCAD_BIRTH_REFRACTORY)
 env.newPropertyUInt("INCLUDE_LINC_COUPLING", INCLUDE_LINC_COUPLING)
 env.newPropertyFloat("LINC_K_ELAST", LINC_K_ELAST)
