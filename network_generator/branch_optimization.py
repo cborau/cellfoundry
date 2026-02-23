@@ -2,13 +2,92 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.special import comb
 
-def branch_optimization(N_branching_optimize, nodes, fibers, N, enforce_bounds=False, bounds=None, bound_mode="reject"):
+def branch_optimization(
+    N_branching_optimize,
+    nodes,
+    fibers,
+    N,
+    enforce_bounds=False,
+    bounds=None,
+    bound_mode="reject",
+    stepsize_mag=0.15,
+    stepsize_mode="absolute",
+    plot_diagnostics=True,
+    return_diagnostics=False,
+):
     """
-    branch_optimization: Align fibers connected at a node such that 
-    the two straightest fibers are straightened, and all other fibers 
-    are aligned towards one of the two straight fibers.
+    Improve local branch alignment at network nodes via stochastic, greedy moves.
+
+    For each node, this routine identifies the pair of connected fibers that are
+    most opposite (minimum dot product), then evaluates a branching energy that:
+    - rewards the selected pair being closer to collinear/opposite,
+    - penalizes remaining fibers that are not aligned with one of those two fibers.
+
+    During optimization, each node and its directly connected neighbor nodes are
+    proposed to move by a small displacement, and the move is accepted if local
+    branching energy decreases (with a small probability of accepting slightly
+    worse moves to avoid poor local minima).
+
+    Parameters
+    ----------
+    N_branching_optimize : int
+        Number of global branching-optimization sweeps.
+    nodes : np.ndarray, shape (N, 3)
+        Node coordinates.
+    fibers : np.ndarray, shape (E, 2)
+        Fiber connectivity as endpoint node indices.
+    N : int
+        Number of nodes (expected to match nodes.shape[0]).
+    enforce_bounds : bool, optional
+        If True, keep proposed moves within `bounds` using `bound_mode`.
+    bounds : tuple, optional
+        ((xmin, xmax), (ymin, ymax), (zmin, zmax)).
+    bound_mode : {"reject", "clip"}, optional
+        - "reject": skip proposals that move any affected node out of bounds.
+        - "clip": clamp proposed coordinates to bounds.
+    stepsize_mag : float or array-like, optional
+        Step-size parameter whose interpretation depends on `stepsize_mode`.
+        If scalar, the same value is used for all sweeps. If array-like,
+        length must equal `N_branching_optimize` and each entry is used for
+        the corresponding sweep.
+    stepsize_mode : {"absolute", "local_mean_fiber"}, optional
+        - "absolute": use `stepsize_mag` directly as displacement magnitude.
+        - "local_mean_fiber": scale by local mean connected-fiber length,
+          i.e., effective step = `stepsize_mag * mean(local_fiber_lengths)`.
+    plot_diagnostics : bool, optional
+        If True, emit diagnostic plots before/after optimization.
+    return_diagnostics : bool, optional
+        If True, return a diagnostics dictionary with per-sweep histories.
+
+    Returns
+    -------
+    nodes : np.ndarray
+        Updated node coordinates.
+    fibers : np.ndarray
+        Unchanged connectivity array.
+    nodal_branching_energy : np.ndarray, shape (N,)
+        Final nodal branching energy values.
+    total_branching_energy_init : float
+        Total branching energy before optimization.
+    total_branching_energy_final : float
+        Total branching energy after optimization.
     """
-    stepsize_mag = 0.15
+
+    if bound_mode not in ("reject", "clip"):
+        raise ValueError("bound_mode must be 'reject' or 'clip'")
+    if stepsize_mode not in ("absolute", "local_mean_fiber"):
+        raise ValueError("stepsize_mode must be 'absolute' or 'local_mean_fiber'")
+
+    stepsize_schedule = np.asarray(stepsize_mag, dtype=float)
+    if stepsize_schedule.ndim == 0:
+        stepsize_schedule = np.full(N_branching_optimize, float(stepsize_schedule))
+    elif stepsize_schedule.ndim == 1 and len(stepsize_schedule) == N_branching_optimize:
+        pass
+    else:
+        raise ValueError("stepsize_mag must be scalar or length N_branching_optimize")
+
+    if np.any(stepsize_schedule <= 0):
+        raise ValueError("stepsize_mag values must be > 0")
 
     othernodes = [None] * N
     valency = np.zeros(N, dtype=int)
@@ -92,9 +171,10 @@ def branch_optimization(N_branching_optimize, nodes, fibers, N, enforce_bounds=F
         
         nodal_branching_energy[j] = 8 * term_1 + term_2
 
-    plt.figure()
-    plt.hist(nodal_branching_energy)
-    plt.title('Nodal Branching Energy Before Branching Optimization')
+    if plot_diagnostics:
+        plt.figure()
+        plt.hist(nodal_branching_energy)
+        plt.title('Nodal Branching Energy Before Branching Optimization')
     
     total_branching_energy_init = np.sum(nodal_branching_energy)
 
@@ -105,13 +185,24 @@ def branch_optimization(N_branching_optimize, nodes, fibers, N, enforce_bounds=F
     n_baa = 0
 
     for m in range(N_branching_optimize):
-        stepsize = stepsize_mag
+        stepsize_param = stepsize_schedule[m]
+        print(
+            f'Branching sweep {m + 1}/{N_branching_optimize}: '
+            f'step parameter = {stepsize_param:.6g} ({stepsize_mode})'
+        )
         for j in range(N):
             opt_id += 1
             node1 = j
             oldx, oldy, oldz = nodes[node1]
-            
+            othernodes_jth = othernodes[node1]
             n_cf = len(othernodes_jth)
+
+            if stepsize_mode == "absolute":
+                stepsize = stepsize_param
+            else:
+                local_lengths = np.linalg.norm(nodes[othernodes_jth] - nodes[node1], axis=1)
+                local_length_scale = np.mean(local_lengths) if local_lengths.size > 0 else 1.0
+                stepsize = stepsize_param * local_length_scale
 
             endpt = unit_vecs[j][SFs[j]].sum(axis=0)
             l_endpt = np.sqrt(np.sum(endpt ** 2))
@@ -121,9 +212,6 @@ def branch_optimization(N_branching_optimize, nodes, fibers, N, enforce_bounds=F
             newx = oldx + stepsize * dir_to_displace[0] + (stepsize / 50) * (-0.5 + np.random.rand())
             newy = oldy + stepsize * dir_to_displace[1] + (stepsize / 50) * (-0.5 + np.random.rand())
             newz = oldz + stepsize * dir_to_displace[2] + (stepsize / 50) * (-0.5 + np.random.rand())
-            
-            othernodes_jth = othernodes[node1]
-            n_cf = len(othernodes_jth)
             
             cnis = np.concatenate(([node1], othernodes_jth))
             other_old_coords = nodes[othernodes_jth]
@@ -291,18 +379,30 @@ def branch_optimization(N_branching_optimize, nodes, fibers, N, enforce_bounds=F
         total_BE_intermed[m] = np.sum(nodal_branching_energy)
         N_accepted_wrt_m[m] = N_accepted_BO
 
-    plt.figure()
-    plt.hist(nodal_branching_energy)
-    plt.title('Nodal Branching Energy After Branching Optimization')
+    if plot_diagnostics:
+        plt.figure()
+        plt.hist(nodal_branching_energy)
+        plt.title('Nodal Branching Energy After Branching Optimization')
 
     total_branching_energy_final = np.sum(nodal_branching_energy)
 
-    plt.figure()
-    plt.plot(range(N_branching_optimize), N_accepted_wrt_m)
-    plt.title('Accepted Changes vs Iteration Number')
+    if plot_diagnostics:
+        plt.figure()
+        plt.plot(range(N_branching_optimize), N_accepted_wrt_m)
+        plt.title('Accepted Changes vs Iteration Number')
 
-    plt.figure(40)
-    plt.plot(range(N_branching_optimize), total_BE_intermed)
-    plt.title('Branching Energy vs Iteration Number')
+        plt.figure(40)
+        plt.plot(range(N_branching_optimize), total_BE_intermed)
+        plt.title('Branching Energy vs Iteration Number')
+
+    if return_diagnostics:
+        diagnostics = {
+            "stepsize_schedule": stepsize_schedule.copy(),
+            "accepted_cumulative": N_accepted_wrt_m.copy(),
+            "total_branching_energy_per_sweep": total_BE_intermed.copy(),
+            "n_accepted_total": int(N_accepted_BO),
+            "n_bad_accepts": int(n_baa),
+        }
+        return nodes, fibers, nodal_branching_energy, total_branching_energy_init, total_branching_energy_final, diagnostics
 
     return nodes, fibers, nodal_branching_energy, total_branching_energy_init, total_branching_energy_final

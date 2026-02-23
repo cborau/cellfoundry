@@ -1,11 +1,26 @@
 import numpy as np
 
-def network_optimization(fraction_to_try_swap, N, nodes, fibers, N_anneal, lx, ly, lz, l_fiber, fiberlengths, fiberenergy, N1, N2, N_boundary_nodes, stepsize, swap_skip_energy, enforce_bounds=False, bounds=None, bound_mode="reject"):
+def network_optimization(fraction_to_try_swap, N, nodes, fibers, N_anneal, lx, ly, lz, l_fiber, fiberlengths, fiberenergy, N1, N2, N_boundary_nodes, stepsize, swap_skip_energy, enforce_bounds=False, bounds=None, bound_mode="reject", min_swap_sweeps=0, return_stats=False):
     """
     network_optimization: use simulated annealing to iterate initial network
     """
+    if not (0 <= fraction_to_try_swap <= 1):
+        raise ValueError("fraction_to_try_swap must be in [0, 1]")
+    if not (0 <= min_swap_sweeps <= N_anneal):
+        raise ValueError("min_swap_sweeps must be in [0, N_anneal]")
+
     N_interior = np.arange(N_boundary_nodes, N)  # The boundary nodes are at the top of nodes, we don't want to move those
     N_int = len(N_interior)
+
+    # Build a per-sweep swap schedule.
+    # Equivalent to Bernoulli(p) per sweep when min_swap_sweeps=0, with an optional
+    # floor to avoid optimization rounds with too few/no swap sweeps.
+    n_swap_sweeps = np.random.binomial(N_anneal, fraction_to_try_swap)
+    n_swap_sweeps = max(n_swap_sweeps, int(min_swap_sweeps))
+    swap_sweep_mask = np.zeros(N_anneal, dtype=bool)
+    if n_swap_sweeps > 0:
+        swap_sweep_indices = np.random.choice(N_anneal, size=n_swap_sweeps, replace=False)
+        swap_sweep_mask[swap_sweep_indices] = True
     
     # Initialize counters
     anneal_id = 0
@@ -23,8 +38,7 @@ def network_optimization(fraction_to_try_swap, N, nodes, fibers, N_anneal, lx, l
         node_fiber_mat[i, :len(nlf)] = nlf
     
     for m in range(N_anneal):
-        fork = np.random.rand()
-        if fork > fraction_to_try_swap:
+        if not swap_sweep_mask[m]:
             # Do node displacement, just on interior nodes
             for j in N_interior:
                 anneal_id += 1
@@ -205,8 +219,9 @@ def network_optimization(fraction_to_try_swap, N, nodes, fibers, N_anneal, lx, l
                     else:
                         n_swaps_rejected += 1
     
-    percent_accepted_iterations = 100 * n_accepted / anneal_id
+    percent_accepted_iterations = 100 * n_accepted / anneal_id if anneal_id > 0 else 0.0
     print(f'Percent accepted iterations for that optimization run = {percent_accepted_iterations}')
+    print(f'Swap sweeps scheduled/executed = {n_swap_sweeps}/{N_anneal} (target p={fraction_to_try_swap}, min={min_swap_sweeps})')
     
     total_energy = np.sum(fiberenergy)
     print(f'Total Network Length Energy = {total_energy}')
@@ -222,5 +237,20 @@ def network_optimization(fraction_to_try_swap, N, nodes, fibers, N_anneal, lx, l
     final_fiber_check = 2 * N_fibers - len(fiber_duplicate_check_final)
     
     print(f'The number of duplicate fibers is {final_fiber_check}')
-    
+
+    if return_stats:
+        stats = {
+            "percent_accepted_iterations": percent_accepted_iterations,
+            "swap_sweeps_executed": int(n_swap_sweeps),
+            "swap_sweeps_total": int(N_anneal),
+            "n_swaps_accepted": int(n_swaps_accepted),
+            "n_swaps_rejected": int(n_swaps_rejected),
+            "n_accepted": int(n_accepted),
+            "anneal_id": int(anneal_id),
+            "total_energy": float(total_energy),
+            "mean_fiber_length": float(avg_fiber_length),
+            "median_fiber_length": float(median_fiber_length),
+        }
+        return nodes, fibers, fiberenergy, fiberlengths, total_energy, N1, N2, N_interior, stats
+
     return nodes, fibers, fiberenergy, fiberlengths, total_energy, N1, N2, N_interior

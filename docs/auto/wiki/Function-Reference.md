@@ -61,6 +61,60 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - Atomic updates to ECM concentration macro-property (C_SP_MACRO)
 - - -
 
+## 📄 cell_focad_update.cpp
+
+### 🔹 [clampf](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_focad_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
+
+- 🔸 **Purpose:** Clamps a scalar to the closed interval [lo, hi].
+- - -
+
+### 🔹 [safeInv](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_focad_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
+
+- 🔸 **Purpose:** Returns 1/x when |x| > eps, otherwise returns 0.
+- - -
+
+### 🔹 [normalize3](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_focad_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
+
+- 🔸 **Purpose:** Normalizes a 3D vector in-place; if near-zero, sets a default unit vector.
+- - -
+
+### 🔹 [swapf](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_focad_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
+
+- 🔸 **Purpose:** Swaps two floats by reference.
+- - -
+
+### 🔹 [swap_col3](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_focad_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
+
+- 🔸 **Purpose:** Swaps two columns of a 3x3 matrix (used for eigenvector column reordering).
+- - -
+
+### 🔹 [eig_sym_3x3](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_focad_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
+
+- 🔸 **Purpose:** Jacobi eigendecomposition for a real symmetric 3x3 matrix:
+- ⬆️ **Outputs:**
+  - Eigenvalues l1, l2, l3
+  - Corresponding eigenvectors (v1, v2, v3)
+- - -
+
+### 🔹 [cell_focad_update](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
+**Type:** `agent`  
+**Source:** [Open cell_focad_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
+
+- 🔸 **Purpose:** Reads all focal adhesion (FOCAD) messages in a bucket keyed by this cell id.
+- - -
+
 ## 📄 cell_move.cpp
 
 ### 🔹 [cell_move](https://github.com/cborau/cellfoundry/blob/master/cell_move.cpp)
@@ -87,60 +141,6 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - Species arrays: k_consumption, k_production, k_reaction, C_sp, M_sp
 - ⬆️ **Outputs:**
   - MessageSpatial3D record for nearby agent queries
-- - -
-
-## 📄 cell_update_stress.cpp
-
-### 🔹 [clampf](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
-**Type:** `helper`  
-**Source:** [Open cell_update_stress.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
-
-- 🔸 **Purpose:** Clamps a scalar to the closed interval [lo, hi].
-- - -
-
-### 🔹 [safeInv](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
-**Type:** `helper`  
-**Source:** [Open cell_update_stress.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
-
-- 🔸 **Purpose:** Returns 1/x when |x| > eps, otherwise returns 0.
-- - -
-
-### 🔹 [normalize3](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
-**Type:** `helper`  
-**Source:** [Open cell_update_stress.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
-
-- 🔸 **Purpose:** Normalizes a 3D vector in-place; if near-zero, sets a default unit vector.
-- - -
-
-### 🔹 [swapf](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
-**Type:** `helper`  
-**Source:** [Open cell_update_stress.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
-
-- 🔸 **Purpose:** Swaps two floats by reference.
-- - -
-
-### 🔹 [swap_col3](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
-**Type:** `helper`  
-**Source:** [Open cell_update_stress.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
-
-- 🔸 **Purpose:** Swaps two columns of a 3x3 matrix (used for eigenvector column reordering).
-- - -
-
-### 🔹 [eig_sym_3x3](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
-**Type:** `helper`  
-**Source:** [Open cell_update_stress.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
-
-- 🔸 **Purpose:** Jacobi eigendecomposition for a real symmetric 3x3 matrix:
-- ⬆️ **Outputs:**
-  - Eigenvalues l1, l2, l3
-  - Corresponding eigenvectors (v1, v2, v3)
-- - -
-
-### 🔹 [cell_update_stress](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
-**Type:** `agent`  
-**Source:** [Open cell_update_stress.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_update_stress.cpp)
-
-- 🔸 **Purpose:** Reads all focal adhesion (FOCAD) messages in a bucket keyed by this cell id.
 - - -
 
 ## 📄 ecm_Csp_update.cpp
