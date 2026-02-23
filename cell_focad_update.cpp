@@ -174,7 +174,7 @@ FLAMEGPU_DEVICE_FUNCTION void eig_sym_3x3(
 }
 
 /**
- * cell_update_stress
+ * cell_focad_update
  *
  * Reads all focal adhesion (FOCAD) messages in a bucket keyed by this cell id.
  * Each message provides:
@@ -195,7 +195,7 @@ FLAMEGPU_DEVICE_FUNCTION void eig_sym_3x3(
  *   force:  nN
  *   stress: nN/um^2 [kPa]
  */
-FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::MessageNone) {
+FLAMEGPU_AGENT_FUNCTION(cell_focad_update, flamegpu::MessageBucket, flamegpu::MessageNone) {
   // -------------------------
   // Read CELL agent state
   // -------------------------
@@ -204,6 +204,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
   const float agent_x = FLAMEGPU->getVariable<float>("x");
   const float agent_y = FLAMEGPU->getVariable<float>("y");
   const float agent_z = FLAMEGPU->getVariable<float>("z");
+  float agent_focad_birth_cooldown = FLAMEGPU->getVariable<float>("focad_birth_cooldown");
   float agent_orx = FLAMEGPU->getVariable<float>("orx");
   float agent_ory = FLAMEGPU->getVariable<float>("ory");
   float agent_orz = FLAMEGPU->getVariable<float>("orz");
@@ -231,8 +232,27 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
   const int INCLUDE_ORIENTATION_ALIGN = FLAMEGPU->environment.getProperty<int>("INCLUDE_ORIENTATION_ALIGN");
   const float ORIENTATION_ALIGN_RATE = FLAMEGPU->environment.getProperty<float>("ORIENTATION_ALIGN_RATE");
   const int ORIENTATION_ALIGN_USE_STRESS = FLAMEGPU->environment.getProperty<int>("ORIENTATION_ALIGN_USE_STRESS");
+  const uint32_t ENABLE_FOCAD_BIRTH = FLAMEGPU->environment.getProperty<uint32_t>("ENABLE_FOCAD_BIRTH");
+  const uint32_t FOCAD_BIRTH_SPECIES_INDEX = FLAMEGPU->environment.getProperty<uint32_t>("FOCAD_BIRTH_SPECIES_INDEX");
+  const uint32_t FOCAD_BIRTH_N_MIN = FLAMEGPU->environment.getProperty<uint32_t>("FOCAD_BIRTH_N_MIN");
+  const uint32_t FOCAD_BIRTH_N_MAX = FLAMEGPU->environment.getProperty<uint32_t>("FOCAD_BIRTH_N_MAX");
+  const float FOCAD_BIRTH_K_0 = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_K_0");
+  const float FOCAD_BIRTH_K_MAX = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_K_MAX");
+  const float FOCAD_BIRTH_K_SIGMA = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_K_SIGMA");
+  const float FOCAD_BIRTH_K_C = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_K_C");
+  const float FOCAD_BIRTH_HILL_N = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_HILL_N");
+  const float FOCAD_BIRTH_REFRACTORY = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_REFRACTORY");
+  const float FOCAD_REST_LENGTH_0 = FLAMEGPU->environment.getProperty<float>("FOCAD_REST_LENGTH_0");
+  const float FOCAD_K_FA = FLAMEGPU->environment.getProperty<float>("FOCAD_K_FA");
+  const float FOCAD_F_MAX = FLAMEGPU->environment.getProperty<float>("FOCAD_F_MAX");
+  const float FOCAD_V_C = FLAMEGPU->environment.getProperty<float>("FOCAD_V_C");
+  const float FOCAD_K_ON = FLAMEGPU->environment.getProperty<float>("FOCAD_K_ON");
+  const float FOCAD_K_OFF_0 = FLAMEGPU->environment.getProperty<float>("FOCAD_K_OFF_0");
+  const float FOCAD_F_C = FLAMEGPU->environment.getProperty<float>("FOCAD_F_C");
+  const float FOCAD_K_REINF = FLAMEGPU->environment.getProperty<float>("FOCAD_K_REINF");
 
   const uint8_t N_ANCHOR_POINTS = 100; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  const uint8_t N_SPECIES = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
 
   // -------------------------
   // Accumulate stresslet S = sum_i sym(r_i ⊗ f_i)
@@ -240,9 +260,11 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
   // -------------------------
   float agent_S_xx = 0.0f, agent_S_yy = 0.0f, agent_S_zz = 0.0f;
   float agent_S_xy = 0.0f, agent_S_xz = 0.0f, agent_S_yz = 0.0f;
+  uint32_t current_focad_count = 0;
 
   // Iterate over all FOCAD messages addressed to this cell id
   for (const auto &message : FLAMEGPU->message_in(agent_id)) {
+    current_focad_count += 1;
     // Anchor position on nucleus and force at the anchor (message variables)
     const float message_x_i = message.getVariable<float>("x_i"); // [um]
     const float message_y_i = message.getVariable<float>("y_i"); // [um]
@@ -485,6 +507,15 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
   // Here u_ref_* are unit vectors defining reference anchor directions on the unit sphere (fixed at agent initialization).
   // The mapping (I + eps) turns the sphere into an ellipsoid consistent with small strain.
   // -------------------------
+  const float lead_x = agent_x + CELL_RADIUS * agent_orx;
+  const float lead_y = agent_y + CELL_RADIUS * agent_ory;
+  const float lead_z = agent_z + CELL_RADIUS * agent_orz;
+  float best_anchor_x = agent_x;
+  float best_anchor_y = agent_y;
+  float best_anchor_z = agent_z;
+  int best_anchor_id = 0;
+  float best_anchor_r2 = 1e30f;
+
   for (unsigned int a = 0; a < N_ANCHOR_POINTS; ++a) {
     // Reference directions (CELL array variables)
     const float ux = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("u_ref_x_i", a);
@@ -505,7 +536,114 @@ FLAMEGPU_AGENT_FUNCTION(cell_update_stress, flamegpu::MessageBucket, flamegpu::M
     FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("x_i", a, anchor_x);
     FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("y_i", a, anchor_y);
     FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("z_i", a, anchor_z);
+
+    const float dax = anchor_x - lead_x;
+    const float day = anchor_y - lead_y;
+    const float daz = anchor_z - lead_z;
+    const float dr2 = dax * dax + day * day + daz * daz;
+    if (dr2 < best_anchor_r2) {
+      best_anchor_r2 = dr2;
+      best_anchor_x = anchor_x;
+      best_anchor_y = anchor_y;
+      best_anchor_z = anchor_z;
+      best_anchor_id = static_cast<int>(a);
+    }
   }
+
+  // -------------------------
+  // FOCAD birth from CELL (bounded, stress+concentration gated)
+  // -------------------------
+  if (agent_focad_birth_cooldown > 0.0f) {
+    agent_focad_birth_cooldown = fmaxf(0.0f, agent_focad_birth_cooldown - TIME_STEP);
+  }
+
+  if (ENABLE_FOCAD_BIRTH != 0 && FOCAD_BIRTH_N_MAX > 0) {
+    const uint32_t idx_sp = FOCAD_BIRTH_SPECIES_INDEX < N_SPECIES ? FOCAD_BIRTH_SPECIES_INDEX : 0;
+    const float c_raw = FLAMEGPU->getVariable<float, N_SPECIES>("C_sp", idx_sp);
+    const float c = fmaxf(0.0f, c_raw);
+    const float sigma_pos = fmaxf(0.0f, sig_l1);
+
+    const float hs_denom = fmaxf(1e-12f, FOCAD_BIRTH_K_SIGMA + sigma_pos);
+    const float h_sigma = sigma_pos / hs_denom;
+
+    const float hill_n = fmaxf(1.0f, FOCAD_BIRTH_HILL_N);
+    const float c_pow = powf(c, hill_n);
+    const float kc_pow = powf(fmaxf(1e-12f, FOCAD_BIRTH_K_C), hill_n);
+    const float hc_denom = fmaxf(1e-12f, kc_pow + c_pow);
+    const float h_c = c_pow / hc_denom;
+
+    const uint32_t n_min = FOCAD_BIRTH_N_MIN;
+    const uint32_t n_max = FOCAD_BIRTH_N_MAX;
+    const float h_birth = h_sigma * h_c;
+    const float target_f = static_cast<float>(n_min) + static_cast<float>(n_max - n_min) * h_birth;
+    uint32_t target_n = static_cast<uint32_t>(target_f + 0.5f);
+    if (target_n < n_min) target_n = n_min;
+    if (target_n > n_max) target_n = n_max;
+
+    const int can_birth = ((current_focad_count < target_n) && (current_focad_count < n_max) && (agent_focad_birth_cooldown <= 0.0f)) ? 1 : 0;
+    
+    if (can_birth != 0) {
+      const float k_birth = fmaxf(0.0f, FOCAD_BIRTH_K_0 + FOCAD_BIRTH_K_MAX * h_birth);
+      const float p_birth = 1.0f - expf(-k_birth * TIME_STEP);
+      const float r_birth = FLAMEGPU->random.uniform<float>(0.0f, 1.0f);
+      if (r_birth < p_birth) {
+        //printf("Cell %d -- Birth FOCAD: count=%d target_n=%d sigma=%.3e h_sigma=%.3f c=%.3e h_c=%.3f h_birth=%.3f k_birth=%.3f p_birth=%.3f\n", 
+        //       agent_id, current_focad_count, target_n, sigma_pos, h_sigma, c, h_c, h_birth, k_birth, p_birth);
+        const int new_focad_id = FLAMEGPU->agent_out.getID();
+        FLAMEGPU->agent_out.setVariable<int>("id", new_focad_id);
+        FLAMEGPU->agent_out.setVariable<int>("cell_id", agent_id);
+        FLAMEGPU->agent_out.setVariable<int>("fnode_id", -1);
+        FLAMEGPU->agent_out.setVariable<float>("x", lead_x);
+        FLAMEGPU->agent_out.setVariable<float>("y", lead_y);
+        FLAMEGPU->agent_out.setVariable<float>("z", lead_z);
+        FLAMEGPU->agent_out.setVariable<float>("vx", 0.0f);
+        FLAMEGPU->agent_out.setVariable<float>("vy", 0.0f);
+        FLAMEGPU->agent_out.setVariable<float>("vz", 0.0f);
+        FLAMEGPU->agent_out.setVariable<float>("fx", 0.0f);
+        FLAMEGPU->agent_out.setVariable<float>("fy", 0.0f);
+        FLAMEGPU->agent_out.setVariable<float>("fz", 0.0f);
+        FLAMEGPU->agent_out.setVariable<int>("anchor_id", best_anchor_id);
+        FLAMEGPU->agent_out.setVariable<float>("x_i", best_anchor_x);
+        FLAMEGPU->agent_out.setVariable<float>("y_i", best_anchor_y);
+        FLAMEGPU->agent_out.setVariable<float>("z_i", best_anchor_z);
+        FLAMEGPU->agent_out.setVariable<float>("x_c", agent_x);
+        FLAMEGPU->agent_out.setVariable<float>("y_c", agent_y);
+        FLAMEGPU->agent_out.setVariable<float>("z_c", agent_z);
+        FLAMEGPU->agent_out.setVariable<float>("orx", agent_orx);
+        FLAMEGPU->agent_out.setVariable<float>("ory", agent_ory);
+        FLAMEGPU->agent_out.setVariable<float>("orz", agent_orz);
+        FLAMEGPU->agent_out.setVariable<float>("rest_length_0", FOCAD_REST_LENGTH_0);
+        FLAMEGPU->agent_out.setVariable<float>("rest_length", FOCAD_REST_LENGTH_0);
+        FLAMEGPU->agent_out.setVariable<float>("k_fa", FOCAD_K_FA);
+        FLAMEGPU->agent_out.setVariable<float>("f_max", FOCAD_F_MAX);
+        FLAMEGPU->agent_out.setVariable<int>("attached", 0);
+        FLAMEGPU->agent_out.setVariable<uint8_t>("active", 1);
+        FLAMEGPU->agent_out.setVariable<float>("v_c", FOCAD_V_C);
+        FLAMEGPU->agent_out.setVariable<uint8_t>("fa_state", 1);
+        FLAMEGPU->agent_out.setVariable<float>("age", 0.0f);
+        FLAMEGPU->agent_out.setVariable<float>("detached_age", 0.0f);
+        FLAMEGPU->agent_out.setVariable<float>("k_on", FOCAD_K_ON);
+        FLAMEGPU->agent_out.setVariable<float>("k_off_0", FOCAD_K_OFF_0);
+        FLAMEGPU->agent_out.setVariable<float>("f_c", FOCAD_F_C);
+        FLAMEGPU->agent_out.setVariable<float>("k_reinf", FOCAD_K_REINF);
+        FLAMEGPU->agent_out.setVariable<float>("f_mag", 0.0f);
+        FLAMEGPU->agent_out.setVariable<int>("is_front", 0);
+        FLAMEGPU->agent_out.setVariable<int>("is_rear", 0);
+        FLAMEGPU->agent_out.setVariable<int>("attached_front", 0);
+        FLAMEGPU->agent_out.setVariable<int>("attached_rear", 0);
+        FLAMEGPU->agent_out.setVariable<float>("frontness_front", 0.0f);
+        FLAMEGPU->agent_out.setVariable<float>("frontness_rear", 0.0f);
+        FLAMEGPU->agent_out.setVariable<float>("k_on_eff_front", 0.0f);
+        FLAMEGPU->agent_out.setVariable<float>("k_on_eff_rear", 0.0f);
+        FLAMEGPU->agent_out.setVariable<float>("k_off_0_eff_front", 0.0f);
+        FLAMEGPU->agent_out.setVariable<float>("k_off_0_eff_rear", 0.0f);
+        FLAMEGPU->agent_out.setVariable<float>("linc_prev_total_length", 0.0f);
+        agent_focad_birth_cooldown = fmaxf(0.0f, FOCAD_BIRTH_REFRACTORY);
+      }
+    }
+  }
+
+  FLAMEGPU->setVariable<float>("focad_birth_cooldown", agent_focad_birth_cooldown);
 
   return flamegpu::ALIVE;
 }

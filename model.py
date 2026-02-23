@@ -17,7 +17,7 @@ import os
 import pickle
 import matplotlib.pyplot as plt
 import check_hard_coded_values
-from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary
+from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary
 
 # TODO LIST:
 # Add cell-fnode repulsion
@@ -249,6 +249,16 @@ FOCAD_F_MATURE = 1.0  # [nN] force threshold to transition nascent->mature
 FOCAD_T_NASCENT_MAX = 120.0  # [s] max nascent lifetime before disassembly if unresolved
 FOCAD_T_DETACHED_GRACE = 30.0  # [s] detached grace before disassembly
 FOCAD_T_DISASSEMBLY = 20.0  # [s] time spent detached in disassembling state before deletion
+ENABLE_FOCAD_BIRTH = True
+FOCAD_BIRTH_SPECIES_INDEX = 0  # species index in CELL C_sp controlling biochemical gate
+FOCAD_BIRTH_N_MIN = 2  # minimum target adhesions per cell
+FOCAD_BIRTH_N_MAX = 3 * INIT_N_FOCAD_PER_CELL  # hard cap / maximum target adhesions per cell
+FOCAD_BIRTH_K_0 = 0.001  # [1/s] baseline birth rate
+FOCAD_BIRTH_K_MAX = 0.03  # [1/s] max stress/biochemical-driven birth gain
+FOCAD_BIRTH_K_SIGMA = 0.5  # [kPa] stress half-saturation for birth gate
+FOCAD_BIRTH_K_C = 5.0  # concentration half-saturation for birth gate
+FOCAD_BIRTH_HILL_N = 2.0  # Hill exponent for concentration gate
+FOCAD_BIRTH_REFRACTORY = 20.0  # [s] minimum time between consecutive births per cell
 # +====================================================================+
 # | LINC coupling between cell nucleus and FOCAD                       |
 # +====================================================================+
@@ -406,6 +416,12 @@ if INCLUDE_CELLS:
         critical_error = True
     if INCLUDE_FOCAL_ADHESIONS and MAX_FOCAD_ARM_LENGTH < CELL_RADIUS:
         print('ERROR: MAX_FOCAD_ARM_LENGTH: {0} must be bigger than CELL_RADIUS: {1}, as focal adhesions are initiated at the cell surface and should be able to grow away'.format(MAX_FOCAD_ARM_LENGTH, CELL_RADIUS))
+    if INCLUDE_FOCAL_ADHESIONS and FOCAD_BIRTH_N_MAX < INIT_N_FOCAD_PER_CELL:
+        print('ERROR: FOCAD_BIRTH_N_MAX: {0} must be >= INIT_N_FOCAD_PER_CELL: {1}'.format(FOCAD_BIRTH_N_MAX, INIT_N_FOCAD_PER_CELL))
+        critical_error = True
+    if INCLUDE_FOCAL_ADHESIONS and FOCAD_BIRTH_N_MAX < FOCAD_BIRTH_N_MIN:
+        print('ERROR: FOCAD_BIRTH_N_MAX: {0} must be >= FOCAD_BIRTH_N_MIN: {1}'.format(FOCAD_BIRTH_N_MAX, FOCAD_BIRTH_N_MIN))
+        critical_error = True
 elif INCLUDE_FOCAL_ADHESIONS:
     print('ERROR: focal adhesions cannot be included if there are no cells to form them')
     critical_error= True
@@ -416,6 +432,21 @@ if INCLUDE_FIBRE_NETWORK:
         fibre_segment_d_dumping=FIBRE_SEGMENT_D_DUMPING,
         fibre_segment_equilibrium_distance=FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE,
         dt = TIME_STEP,
+    )
+
+if INCLUDE_CELLS and INCLUDE_FOCAL_ADHESIONS and ENABLE_FOCAD_BIRTH:
+    print_focad_birth_calibration_summary(
+        dt=TIME_STEP,
+        init_n_focad_per_cell=INIT_N_FOCAD_PER_CELL,
+        n_min=FOCAD_BIRTH_N_MIN,
+        n_max=FOCAD_BIRTH_N_MAX,
+        k0=FOCAD_BIRTH_K_0,
+        kmax=FOCAD_BIRTH_K_MAX,
+        refractory_s=FOCAD_BIRTH_REFRACTORY,
+        k_sigma=FOCAD_BIRTH_K_SIGMA,
+        k_c=FOCAD_BIRTH_K_C,
+        hill_n=FOCAD_BIRTH_HILL_N,
+        species_index=FOCAD_BIRTH_SPECIES_INDEX,
     )
 
 
@@ -458,7 +489,7 @@ cell_spatial_location_data_file = "cell_spatial_location_data.cpp"
 cell_ecm_interaction_metabolism_file = "cell_ecm_interaction_metabolism.cpp"
 cell_move_file = "cell_move.cpp"
 cell_bucket_location_data_file = "cell_bucket_location_data.cpp"
-cell_update_stress_file = "cell_update_stress.cpp"
+cell_focad_update_file = "cell_focad_update.cpp"
 
 """
   FOCAD
@@ -608,6 +639,16 @@ env.newPropertyFloat("FOCAD_F_MATURE", FOCAD_F_MATURE)
 env.newPropertyFloat("FOCAD_T_NASCENT_MAX", FOCAD_T_NASCENT_MAX)
 env.newPropertyFloat("FOCAD_T_DETACHED_GRACE", FOCAD_T_DETACHED_GRACE)
 env.newPropertyFloat("FOCAD_T_DISASSEMBLY", FOCAD_T_DISASSEMBLY)
+env.newPropertyUInt("ENABLE_FOCAD_BIRTH", ENABLE_FOCAD_BIRTH)
+env.newPropertyUInt("FOCAD_BIRTH_SPECIES_INDEX", FOCAD_BIRTH_SPECIES_INDEX)
+env.newPropertyUInt("FOCAD_BIRTH_N_MIN", FOCAD_BIRTH_N_MIN)
+env.newPropertyUInt("FOCAD_BIRTH_N_MAX", FOCAD_BIRTH_N_MAX)
+env.newPropertyFloat("FOCAD_BIRTH_K_0", FOCAD_BIRTH_K_0)
+env.newPropertyFloat("FOCAD_BIRTH_K_MAX", FOCAD_BIRTH_K_MAX)
+env.newPropertyFloat("FOCAD_BIRTH_K_SIGMA", FOCAD_BIRTH_K_SIGMA)
+env.newPropertyFloat("FOCAD_BIRTH_K_C", FOCAD_BIRTH_K_C)
+env.newPropertyFloat("FOCAD_BIRTH_HILL_N", FOCAD_BIRTH_HILL_N)
+env.newPropertyFloat("FOCAD_BIRTH_REFRACTORY", FOCAD_BIRTH_REFRACTORY)
 env.newPropertyUInt("INCLUDE_LINC_COUPLING", INCLUDE_LINC_COUPLING)
 env.newPropertyFloat("LINC_K_ELAST", LINC_K_ELAST)
 env.newPropertyFloat("LINC_D_DUMPING", LINC_D_DUMPING)
@@ -945,6 +986,7 @@ if MOVING_BOUNDARIES:
   CELL agent
 """
 if INCLUDE_CELLS:
+    cell_focad_update_fn = None
     CELL_agent = model.newAgent("CELL")
     CELL_agent.newVariableInt("id", 0)
     CELL_agent.newVariableFloat("x", 0.0)
@@ -971,6 +1013,7 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableInt("cell_type", 0) # to represent different phenotypes, e.g. for different cell lines or for cancer vs stromal cells. The specific meaning of the values assigned to this variable is up to the user and is not defined by the model.
     CELL_agent.newVariableFloat("clock", 0.0) # internal clock of the cell to switch phases
     CELL_agent.newVariableInt("completed_cycles", 0)
+    CELL_agent.newVariableFloat("focad_birth_cooldown", 0.0)
     CELL_agent.newRTCFunctionFile("cell_spatial_location_data", cell_spatial_location_data_file).setMessageOutput("cell_spatial_location_message")
     CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ecm_grid_location_message")
     CELL_agent.newRTCFunctionFile("cell_move", cell_move_file)
@@ -1019,7 +1062,8 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableArrayFloat("chemotaxis_sensitivity", N_SPECIES)
     if INCLUDE_FOCAL_ADHESIONS:  
         CELL_agent.newRTCFunctionFile("cell_bucket_location_data", cell_bucket_location_data_file).setMessageOutput("cell_bucket_location_message")
-        CELL_agent.newRTCFunctionFile("cell_update_stress", cell_update_stress_file).setMessageInput("focad_bucket_location_message")
+        cell_focad_update_fn = CELL_agent.newRTCFunctionFile("cell_focad_update", cell_focad_update_file)
+        cell_focad_update_fn.setMessageInput("focad_bucket_location_message")
         
 """
   FOCAD agent
@@ -1079,9 +1123,12 @@ if INCLUDE_FOCAL_ADHESIONS:
     FOCAD_agent.newRTCFunctionFile("focad_bucket_location_data", focad_bucket_location_data_file).setMessageOutput("focad_bucket_location_message")
     FOCAD_agent.newRTCFunctionFile("focad_spatial_location_data", focad_spatial_location_data_file).setMessageOutput("focad_spatial_location_message")
     FOCAD_agent.newRTCFunctionFile("focad_anchor_update", focad_anchor_update_file).setMessageInput("cell_bucket_location_message")
-    faf = FOCAD_agent.newRTCFunctionFile("focad_fnode_interaction", focad_fnode_interaction_file).setMessageInput("fnode_spatial_location_message")
+    faf = FOCAD_agent.newRTCFunctionFile("focad_fnode_interaction", focad_fnode_interaction_file)
+    faf.setMessageInput("fnode_spatial_location_message")
     faf.setAllowAgentDeath(True) # WARNING: if this flag is not set, the function will not be able to actually kill the agent (eventhough the function returns flamegpu::DEAD), which will cause errors in the logic of the model.
     FOCAD_agent.newRTCFunctionFile("focad_move", focad_move_file).setMessageInput("fnode_bucket_location_message")        
+    # Now that the agent exists, set it as the output agent of the cell_focad_update function, which allows focal adhesion agents to be created and destroyed by that function based on the state of the cell and the local environment.
+    cell_focad_update_fn.setAgentOutput(FOCAD_agent)
 
 
 
@@ -1293,6 +1340,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_M_DURATION")                    
                 instance.setVariableFloat("clock", cycle_clock)
                 instance.setVariableInt("completed_cycles",0)
+                instance.setVariableFloat("focad_birth_cooldown", 0.0)
                 
                 anchor_pos = getRandomCoordsAroundPoint(N_ANCHOR_POINTS, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_NUCLEUS_RADIUS, on_surface=True)
                 instance.setVariableArrayFloat("x_i", anchor_pos[:, 0].tolist())
@@ -1798,7 +1846,7 @@ if INCLUDE_FIBRE_NETWORK:
         model.newLayer("L7_FOCAD_Locations_1").addAgentFunction("FOCAD", "focad_spatial_location_data")
         model.newLayer("L7_FOCAD_Locations_2").addAgentFunction("FOCAD", "focad_bucket_location_data")
         model.newLayer("L7_FNODE_Force_Update").addAgentFunction("FNODE", "fnode_focad_interaction") 
-        model.newLayer("L7_CELL_Stress_Update").addAgentFunction("CELL", "cell_update_stress") 
+        model.newLayer("L7_CELL_Stress_Update").addAgentFunction("CELL", "cell_focad_update") 
 
 # L8_Agent_Movement
 if INCLUDE_CELLS:

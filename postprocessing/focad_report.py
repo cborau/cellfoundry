@@ -59,6 +59,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Display plots interactively",
     )
+    parser.add_argument(
+        "--n-cells",
+        type=float,
+        default=None,
+        help="Override number of cells used to compute avg FOCAD per cell (defaults to MODEL_CONFIG.N_CELLS if available)",
+    )
     return parser.parse_args()
 
 
@@ -79,7 +85,32 @@ def compute_last20_stats(df: pd.DataFrame, prefix: str) -> dict[str, float]:
         if col in tail.columns:
             out[f"{prefix}_{col}_mean_last20"] = float(tail[col].mean())
             out[f"{prefix}_{col}_std_last20"] = float(tail[col].std(ddof=1)) if len(tail) > 1 else 0.0
+    if "avg_focad_per_cell" in tail.columns:
+        out[f"{prefix}_avg_focad_per_cell_mean_last20"] = float(tail["avg_focad_per_cell"].mean())
+        out[f"{prefix}_avg_focad_per_cell_std_last20"] = float(tail["avg_focad_per_cell"].std(ddof=1)) if len(tail) > 1 else 0.0
     return out
+
+
+def resolve_n_cells(data: dict[str, Any], override_n_cells: float | None) -> float | None:
+    if override_n_cells is not None:
+        return float(override_n_cells)
+
+    model_cfg = data.get("MODEL_CONFIG", None)
+    if model_cfg is None:
+        return None
+
+    n_cells = getattr(model_cfg, "N_CELLS", None)
+    if n_cells is None:
+        return None
+
+    try:
+        n_cells_f = float(n_cells)
+    except (TypeError, ValueError):
+        return None
+
+    if n_cells_f <= 0:
+        return None
+    return n_cells_f
 
 
 def compute_polarity_summary(fpol: pd.DataFrame, fmet: pd.DataFrame) -> dict[str, float | bool]:
@@ -145,6 +176,44 @@ def make_plots(fmet: pd.DataFrame, fpol: pd.DataFrame, outdir: Path, tag: str, s
     ax.legend(lines + lines2, labels + labels2, loc="best")
     fig.tight_layout()
     fig.savefig(outdir / f"fa_metrics_trends_{tag}.png", dpi=180)
+
+    if "avg_focad_per_cell" in fmet.columns:
+        avg_window = max(5, min(25, len(fmet) // 6 if len(fmet) > 0 else 5))
+        avg_series = fmet["avg_focad_per_cell"]
+        avg_median = avg_series.rolling(window=avg_window, min_periods=1).median()
+        avg_p25 = avg_series.rolling(window=avg_window, min_periods=1).quantile(0.25)
+        avg_p75 = avg_series.rolling(window=avg_window, min_periods=1).quantile(0.75)
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.plot(
+            fmet["step"],
+            avg_series,
+            label="avg_focad_per_cell (raw)",
+            linewidth=1.4,
+            alpha=0.35,
+            color="tab:blue",
+        )
+        ax.fill_between(
+            fmet["step"],
+            avg_p25,
+            avg_p75,
+            alpha=0.22,
+            color="tab:blue",
+            label=f"IQR (rolling, w={avg_window})",
+        )
+        ax.plot(
+            fmet["step"],
+            avg_median,
+            label=f"median (rolling, w={avg_window})",
+            linewidth=2.4,
+            color="tab:blue",
+        )
+        ax.set_xlabel("Step")
+        ax.set_ylabel("Average FOCAD per cell")
+        ax.grid(alpha=0.25)
+        ax.legend(loc="best")
+        fig.tight_layout()
+        fig.savefig(outdir / f"fa_avg_focad_per_cell_{tag}.png", dpi=180)
 
     window = max(3, min(15, len(fmet) // 5 if len(fmet) > 0 else 3))
     smooth_attached = fmet["attached_ratio"].rolling(window=window, min_periods=1).mean()
@@ -283,6 +352,13 @@ These plots summarize focal-adhesion (FOCAD) mechanics over simulation time.
 - Thick lines: smoothed trends (rolling mean window shown in legend).
 - Useful for seeing long-timescale drift and comparing conditions with less noise.
 
+2b) fa_avg_focad_per_cell_{tag}.png
+----------------------------------
+- Time series of average FOCAD count per cell.
+- Computed as total FOCAD / N_CELLS (from MODEL_CONFIG.N_CELLS or --n-cells override).
+- Shows raw series, rolling median, and shaded interquartile range (IQR, 25th–75th percentiles).
+- Useful to verify that birth/death dynamics stay in expected bounds over time.
+
 3) fa_polarity_attached_ratio_{tag}.png
 --------------------------------------
 - front_attached_ratio: attachment fraction among front-facing adhesions.
@@ -333,6 +409,10 @@ def main() -> None:
     if len(fpol) > 0:
         fpol.insert(0, "step", range(1, len(fpol) + 1))
 
+    n_cells = resolve_n_cells(data, args.n_cells)
+    if len(fmet) > 0 and n_cells is not None and n_cells > 0 and "total" in fmet.columns:
+        fmet["avg_focad_per_cell"] = fmet["total"] / n_cells
+
     metrics_csv = outdir / f"fa_metrics_{args.tag}.csv"
     polarity_csv = outdir / f"fa_polarity_{args.tag}.csv"
     summary_csv = outdir / f"fa_summary_{args.tag}.csv"
@@ -352,6 +432,10 @@ def main() -> None:
     print(f"Saved: {polarity_csv}")
     print(f"Saved: {summary_csv}")
     print(f"Saved: {explanation_txt}")
+    if n_cells is not None:
+        print(f"Avg FOCAD/cell computed with N_CELLS={n_cells:g}")
+    else:
+        print("Avg FOCAD/cell not computed: N_CELLS unavailable (use --n-cells to override)")
     print(f"Saved plots with tag '{args.tag}' in: {outdir}")
 
 

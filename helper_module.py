@@ -264,6 +264,121 @@ def print_fibre_calibration_summary(
     }
 
 
+def print_focad_birth_calibration_summary(
+    *,
+    dt,
+    init_n_focad_per_cell,
+    n_min,
+    n_max,
+    k0,
+    kmax,
+    refractory_s,
+    k_sigma,
+    k_c,
+    hill_n,
+    species_index,
+):
+    """
+    Print a compact calibration summary for CELL-driven FOCAD birth dynamics.
+
+    Birth model in cell_focad_update:
+      h_sigma = sigma_+ / (k_sigma + sigma_+)
+      h_c     = C^n / (k_c^n + C^n)
+      h_birth = h_sigma * h_c
+      k_birth = k0 + kmax * h_birth
+      p_step  = 1 - exp(-k_birth * dt)
+
+    Notes:
+      - Single-birth-attempt per CELL per step (agent_out semantics)
+      - Additional refractory timer further caps effective birth frequency
+    """
+
+    eps = 1e-20
+    dt = float(dt)
+    k0 = float(k0)
+    kmax = float(kmax)
+    refractory_s = float(refractory_s)
+    n_min = int(n_min)
+    n_max = int(n_max)
+    init_n = int(init_n_focad_per_cell)
+
+    k_birth_min = max(0.0, k0)
+    k_birth_max = max(0.0, k0 + kmax)
+
+    p_step_min = 1.0 - math.exp(-k_birth_min * dt)
+    p_step_max = 1.0 - math.exp(-k_birth_max * dt)
+
+    births_per_min_min = 60.0 * k_birth_min
+    births_per_min_max = 60.0 * k_birth_max
+
+    delta_to_max = max(0, n_max - init_n)
+    if delta_to_max == 0:
+        est_fill_time_s = 0.0
+    else:
+        effective_births_per_s = k_birth_max
+        if refractory_s > eps:
+            effective_births_per_s = min(effective_births_per_s, 1.0 / refractory_s)
+        if effective_births_per_s > eps:
+            est_fill_time_s = delta_to_max / effective_births_per_s
+        else:
+            est_fill_time_s = float("inf")
+
+    if refractory_s > eps:
+        refractory_steps = refractory_s / max(dt, eps)
+        max_births_per_min_refractory = 60.0 / refractory_s
+    else:
+        refractory_steps = 0.0
+        max_births_per_min_refractory = float("inf")
+
+    print("\n--- FOCAD birth calibration summary ---")
+    print(f"dt = {dt:.4g} s")
+    print(f"species index for biochemical gate = {species_index}")
+    print(f"target count bounds: n_min = {n_min}, n_max = {n_max} (init = {init_n})")
+    print(f"kinetic rates: k0 = {k0:.4g} 1/s, kmax = {kmax:.4g} 1/s")
+    print(f"gate half-saturation: k_sigma = {k_sigma:.4g} kPa, k_c = {k_c:.4g}, hill_n = {hill_n:.4g}")
+    print(f"k_birth range = [{k_birth_min:.4g}, {k_birth_max:.4g}] 1/s")
+    print(f"p_step range = [{p_step_min:.4g}, {p_step_max:.4g}] per step")
+    print(f"expected births per cell per minute (rate-only) = [{births_per_min_min:.4g}, {births_per_min_max:.4g}]")
+
+    if math.isfinite(max_births_per_min_refractory):
+        print(
+            f"refractory = {refractory_s:.4g} s (~{refractory_steps:.3g} steps), "
+            f"absolute cap ≈ {max_births_per_min_refractory:.4g} births/cell/min"
+        )
+    else:
+        print("refractory disabled (<=0): no refractory cap")
+
+    if math.isfinite(est_fill_time_s):
+        print(
+            f"estimated time to go from init ({init_n}) to n_max ({n_max}) at max drive (ignoring deaths) "
+            f"≈ {est_fill_time_s:.4g} s ({est_fill_time_s/60.0:.4g} min)"
+        )
+    else:
+        print(
+            f"estimated time to go from init ({init_n}) to n_max ({n_max}) at max drive (ignoring deaths): infinite "
+            f"(effective birth rate <= 0)"
+        )
+
+    print("tuning guideline:")
+    print("  - Too many births: decrease kmax, increase refractory, or increase k_sigma/k_c")
+    print("  - Too few births: increase kmax or decrease k_sigma/k_c")
+    print("  - Bursty births: increase refractory (and/or lower k0)")
+    print()
+
+    return {
+        "k_birth_min": k_birth_min,
+        "k_birth_max": k_birth_max,
+        "p_step_min": p_step_min,
+        "p_step_max": p_step_max,
+        "births_per_min_min": births_per_min_min,
+        "births_per_min_max": births_per_min_max,
+        "refractory_steps": refractory_steps,
+        "max_births_per_min_refractory": max_births_per_min_refractory,
+        "delta_to_max": float(delta_to_max),
+        "est_fill_time_s": est_fill_time_s,
+    }
+
+
 
 #Helper functions for agent initialization
 # +--------------------------------------------------------------------+

@@ -12,7 +12,7 @@ What it looks for
 
 - RTC functions (including chained message IO, possibly multi-line):
     CELL_agent.newRTCFunctionFile("cell_bucket_location_data", file_var).setMessageOutput("cell_bucket_location_message")
-    CELL_agent.newRTCFunctionFile("cell_update_stress", file_var).setMessageInput("focad_bucket_location_message")
+    CELL_agent.newRTCFunctionFile("cell_focad_update", file_var).setMessageInput("focad_bucket_location_message")
 
 Output
 - A LaTeX file containing, for each agent:
