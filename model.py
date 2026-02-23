@@ -1079,7 +1079,8 @@ if INCLUDE_FOCAL_ADHESIONS:
     FOCAD_agent.newRTCFunctionFile("focad_bucket_location_data", focad_bucket_location_data_file).setMessageOutput("focad_bucket_location_message")
     FOCAD_agent.newRTCFunctionFile("focad_spatial_location_data", focad_spatial_location_data_file).setMessageOutput("focad_spatial_location_message")
     FOCAD_agent.newRTCFunctionFile("focad_anchor_update", focad_anchor_update_file).setMessageInput("cell_bucket_location_message")
-    FOCAD_agent.newRTCFunctionFile("focad_fnode_interaction", focad_fnode_interaction_file).setMessageInput("fnode_spatial_location_message")
+    faf = FOCAD_agent.newRTCFunctionFile("focad_fnode_interaction", focad_fnode_interaction_file).setMessageInput("fnode_spatial_location_message")
+    faf.setAllowAgentDeath(True) # WARNING: if this flag is not set, the function will not be able to actually kill the agent (eventhough the function returns flamegpu::DEAD), which will cause errors in the logic of the model.
     FOCAD_agent.newRTCFunctionFile("focad_move", focad_move_file).setMessageInput("fnode_bucket_location_message")        
 
 
