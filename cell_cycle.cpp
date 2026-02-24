@@ -9,12 +9,19 @@ FLAMEGPU_DEVICE_FUNCTION float vec3Length(const float x, const float y, const fl
 FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone) {
   int id = FLAMEGPU->getVariable<int>("id");
   auto MACRO_MAX_GLOBAL_CELL_ID = FLAMEGPU->environment.getMacroProperty<int, 1>("MACRO_MAX_GLOBAL_CELL_ID");
+  const uint32_t DEAD_CELLS_DISAPPEAR = FLAMEGPU->environment.getProperty<uint32_t>("DEAD_CELLS_DISAPPEAR");
   int agent_cell_type = FLAMEGPU->getVariable<int>("cell_type");
   int agent_max_global_cell_id = FLAMEGPU->getVariable<int>("max_global_cell_id");
+  const int agent_marked_for_removal = FLAMEGPU->getVariable<int>("marked_for_removal");
+  if (agent_marked_for_removal == 1 && DEAD_CELLS_DISAPPEAR != 0) {
+    return flamegpu::DEAD;
+  }
   const int agent_dead = FLAMEGPU->getVariable<int>("dead");
   if (agent_dead == 1) {
     return flamegpu::ALIVE; // Note: if DEAD_CELLS_DISAPPEAR = True, a dead CELL agent remains ALIVE for flamegpu purposes and may still interact with other agents.
   }
+  FLAMEGPU->setVariable<int>("just_divided", 0);
+  FLAMEGPU->setVariable<int>("daughter_id", -1);
   
   // Agent position
   float agent_x = FLAMEGPU->getVariable<float>("x");
@@ -92,7 +99,6 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
   const float acute_hypoxia_threshold = FLAMEGPU->environment.getProperty<float>("CELL_ACUTE_HYPOXIA_THRESHOLD");
   const float acute_nutrient_threshold = FLAMEGPU->environment.getProperty<float>("CELL_ACUTE_NUTRIENT_THRESHOLD");
   const float acute_stress_threshold = FLAMEGPU->environment.getProperty<float>("CELL_ACUTE_STRESS_THRESHOLD");
-  const uint32_t DEAD_CELLS_DISAPPEAR = FLAMEGPU->environment.getProperty<uint32_t>("DEAD_CELLS_DISAPPEAR");
 
   // Proxies used for death pathways (can be remapped by user model semantics)
   const float oxygen_proxy = agent_C_sp[0];
@@ -158,14 +164,19 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
   if (death_cause >= 0) {
     FLAMEGPU->setVariable<int>("dead", 1);
     FLAMEGPU->setVariable<int>("dead_by", death_cause);
+    FLAMEGPU->setVariable<int>("just_divided", 0);
+    FLAMEGPU->setVariable<int>("daughter_id", -1);
     FLAMEGPU->setVariable<float>("vx", 0.0f);
     FLAMEGPU->setVariable<float>("vy", 0.0f);
     FLAMEGPU->setVariable<float>("vz", 0.0f);
     if (DEAD_CELLS_DISAPPEAR != 0) {
-      return flamegpu::DEAD;
+      FLAMEGPU->setVariable<int>("marked_for_removal", 1);
+      return flamegpu::ALIVE; // Note: if DEAD_CELLS_DISAPPEAR = True, a dead CELL agent remains ALIVE for flamegpu purposes and may still interact with other agents.
     }
+    FLAMEGPU->setVariable<int>("marked_for_removal", 0);
     return flamegpu::ALIVE; // Note: if DEAD_CELLS_DISAPPEAR = True, a dead CELL agent remains ALIVE for flamegpu purposes and may still interact with other agents.
   }
+  FLAMEGPU->setVariable<int>("marked_for_removal", 0);
   
   float agent_clock = FLAMEGPU->getVariable<float>("clock");
   agent_clock += TIME_STEP;
@@ -259,9 +270,13 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
         vec3Div(rand_dir_x, rand_dir_y, rand_dir_z, rand_dir_length);
       }
       const int daughter_cell_id = MACRO_MAX_GLOBAL_CELL_ID.addAtomic(1);
-      FLAMEGPU->setVariable<int>("max_global_cell_id", daughter_cell_id); // update parent's max_global_cell_id to ensure unique ids for next divisions
       FLAMEGPU->setVariable<int>("dead", 0);
       FLAMEGPU->setVariable<int>("dead_by", -1);
+      FLAMEGPU->setVariable<int>("mother_id", -1);
+      FLAMEGPU->setVariable<int>("just_divided", 1);
+      FLAMEGPU->setVariable<int>("daughter_id", daughter_cell_id);
+      FLAMEGPU->setVariable<int>("marked_for_removal", 0);
+      // Daugther cell is created with the same properties as the parent, but with a new unique id, position offset in the opposite direction to the parent, and some damage inherited from the parent.
       FLAMEGPU->agent_out.setVariable<int>("id", daughter_cell_id);
       FLAMEGPU->agent_out.setVariable<int>("max_global_cell_id", daughter_cell_id);
       FLAMEGPU->agent_out.setVariable<float>("x", daughter_x);
@@ -293,6 +308,10 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
       FLAMEGPU->agent_out.setVariable<int>("completed_cycles", 0);
       FLAMEGPU->agent_out.setVariable<int>("dead", 0);
       FLAMEGPU->agent_out.setVariable<int>("dead_by", -1);
+      FLAMEGPU->agent_out.setVariable<int>("mother_id", id);
+      FLAMEGPU->agent_out.setVariable<int>("just_divided", 0);
+      FLAMEGPU->agent_out.setVariable<int>("daughter_id", -1);
+      FLAMEGPU->agent_out.setVariable<int>("marked_for_removal", 0);
       FLAMEGPU->agent_out.setVariable<float>("focad_birth_cooldown", fmaxf(0.0f, agent_focad_birth_cooldown));
       FLAMEGPU->agent_out.setVariable<float>("damage", damage_share);
 

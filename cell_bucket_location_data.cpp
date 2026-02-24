@@ -20,6 +20,9 @@ FLAMEGPU_AGENT_FUNCTION(cell_bucket_location_data, flamegpu::MessageNone, flameg
   FLAMEGPU->message_out.setVariable<float>("ory", FLAMEGPU->getVariable<float>("ory"));
   FLAMEGPU->message_out.setVariable<float>("orz", FLAMEGPU->getVariable<float>("orz"));
   FLAMEGPU->message_out.setVariable<int>("dead", FLAMEGPU->getVariable<int>("dead"));
+  FLAMEGPU->message_out.setVariable<int>("just_divided", FLAMEGPU->getVariable<int>("just_divided"));
+  FLAMEGPU->message_out.setVariable<int>("daughter_id", FLAMEGPU->getVariable<int>("daughter_id"));
+  FLAMEGPU->message_out.setVariable<int>("marked_for_removal", FLAMEGPU->getVariable<int>("marked_for_removal"));
 
   const uint8_t N_ANCHOR_POINTS = 100; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
 

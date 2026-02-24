@@ -232,7 +232,7 @@ CELL_ACUTE_STRESS_THRESHOLD = 25.0     # [kPa = nN/um^2] immediate mechanical-fa
 _sim_time_s = STEPS * TIME_STEP
 if INCLUDE_CELLS and INCLUDE_CELL_CYCLE and CELL_CYCLE_DURATION > 0.0:
     _doublings = _sim_time_s / CELL_CYCLE_DURATION
-    MAX_EXPECTED_N_CELLS = max(N_CELLS, int(math.ceil(N_CELLS * (2.0 ** _doublings) * 1.1)))
+    MAX_EXPECTED_N_CELLS = max(N_CELLS, int(math.ceil(N_CELLS * (2.0 ** _doublings) * 2.0))) # * 2.0 is a safety factor. 
     print(f"Estimated maximum cell population at the end of the simulation: {MAX_EXPECTED_N_CELLS} (doublings: {_doublings:.2f})")
 else:
     MAX_EXPECTED_N_CELLS = N_CELLS + 1 # add 1 as bucket messages requires min <> max bounds.
@@ -529,6 +529,7 @@ cell_maxid_update_file = "cell_MaxID_update.cpp"
 focad_bucket_location_data_file = "focad_bucket_location_data.cpp"
 focad_spatial_location_data_file = "focad_spatial_location_data.cpp"
 focad_anchor_update_file = "focad_anchor_update.cpp"
+focad_post_cycle_update_file = "focad_post_cycle_update.cpp"
 focad_fnode_interaction_file = "focad_fnode_interaction.cpp"
 focad_move_file = "focad_move.cpp"
 
@@ -857,6 +858,9 @@ if INCLUDE_CELLS:
         CELL_bucket_location_message.newVariableFloat("ory")
         CELL_bucket_location_message.newVariableFloat("orz")
         CELL_bucket_location_message.newVariableInt("dead")
+        CELL_bucket_location_message.newVariableInt("just_divided")
+        CELL_bucket_location_message.newVariableInt("daughter_id")
+        CELL_bucket_location_message.newVariableInt("marked_for_removal")
         CELL_bucket_location_message.newVariableArrayFloat("x_i", N_ANCHOR_POINTS)
         CELL_bucket_location_message.newVariableArrayFloat("y_i", N_ANCHOR_POINTS)
         CELL_bucket_location_message.newVariableArrayFloat("z_i", N_ANCHOR_POINTS)
@@ -1063,6 +1067,10 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableFloat("damage", 0.0) # accumulated damage score in [0,1], where 1 is lethal threshold
     CELL_agent.newVariableInt("dead", 0) # 0: alive, 1: dead
     CELL_agent.newVariableInt("dead_by", -1) # -1:none, 0:hypoxia, 1:starvation, 2:mechanical, 3:cumulative_damage
+    CELL_agent.newVariableInt("mother_id", -1)
+    CELL_agent.newVariableInt("daughter_id", -1)
+    CELL_agent.newVariableInt("just_divided", 0)
+    CELL_agent.newVariableInt("marked_for_removal", 0)
     CELL_agent.newVariableFloat("focad_birth_cooldown", 0.0)
     CELL_agent.newRTCFunctionFile("cell_spatial_location_data", cell_spatial_location_data_file).setMessageOutput("cell_spatial_location_message")
     CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ecm_grid_location_message")
@@ -1178,6 +1186,9 @@ if INCLUDE_FOCAL_ADHESIONS:
     FOCAD_agent.newRTCFunctionFile("focad_bucket_location_data", focad_bucket_location_data_file).setMessageOutput("focad_bucket_location_message")
     FOCAD_agent.newRTCFunctionFile("focad_spatial_location_data", focad_spatial_location_data_file).setMessageOutput("focad_spatial_location_message")
     FOCAD_agent.newRTCFunctionFile("focad_anchor_update", focad_anchor_update_file).setMessageInput("cell_bucket_location_message")
+    fpcu = FOCAD_agent.newRTCFunctionFile("focad_post_cycle_update", focad_post_cycle_update_file)
+    fpcu.setMessageInput("cell_bucket_location_message")
+    fpcu.setAllowAgentDeath(True)
     faf = FOCAD_agent.newRTCFunctionFile("focad_fnode_interaction", focad_fnode_interaction_file)
     faf.setMessageInput("fnode_spatial_location_message")
     faf.setAllowAgentDeath(True) # WARNING: if this flag is not set, the function will not be able to actually kill the agent (eventhough the function returns flamegpu::DEAD), which will cause errors in the logic of the model.
@@ -1335,8 +1346,6 @@ class initAgentPopulations(pyflamegpu.HostFunction):
 
 
             FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
-            max_global_cell_id_macro = FLAMEGPU.environment.getMacroPropertyInt("MACRO_MAX_GLOBAL_CELL_ID")
-            max_global_cell_id_macro[0] = current_id + count
 
             
         # CELLS
@@ -1403,6 +1412,10 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableFloat("damage", 0.0)
                 instance.setVariableInt("dead", 0)
                 instance.setVariableInt("dead_by", -1)
+                instance.setVariableInt("mother_id", -1)
+                instance.setVariableInt("daughter_id", -1)
+                instance.setVariableInt("just_divided", 0)
+                instance.setVariableInt("marked_for_removal", 0)
                 instance.setVariableFloat("focad_birth_cooldown", 0.0)
                 
                 anchor_pos = getRandomCoordsAroundPoint(N_ANCHOR_POINTS, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_NUCLEUS_RADIUS, on_surface=True)
@@ -1453,6 +1466,8 @@ class initAgentPopulations(pyflamegpu.HostFunction):
 
 
             FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
+            max_global_cell_id_macro = FLAMEGPU.environment.getMacroPropertyInt("MACRO_MAX_GLOBAL_CELL_ID")
+            max_global_cell_id_macro[0] = current_id + count
             
         if INCLUDE_FOCAL_ADHESIONS:
             current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
@@ -1893,6 +1908,9 @@ if INCLUDE_CELLS and INCLUDE_DIFFUSION:
 if INCLUDE_CELLS and INCLUDE_CELL_CYCLE:
     model.newLayer("L3_Cell_MaxID_Update").addAgentFunction("CELL", "cell_MaxID_update")
     model.newLayer("L3_Cell_Cycle").addAgentFunction("CELL", "cell_cycle")
+    if INCLUDE_FOCAL_ADHESIONS:
+        model.newLayer("L3_Cell_Bucket_PostCycle").addAgentFunction("CELL", "cell_bucket_location_data")
+        model.newLayer("L3_FOCAD_PostCycle_Update").addAgentFunction("FOCAD", "focad_post_cycle_update")
 if INCLUDE_DIFFUSION:
     # L4_ECM_Csp_Update
     model.newLayer("L4_ECM_Csp_Update").addAgentFunction("ECM", "ecm_Csp_update")
