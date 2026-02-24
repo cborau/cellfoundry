@@ -20,6 +20,8 @@ import check_hard_coded_values
 from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary
 
 # TODO LIST:
+# Modify cell_focad_update to create new adhesions when the number is below a minimum number threshold (e.g. right after division)
+# In cell cycle, update anchor points after division.
 # Add cell-fnode repulsion
 # Add FOCAD interaction with other FOCADs from other cells?
 # Include new FOCAD agent generation? (e.g. when a cell starts migrating, it generates new FOCAD agents at its leading edge, which then try to find fibres to attach to. When a FOCAD agent detaches, it can be removed from the simulation or moved back to the cell center to be reused later)
