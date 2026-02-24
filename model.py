@@ -183,11 +183,9 @@ HETEROGENEOUS_DIFFUSION = False  # if True, diffusion coefficient is multiplied 
 # | CELL PARAMETERS                                                    |
 # +====================================================================+
 INCLUDE_CELLS = True
-INCLUDE_CELL_ORIENTATION = True
-INCLUDE_CELL_CELL_INTERACTION = False
-INCLUDE_CELL_CYCLE = False
+INCLUDE_CELL_CELL_INTERACTION = False # TODO: implement cell-cell repulsion and adhesion
+INCLUDE_CELL_CYCLE = True # If True, cells go through a simplified cell cycle with G1, S, G2 and M phases, which can affect their behavior. Also includes birth/death dynamics (WARNING: USER-DEFINED in cell_cycle.cpp).
 PERIODIC_BOUNDARIES_FOR_CELLS = False
-CELL_ORIENTATION_RATE = 1.0  # [1/s] TODO: check whether cell reorient themselves faster than ECM
 N_CELLS = 1
 CELL_K_ELAST = 2.0  # [nN/um]
 CELL_D_DUMPING = 0.4  # [nN·s/um]
@@ -197,22 +195,48 @@ CELL_SPEED_REF = 0.75 # [um/s] Another option is to define it according to grid 
 BROWNIAN_MOTION_STRENGTH = CELL_SPEED_REF / 10.0 # [um/s] Strength of random movement added to cell velocity to represent Brownian motion and other non-directed motility.
 print(f'Initial cell speed reference: {CELL_SPEED_REF} um/s')   
 print(f'Initial Brownian motion strength: {BROWNIAN_MOTION_STRENGTH} um/s')
-CYCLE_PHASE_G1_DURATION = 10.0 * 3600 #[s]
-CYCLE_PHASE_S_DURATION = 8.0 * 3600 #[s]
-CYCLE_PHASE_G2_DURATION = 4.0 * 3600 #[s]
-CYCLE_PHASE_M_DURATION = 2.0 * 3600 #[s]
+debug_acc = 40000
+CYCLE_PHASE_G1_DURATION = 10.0 * 3600 / debug_acc #[s]
+CYCLE_PHASE_S_DURATION = 8.0 * 3600 / debug_acc#[s]
+CYCLE_PHASE_G2_DURATION = 4.0 * 3600 / debug_acc#[s]
+CYCLE_PHASE_M_DURATION = 2.0 * 3600 / debug_acc #[s]
 CYCLE_PHASE_G1_START = 0.0 #[s]
 CYCLE_PHASE_S_START = CYCLE_PHASE_G1_DURATION
 CYCLE_PHASE_G2_START = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION
 CYCLE_PHASE_M_START = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION + CYCLE_PHASE_G2_DURATION
 CELL_CYCLE_DURATION = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION + CYCLE_PHASE_G2_DURATION + CYCLE_PHASE_M_DURATION # typically 24h 
-INIT_ECM_CONCENTRATION_VALS = [0.0, 0.0]  # initial concentration of each species on the ECM agents
-INIT_CELL_CONCENTRATION_VALS = [15.0, 0.0]  # initial concentration of each species on the CELL agents
+INIT_ECM_CONCENTRATION_VALS = [20.0, 20.0]  # initial concentration of each species on the ECM agents
+INIT_CELL_CONCENTRATION_VALS = [15.0, 15.0]  # initial concentration of each species on the CELL agents
 INIT_CELL_CONC_MASS_VALS = [x * (4/3 * 3.1415926 * CELL_RADIUS**3) for x in INIT_CELL_CONCENTRATION_VALS]  # initial mass of each species on the CELL agents
 INIT_ECM_SAT_CONCENTRATION_VALS = [0.0, 10.0]  # initial saturation concentration of each species on the ECM agents
 INIT_CELL_CONSUMPTION_RATES = [0.001, 0.0]  # consumption rate of each species by the CELL agents 
 INIT_CELL_PRODUCTION_RATES = [0.0, 10.0]  # production rate of each species by the CELL agents 
 INIT_CELL_REACTION_RATES = [0.00018, 0.00018]  # metabolic reaction rates of each species by the CELL agents 
+
+# Cell damage and death pathway controls
+# Note: cell stress variables (sig_xx, sig_eig_1, etc.) are in [nN/um^2], numerically equivalent to [kPa].
+CELL_HYPOXIA_THRESHOLD = 0.03          # [concentration units of C_sp[0]] chronic hypoxia damage threshold
+CELL_NUTRIENT_THRESHOLD = 0.03         # [concentration units of C_sp[1]] chronic nutrient-deprivation threshold
+CELL_STRESS_THRESHOLD = 8.0            # [kPa = nN/um^2] chronic mechanical-overstress damage threshold
+CELL_HYPOXIA_DAMAGE_RATE = 2.0e-4      # [1/s] damage accumulation rate scaling under hypoxia (hour-scale)
+CELL_NUTRIENT_DAMAGE_RATE = 1.5e-4     # [1/s] damage accumulation rate scaling under nutrient deprivation (hour-scale)
+CELL_STRESS_DAMAGE_RATE = 1.0e-4       # [1/s] damage accumulation rate scaling under mechanical overstress (hour-scale)
+CELL_BASAL_DAMAGE_REPAIR_RATE = 5.0e-5 # [1/s] baseline damage repair rate
+CELL_ACUTE_HYPOXIA_THRESHOLD = 0.005   # [concentration units of C_sp[0]] immediate death threshold
+CELL_ACUTE_NUTRIENT_THRESHOLD = 0.005  # [concentration units of C_sp[1]] immediate death threshold
+CELL_ACUTE_STRESS_THRESHOLD = 25.0     # [kPa = nN/um^2] immediate mechanical-failure threshold
+
+# Estimate maximum CELL population for bucket bounds and id allocation.
+# Assumes worst-case synchronized proliferative expansion with cycle period CELL_CYCLE_DURATION.
+_sim_time_s = STEPS * TIME_STEP
+if INCLUDE_CELLS and INCLUDE_CELL_CYCLE and CELL_CYCLE_DURATION > 0.0:
+    _doublings = _sim_time_s / CELL_CYCLE_DURATION
+    MAX_EXPECTED_N_CELLS = max(N_CELLS, int(math.ceil(N_CELLS * (2.0 ** _doublings) * 1.1)))
+    print(f"Estimated maximum cell population at the end of the simulation: {MAX_EXPECTED_N_CELLS} (doublings: {_doublings:.2f})")
+else:
+    MAX_EXPECTED_N_CELLS = N_CELLS + 1 # add 1 as bucket messages requires min <> max bounds.
+    
+
 # +====================================================================+
 # | FOCAL ADHESION PARAMETERS  (units: um, s, nN)                      |
 # +====================================================================+
@@ -496,6 +520,7 @@ cell_move_file = "cell_move.cpp"
 cell_bucket_location_data_file = "cell_bucket_location_data.cpp"
 cell_focad_update_file = "cell_focad_update.cpp"
 cell_cycle_file = "cell_cycle.cpp"
+cell_new_count_reset_file = "cell_new_count_reset.cpp"
 
 """
   FOCAD
@@ -582,6 +607,8 @@ env.newMacroPropertyFloat("BOUNDARY_CONC_INIT_MULTI", N_SPECIES,
                           6)  # a 2D matrix with the 6 boundary conditions (columns) for each species (rows)
 env.newMacroPropertyFloat("BOUNDARY_CONC_FIXED_MULTI", N_SPECIES,
                           6)  # a 2D matrix with the 6 boundary conditions (columns) for each species (rows)
+env.newMacroPropertyInt("MACRO_N_NEW_CELLS", 1)  # atomic counter of new CELLs created during current step
+env.newMacroPropertyInt("MACRO_MAX_GLOBAL_CELL_ID", 1)  # shared current max CELL id across all proliferating cells
 env.newPropertyUInt("ECM_POPULATION_SIZE", ECM_POPULATION_SIZE)
 
 # Fibre network parameters
@@ -592,7 +619,6 @@ env.newPropertyFloat("FIBRE_SEGMENT_D_DUMPING",FIBRE_SEGMENT_D_DUMPING)
 env.newPropertyFloat("FIBRE_NODE_REPULSION_K", FIBRE_NODE_REPULSION_K)
 
 # Cell properties TODO: MOVE SOME OF THESE PROPERTIES TO THE CELL AGENT 
-env.newPropertyUInt("INCLUDE_CELL_ORIENTATION", INCLUDE_CELL_ORIENTATION)
 env.newPropertyUInt("INCLUDE_CELL_CELL_INTERACTION", INCLUDE_CELL_CELL_INTERACTION)
 env.newPropertyUInt("PERIODIC_BOUNDARIES_FOR_CELLS", PERIODIC_BOUNDARIES_FOR_CELLS)
 env.newPropertyUInt("N_CELLS", N_CELLS)
@@ -602,7 +628,6 @@ env.newPropertyFloat("CELL_RADIUS", CELL_RADIUS)
 env.newPropertyFloat("CELL_NUCLEUS_RADIUS", CELL_NUCLEUS_RADIUS)
 env.newPropertyFloat("CELL_SPEED_REF", CELL_SPEED_REF)
 env.newPropertyFloat("BROWNIAN_MOTION_STRENGTH", BROWNIAN_MOTION_STRENGTH)
-env.newPropertyFloat("CELL_ORIENTATION_RATE", CELL_ORIENTATION_RATE)
 env.newPropertyFloat("MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION", MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION)
 env.newPropertyFloat("MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION", MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION)
 env.newPropertyFloat("CELL_CYCLE_DURATION", CELL_CYCLE_DURATION)
@@ -614,6 +639,16 @@ env.newPropertyFloat("CYCLE_PHASE_G1_START", CYCLE_PHASE_G1_START)
 env.newPropertyFloat("CYCLE_PHASE_S_START", CYCLE_PHASE_S_START)
 env.newPropertyFloat("CYCLE_PHASE_G2_START", CYCLE_PHASE_G2_START)
 env.newPropertyFloat("CYCLE_PHASE_M_START", CYCLE_PHASE_M_START)
+env.newPropertyFloat("CELL_HYPOXIA_THRESHOLD", CELL_HYPOXIA_THRESHOLD)
+env.newPropertyFloat("CELL_NUTRIENT_THRESHOLD", CELL_NUTRIENT_THRESHOLD)
+env.newPropertyFloat("CELL_STRESS_THRESHOLD", CELL_STRESS_THRESHOLD)
+env.newPropertyFloat("CELL_HYPOXIA_DAMAGE_RATE", CELL_HYPOXIA_DAMAGE_RATE)
+env.newPropertyFloat("CELL_NUTRIENT_DAMAGE_RATE", CELL_NUTRIENT_DAMAGE_RATE)
+env.newPropertyFloat("CELL_STRESS_DAMAGE_RATE", CELL_STRESS_DAMAGE_RATE)
+env.newPropertyFloat("CELL_BASAL_DAMAGE_REPAIR_RATE", CELL_BASAL_DAMAGE_REPAIR_RATE)
+env.newPropertyFloat("CELL_ACUTE_HYPOXIA_THRESHOLD", CELL_ACUTE_HYPOXIA_THRESHOLD)
+env.newPropertyFloat("CELL_ACUTE_NUTRIENT_THRESHOLD", CELL_ACUTE_NUTRIENT_THRESHOLD)
+env.newPropertyFloat("CELL_ACUTE_STRESS_THRESHOLD", CELL_ACUTE_STRESS_THRESHOLD)
 
 # Focal adhesion properties
 env.newPropertyUInt("INCLUDE_FOCAL_ADHESIONS", INCLUDE_FOCAL_ADHESIONS)
@@ -806,7 +841,7 @@ if INCLUDE_CELLS:
     if INCLUDE_FOCAL_ADHESIONS:
         CELL_bucket_location_message = model.newMessageBucket("cell_bucket_location_message")
         cell_bucket_min = 8 + N_NODES + 1
-        cell_bucket_max = 8 + N_NODES + N_CELLS
+        cell_bucket_max = 8 + N_NODES + MAX_EXPECTED_N_CELLS
         if cell_bucket_max <= cell_bucket_min:
             cell_bucket_max = cell_bucket_min + 1 # to avoid compilation errors in case there is only 1 cell
         # +8 because domain corners have idx from 1 to 8, +N_NODES because fibre nodes have idx from 9 to 8+N_NODES. WARNING: make sure to initialize cell agents starting from index 8+N_NODES
@@ -1020,6 +1055,8 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableInt("cell_type", 0) # to represent different phenotypes, e.g. for different cell lines or for cancer vs stromal cells. The specific meaning of the values assigned to this variable is up to the user and is not defined by the model.
     CELL_agent.newVariableFloat("clock", 0.0) # internal clock of the cell to switch phases
     CELL_agent.newVariableInt("completed_cycles", 0)
+    CELL_agent.newVariableInt("max_global_cell_id", 0) # cached global max CELL id (updated in pre-cycle layer)
+    CELL_agent.newVariableFloat("damage", 0.0) # accumulated damage score in [0,1], where 1 is lethal threshold
     CELL_agent.newVariableFloat("focad_birth_cooldown", 0.0)
     CELL_agent.newRTCFunctionFile("cell_spatial_location_data", cell_spatial_location_data_file).setMessageOutput("cell_spatial_location_message")
     CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ecm_grid_location_message")
@@ -1072,6 +1109,7 @@ if INCLUDE_CELLS:
         cell_focad_update_fn = CELL_agent.newRTCFunctionFile("cell_focad_update", cell_focad_update_file)
         cell_focad_update_fn.setMessageInput("focad_bucket_location_message")
     if INCLUDE_CELL_CYCLE:
+        CELL_agent.newRTCFunctionFile("cell_new_count_reset", cell_new_count_reset_file)
         ccf = CELL_agent.newRTCFunctionFile("cell_cycle", cell_cycle_file)
         ccf.setAgentOutput(CELL_agent)
         ccf.setAllowAgentDeath(True) 
@@ -1291,6 +1329,9 @@ class initAgentPopulations(pyflamegpu.HostFunction):
 
 
             FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
+            max_global_cell_id_macro = FLAMEGPU.environment.getMacroPropertyInt("MACRO_MAX_GLOBAL_CELL_ID")
+            max_global_cell_id_macro[0] = current_id + count
+
             
         # CELLS
         if INCLUDE_CELLS:
@@ -1352,6 +1393,8 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_M_DURATION")                    
                 instance.setVariableFloat("clock", cycle_clock)
                 instance.setVariableInt("completed_cycles",0)
+                instance.setVariableInt("max_global_cell_id", current_id + N_CELLS - 1)
+                instance.setVariableFloat("damage", 0.0)
                 instance.setVariableFloat("focad_birth_cooldown", 0.0)
                 
                 anchor_pos = getRandomCoordsAroundPoint(N_ANCHOR_POINTS, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_NUCLEUS_RADIUS, on_surface=True)
@@ -1552,6 +1595,9 @@ class initMacroProperties(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
         global INIT_ECM_CONCENTRATION_VALS, ECM_POPULATION_SIZE, N_SPECIES
         resetMacroProperties(self, FLAMEGPU)
+        # Keep macro new-cell counter zeroed before simulation starts.
+        n_new_cells_macro = FLAMEGPU.environment.getMacroPropertyInt("MACRO_N_NEW_CELLS")
+        n_new_cells_macro[0] = 0
         c_sp_macro = FLAMEGPU.environment.getMacroPropertyFloat("C_SP_MACRO")
         for i in range(ECM_POPULATION_SIZE):
             for j in range(N_SPECIES):
@@ -1751,10 +1797,10 @@ class ReportFAMetrics(pyflamegpu.HostFunction):
         attached_ratio = attached_count / float(n_focad)
         mean_force_mag = total_force_mag / float(n_focad)
 
-        print(
-            f"FA metrics (step {stepCounter:04d}) -> attached={int(attached_count)}/{n_focad} "
-            f"(ratio={attached_ratio:.3f}), mean|F|={mean_force_mag:.4f} nN"
-        )
+        # print(
+        #     f"FA metrics (step {stepCounter:04d}) -> attached={int(attached_count)}/{n_focad} "
+        #     f"(ratio={attached_ratio:.3f}), mean|F|={mean_force_mag:.4f} nN"
+        # )
 
 
                           
@@ -1840,6 +1886,7 @@ if INCLUDE_FIBRE_NETWORK:
 if INCLUDE_CELLS and INCLUDE_DIFFUSION:    
     model.newLayer("L3_Metabolism").addAgentFunction("CELL", "cell_ecm_interaction_metabolism")
 if INCLUDE_CELLS and INCLUDE_CELL_CYCLE:
+    model.newLayer("L3_Cell_New_Count_Reset").addAgentFunction("CELL", "cell_new_count_reset")
     model.newLayer("L3_Cell_Cycle").addAgentFunction("CELL", "cell_cycle")
 if INCLUDE_DIFFUSION:
     # L4_ECM_Csp_Update

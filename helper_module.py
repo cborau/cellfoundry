@@ -831,6 +831,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
                 file.write("0.0 0.0 0.0 \n")
 
     if include_cells:
+        cell_ids = list()
         cell_coords = list()
         cell_velocity = list()
         cell_orientation = list()
@@ -840,6 +841,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
         cell_cycle_phase = list()
         cell_completed_cycles = list()
         cell_type = list()
+        cell_damage = list()
         cell_anchor_points_x = list()
         cell_anchor_points_y = list()
         cell_anchor_points_z = list()
@@ -850,6 +852,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
         cell_agent.sortInt("id", pyflamegpu.HostAgentAPI.Asc)
         av = cell_agent.getPopulationData()
         for ai in av:
+            cell_id_ai = ai.getVariableInt("id")
             coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
             velocity_ai = (ai.getVariableFloat("vx"), ai.getVariableFloat("vy"), ai.getVariableFloat("vz"))
             orientation_ai = (ai.getVariableFloat("orx"), ai.getVariableFloat("ory"), ai.getVariableFloat("orz"))
@@ -859,6 +862,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             cycle_phase_ai = ai.getVariableInt("cycle_phase")
             completed_cycles_ai = ai.getVariableInt("completed_cycles")
             cell_type_ai = ai.getVariableInt("cell_type")
+            damage_ai = ai.getVariableFloat("damage")
             cell_anchor_points_x.append(ai.getVariableArrayFloat("x_i"))
             cell_anchor_points_y.append(ai.getVariableArrayFloat("y_i"))
             cell_anchor_points_z.append(ai.getVariableArrayFloat("z_i"))
@@ -872,7 +876,8 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             cell_completed_cycles.append(completed_cycles_ai)
             cell_cycle_phase.append(cycle_phase_ai)
             cell_type.append(cell_type_ai)
-
+            cell_damage.append(damage_ai)
+            cell_ids.append(cell_id_ai)
         with open(str(file_path), 'w') as file:
             for line in save_context["celldata"]:
                 file.write(line + '\n')
@@ -903,6 +908,14 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             
             file.write("POINT_DATA {} \n".format(num_cells + num_total_anchor_points))
 
+            file.write("SCALARS id int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for id_ai in cell_ids:
+                file.write("{} \n".format(id_ai))
+            for i in range(num_cells):
+                for _ in range(num_anchor_points):
+                    file.write("{} \n".format(cell_ids[i]))
+            
             file.write("SCALARS alignment float 1\n")
             file.write("LOOKUP_TABLE default\n")
             for a_ai in cell_alignment:
@@ -950,6 +963,14 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             for i in range(num_cells):
                 for _ in range(num_anchor_points):
                     file.write("{} \n".format(cell_type[i]))
+
+            file.write("SCALARS damage float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for d_ai in cell_damage:
+                file.write("{:.4f} \n".format(d_ai))
+            for i in range(num_cells):
+                for _ in range(num_anchor_points):
+                    file.write("{:.4f} \n".format(cell_damage[i]))
 
             for s in range(n_species):
                 file.write("SCALARS concentration_species_{0} float 1 \n".format(s))
