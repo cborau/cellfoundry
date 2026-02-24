@@ -44,6 +44,13 @@ FLAMEGPU_DEVICE_FUNCTION void normalize3(float &x, float &y, float &z) {
  *   - Updated CELL position, velocity, orientation-aligned motion state
  */
 FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone) {
+  if (FLAMEGPU->getVariable<int>("dead") == 1) {
+    // Note: if DEAD_CELLS_DISAPPEAR = True, a dead CELL agent remains ALIVE for flamegpu purposes and may still interact with other agents.
+    FLAMEGPU->setVariable<float>("vx", 0.0f);
+    FLAMEGPU->setVariable<float>("vy", 0.0f);
+    FLAMEGPU->setVariable<float>("vz", 0.0f);
+    return flamegpu::ALIVE;
+  }
   //Get agent variables (agent calling the function)
   int agent_id = FLAMEGPU->getVariable<int>("id");
   float agent_x = FLAMEGPU->getVariable<float>("x");

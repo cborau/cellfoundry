@@ -842,6 +842,8 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
         cell_completed_cycles = list()
         cell_type = list()
         cell_damage = list()
+        cell_dead = list()
+        cell_dead_by = list()
         cell_anchor_points_x = list()
         cell_anchor_points_y = list()
         cell_anchor_points_z = list()
@@ -863,6 +865,8 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             completed_cycles_ai = ai.getVariableInt("completed_cycles")
             cell_type_ai = ai.getVariableInt("cell_type")
             damage_ai = ai.getVariableFloat("damage")
+            dead_ai = ai.getVariableInt("dead")
+            dead_by_ai = ai.getVariableInt("dead_by")
             cell_anchor_points_x.append(ai.getVariableArrayFloat("x_i"))
             cell_anchor_points_y.append(ai.getVariableArrayFloat("y_i"))
             cell_anchor_points_z.append(ai.getVariableArrayFloat("z_i"))
@@ -877,11 +881,13 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             cell_cycle_phase.append(cycle_phase_ai)
             cell_type.append(cell_type_ai)
             cell_damage.append(damage_ai)
+            cell_dead.append(dead_ai)
+            cell_dead_by.append(dead_by_ai)
             cell_ids.append(cell_id_ai)
         with open(str(file_path), 'w') as file:
             for line in save_context["celldata"]:
                 file.write(line + '\n')
-            num_cells = FLAMEGPU.environment.getPropertyUInt("N_CELLS")
+            num_cells = len(cell_ids)
             num_anchor_points = FLAMEGPU.environment.getPropertyUInt("N_ANCHOR_POINTS")
             num_total_anchor_points = num_cells * num_anchor_points
             num_points = num_cells + num_total_anchor_points
@@ -971,6 +977,22 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             for i in range(num_cells):
                 for _ in range(num_anchor_points):
                     file.write("{:.4f} \n".format(cell_damage[i]))
+
+            file.write("SCALARS dead int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for d_ai in cell_dead:
+                file.write("{} \n".format(d_ai))
+            for i in range(num_cells):
+                for _ in range(num_anchor_points):
+                    file.write("{} \n".format(cell_dead[i]))
+
+            file.write("SCALARS dead_by int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for d_ai in cell_dead_by:
+                file.write("{} \n".format(d_ai))
+            for i in range(num_cells):
+                for _ in range(num_anchor_points):
+                    file.write("{} \n".format(cell_dead_by[i]))
 
             for s in range(n_species):
                 file.write("SCALARS concentration_species_{0} float 1 \n".format(s))

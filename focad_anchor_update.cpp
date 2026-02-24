@@ -47,6 +47,7 @@ FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::
   // -------------------------
   // Expect exactly 1 message in that bucket (the corresponding CELL).
   uint8_t found_cell = 0;
+  int found_cell_dead = 0;
 
   // We will pick the closest anchor to the current FOCAD position (x,y,z)
   float best_r2 = 2 * (MAX_FOCAD_ARM_LENGTH * MAX_FOCAD_ARM_LENGTH); // 2 times just to give it some margin
@@ -58,6 +59,12 @@ FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::
   for (const auto &message : FLAMEGPU->message_in(agent_cell_id)) {
     // Optional sanity check: you can ensure message id matches agent_cell_id
     // const int message_id = message.getVariable<int>("id");
+
+    found_cell_dead = message.getVariable<int>("dead");
+    if (found_cell_dead != 0) {
+      found_cell = 1;
+      break;
+    }
 
     // Update stored nucleus center
     agent_x_c = message.getVariable<float>("x");
@@ -100,11 +107,18 @@ FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::
   }
 
   // If we found the cell message, update the chosen anchor
-  if (found_cell != 0) {
+  if (found_cell != 0 && found_cell_dead == 0) {
     agent_x_i = best_xi;
     agent_y_i = best_yi;
     agent_z_i = best_zi;
     agent_anchor_id = best_anchor_id;
+  } else {
+    FLAMEGPU->setVariable<int>("attached", 0);
+    FLAMEGPU->setVariable<uint8_t>("active", 0);
+    FLAMEGPU->setVariable<int>("fnode_id", -1);
+    FLAMEGPU->setVariable<float>("fx", 0.0f);
+    FLAMEGPU->setVariable<float>("fy", 0.0f);
+    FLAMEGPU->setVariable<float>("fz", 0.0f);
   }
   // else: no message found in bucket (should not happen). Keep previous x_c/xi values.
 

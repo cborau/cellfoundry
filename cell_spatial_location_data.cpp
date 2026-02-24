@@ -12,6 +12,7 @@
  *   - MessageSpatial3D record for nearby agent queries
  */
 FLAMEGPU_AGENT_FUNCTION(cell_spatial_location_data, flamegpu::MessageNone, flamegpu::MessageSpatial3D) {
+
   FLAMEGPU->message_out.setVariable<int>("id", FLAMEGPU->getVariable<int>("id"));
   FLAMEGPU->message_out.setVariable<float>("x", FLAMEGPU->getVariable<float>("x"));
   FLAMEGPU->message_out.setVariable<float>("y", FLAMEGPU->getVariable<float>("y"));
@@ -46,6 +47,9 @@ FLAMEGPU_AGENT_FUNCTION(cell_spatial_location_data, flamegpu::MessageNone, flame
     float ncol = FLAMEGPU->getVariable<float, N_SPECIES>("M_sp", i);
     FLAMEGPU->message_out.setVariable<float, N_SPECIES>("M_sp", i, ncol);
   }
+
+  FLAMEGPU->message_out.setVariable<int>("dead", FLAMEGPU->getVariable<int>("dead"));
+  FLAMEGPU->message_out.setVariable<int>("dead_by", FLAMEGPU->getVariable<int>("dead_by"));
 
 
   return flamegpu::ALIVE;

@@ -14,6 +14,9 @@
  *   - Atomic updates to ECM concentration macro-property (C_SP_MACRO)
  */
 FLAMEGPU_AGENT_FUNCTION(cell_ecm_interaction_metabolism, flamegpu::MessageArray3D, flamegpu::MessageNone) {
+  if (FLAMEGPU->getVariable<int>("dead") == 1) {
+    return flamegpu::ALIVE; // Note: if DEAD_CELLS_DISAPPEAR = True, a dead CELL agent remains ALIVE for flamegpu purposes and may still interact with other agents.
+  }
   //Get agent variables (agent calling the function)
   int agent_id = FLAMEGPU->getVariable<int>("id");
   float agent_x = FLAMEGPU->getVariable<float>("x");

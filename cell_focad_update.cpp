@@ -196,6 +196,9 @@ FLAMEGPU_DEVICE_FUNCTION void eig_sym_3x3(
  *   stress: nN/um^2 [kPa]
  */
 FLAMEGPU_AGENT_FUNCTION(cell_focad_update, flamegpu::MessageBucket, flamegpu::MessageNone) {
+  if (FLAMEGPU->getVariable<int>("dead") == 1) {
+    return flamegpu::ALIVE; // Note: if DEAD_CELLS_DISAPPEAR = True, a dead CELL agent remains ALIVE for flamegpu purposes and may still interact with other agents.
+  }
   // -------------------------
   // Read CELL agent state
   // -------------------------

@@ -185,6 +185,7 @@ HETEROGENEOUS_DIFFUSION = False  # if True, diffusion coefficient is multiplied 
 INCLUDE_CELLS = True
 INCLUDE_CELL_CELL_INTERACTION = False # TODO: implement cell-cell repulsion and adhesion
 INCLUDE_CELL_CYCLE = True # If True, cells go through a simplified cell cycle with G1, S, G2 and M phases, which can affect their behavior. Also includes birth/death dynamics (WARNING: USER-DEFINED in cell_cycle.cpp).
+DEAD_CELLS_DISAPPEAR = False  # If True, dead CELL agents are removed; if False, they remain inert with dead=1.
 PERIODIC_BOUNDARIES_FOR_CELLS = False
 N_CELLS = 1
 CELL_K_ELAST = 2.0  # [nN/um]
@@ -520,7 +521,7 @@ cell_move_file = "cell_move.cpp"
 cell_bucket_location_data_file = "cell_bucket_location_data.cpp"
 cell_focad_update_file = "cell_focad_update.cpp"
 cell_cycle_file = "cell_cycle.cpp"
-cell_new_count_reset_file = "cell_new_count_reset.cpp"
+cell_maxid_update_file = "cell_MaxID_update.cpp"
 
 """
   FOCAD
@@ -607,7 +608,6 @@ env.newMacroPropertyFloat("BOUNDARY_CONC_INIT_MULTI", N_SPECIES,
                           6)  # a 2D matrix with the 6 boundary conditions (columns) for each species (rows)
 env.newMacroPropertyFloat("BOUNDARY_CONC_FIXED_MULTI", N_SPECIES,
                           6)  # a 2D matrix with the 6 boundary conditions (columns) for each species (rows)
-env.newMacroPropertyInt("MACRO_N_NEW_CELLS", 1)  # atomic counter of new CELLs created during current step
 env.newMacroPropertyInt("MACRO_MAX_GLOBAL_CELL_ID", 1)  # shared current max CELL id across all proliferating cells
 env.newPropertyUInt("ECM_POPULATION_SIZE", ECM_POPULATION_SIZE)
 
@@ -620,6 +620,7 @@ env.newPropertyFloat("FIBRE_NODE_REPULSION_K", FIBRE_NODE_REPULSION_K)
 
 # Cell properties TODO: MOVE SOME OF THESE PROPERTIES TO THE CELL AGENT 
 env.newPropertyUInt("INCLUDE_CELL_CELL_INTERACTION", INCLUDE_CELL_CELL_INTERACTION)
+env.newPropertyUInt("DEAD_CELLS_DISAPPEAR", DEAD_CELLS_DISAPPEAR)
 env.newPropertyUInt("PERIODIC_BOUNDARIES_FOR_CELLS", PERIODIC_BOUNDARIES_FOR_CELLS)
 env.newPropertyUInt("N_CELLS", N_CELLS)
 env.newPropertyFloat("CELL_K_ELAST", CELL_K_ELAST)
@@ -836,6 +837,8 @@ if INCLUDE_CELLS:
     CELL_spatial_location_message.newVariableFloat("cycle_phase")
     CELL_spatial_location_message.newVariableFloat("clock")
     CELL_spatial_location_message.newVariableInt("completed_cycles")
+    CELL_spatial_location_message.newVariableInt("dead")
+    CELL_spatial_location_message.newVariableInt("dead_by")
         
     # Set the range and bounds.
     if INCLUDE_FOCAL_ADHESIONS:
@@ -853,6 +856,7 @@ if INCLUDE_CELLS:
         CELL_bucket_location_message.newVariableFloat("orx")
         CELL_bucket_location_message.newVariableFloat("ory")
         CELL_bucket_location_message.newVariableFloat("orz")
+        CELL_bucket_location_message.newVariableInt("dead")
         CELL_bucket_location_message.newVariableArrayFloat("x_i", N_ANCHOR_POINTS)
         CELL_bucket_location_message.newVariableArrayFloat("y_i", N_ANCHOR_POINTS)
         CELL_bucket_location_message.newVariableArrayFloat("z_i", N_ANCHOR_POINTS)
@@ -1057,6 +1061,8 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableInt("completed_cycles", 0)
     CELL_agent.newVariableInt("max_global_cell_id", 0) # cached global max CELL id (updated in pre-cycle layer)
     CELL_agent.newVariableFloat("damage", 0.0) # accumulated damage score in [0,1], where 1 is lethal threshold
+    CELL_agent.newVariableInt("dead", 0) # 0: alive, 1: dead
+    CELL_agent.newVariableInt("dead_by", -1) # -1:none, 0:hypoxia, 1:starvation, 2:mechanical, 3:cumulative_damage
     CELL_agent.newVariableFloat("focad_birth_cooldown", 0.0)
     CELL_agent.newRTCFunctionFile("cell_spatial_location_data", cell_spatial_location_data_file).setMessageOutput("cell_spatial_location_message")
     CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ecm_grid_location_message")
@@ -1109,7 +1115,7 @@ if INCLUDE_CELLS:
         cell_focad_update_fn = CELL_agent.newRTCFunctionFile("cell_focad_update", cell_focad_update_file)
         cell_focad_update_fn.setMessageInput("focad_bucket_location_message")
     if INCLUDE_CELL_CYCLE:
-        CELL_agent.newRTCFunctionFile("cell_new_count_reset", cell_new_count_reset_file)
+        CELL_agent.newRTCFunctionFile("cell_MaxID_update", cell_maxid_update_file)
         ccf = CELL_agent.newRTCFunctionFile("cell_cycle", cell_cycle_file)
         ccf.setAgentOutput(CELL_agent)
         ccf.setAllowAgentDeath(True) 
@@ -1395,6 +1401,8 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableInt("completed_cycles",0)
                 instance.setVariableInt("max_global_cell_id", current_id + N_CELLS - 1)
                 instance.setVariableFloat("damage", 0.0)
+                instance.setVariableInt("dead", 0)
+                instance.setVariableInt("dead_by", -1)
                 instance.setVariableFloat("focad_birth_cooldown", 0.0)
                 
                 anchor_pos = getRandomCoordsAroundPoint(N_ANCHOR_POINTS, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_NUCLEUS_RADIUS, on_surface=True)
@@ -1595,9 +1603,6 @@ class initMacroProperties(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
         global INIT_ECM_CONCENTRATION_VALS, ECM_POPULATION_SIZE, N_SPECIES
         resetMacroProperties(self, FLAMEGPU)
-        # Keep macro new-cell counter zeroed before simulation starts.
-        n_new_cells_macro = FLAMEGPU.environment.getMacroPropertyInt("MACRO_N_NEW_CELLS")
-        n_new_cells_macro[0] = 0
         c_sp_macro = FLAMEGPU.environment.getMacroPropertyFloat("C_SP_MACRO")
         for i in range(ECM_POPULATION_SIZE):
             for j in range(N_SPECIES):
@@ -1886,7 +1891,7 @@ if INCLUDE_FIBRE_NETWORK:
 if INCLUDE_CELLS and INCLUDE_DIFFUSION:    
     model.newLayer("L3_Metabolism").addAgentFunction("CELL", "cell_ecm_interaction_metabolism")
 if INCLUDE_CELLS and INCLUDE_CELL_CYCLE:
-    model.newLayer("L3_Cell_New_Count_Reset").addAgentFunction("CELL", "cell_new_count_reset")
+    model.newLayer("L3_Cell_MaxID_Update").addAgentFunction("CELL", "cell_MaxID_update")
     model.newLayer("L3_Cell_Cycle").addAgentFunction("CELL", "cell_cycle")
 if INCLUDE_DIFFUSION:
     # L4_ECM_Csp_Update

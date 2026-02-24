@@ -8,10 +8,13 @@ FLAMEGPU_DEVICE_FUNCTION float vec3Length(const float x, const float y, const fl
 }
 FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone) {
   int id = FLAMEGPU->getVariable<int>("id");
-  auto MACRO_N_NEW_CELLS = FLAMEGPU->environment.getMacroProperty<int, 1>("MACRO_N_NEW_CELLS");
   auto MACRO_MAX_GLOBAL_CELL_ID = FLAMEGPU->environment.getMacroProperty<int, 1>("MACRO_MAX_GLOBAL_CELL_ID");
   int agent_cell_type = FLAMEGPU->getVariable<int>("cell_type");
   int agent_max_global_cell_id = FLAMEGPU->getVariable<int>("max_global_cell_id");
+  const int agent_dead = FLAMEGPU->getVariable<int>("dead");
+  if (agent_dead == 1) {
+    return flamegpu::ALIVE; // Note: if DEAD_CELLS_DISAPPEAR = True, a dead CELL agent remains ALIVE for flamegpu purposes and may still interact with other agents.
+  }
   
   // Agent position
   float agent_x = FLAMEGPU->getVariable<float>("x");
@@ -89,6 +92,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
   const float acute_hypoxia_threshold = FLAMEGPU->environment.getProperty<float>("CELL_ACUTE_HYPOXIA_THRESHOLD");
   const float acute_nutrient_threshold = FLAMEGPU->environment.getProperty<float>("CELL_ACUTE_NUTRIENT_THRESHOLD");
   const float acute_stress_threshold = FLAMEGPU->environment.getProperty<float>("CELL_ACUTE_STRESS_THRESHOLD");
+  const uint32_t DEAD_CELLS_DISAPPEAR = FLAMEGPU->environment.getProperty<uint32_t>("DEAD_CELLS_DISAPPEAR");
 
   // Proxies used for death pathways (can be remapped by user model semantics)
   const float oxygen_proxy = agent_C_sp[0];
@@ -140,13 +144,27 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
   agent_damage -= TIME_STEP * damage_repair_multiplier * basal_damage_repair_rate;
   agent_damage = fminf(1.0f, fmaxf(0.0f, agent_damage));
   FLAMEGPU->setVariable<float>("damage", agent_damage);
-  if (oxygen_proxy < acute_hypoxia_threshold || nutrient_proxy < acute_nutrient_threshold || tensile_stress_proxy > acute_stress_threshold) {
-    printf("Cell [id: %d] at t: %g - ACUTE STRESS DETECTED! Proxies -> oxygen: %g, nutrient: %g, tensile_stress: %g\n", id, FLAMEGPU->getVariable<float>("clock"), oxygen_proxy, nutrient_proxy, tensile_stress_proxy);
-    //return flamegpu::DEAD;
+  int death_cause = -1;
+  if (oxygen_proxy < acute_hypoxia_threshold) {
+    death_cause = 0;
+  } else if (nutrient_proxy < acute_nutrient_threshold) {
+    death_cause = 1;
+  } else if (tensile_stress_proxy > acute_stress_threshold) {
+    death_cause = 2;
+  } else if (agent_damage >= damage_death_threshold) {
+    death_cause = 3;
   }
-  if (agent_damage >= damage_death_threshold) {
-    printf("Cell [id: %d] at t: %g - DEATH OCCURS! Damage: %g (threshold: %g)\n", id, FLAMEGPU->getVariable<float>("clock"), agent_damage, damage_death_threshold);
-    //return flamegpu::DEAD;
+
+  if (death_cause >= 0) {
+    FLAMEGPU->setVariable<int>("dead", 1);
+    FLAMEGPU->setVariable<int>("dead_by", death_cause);
+    FLAMEGPU->setVariable<float>("vx", 0.0f);
+    FLAMEGPU->setVariable<float>("vy", 0.0f);
+    FLAMEGPU->setVariable<float>("vz", 0.0f);
+    if (DEAD_CELLS_DISAPPEAR != 0) {
+      return flamegpu::DEAD;
+    }
+    return flamegpu::ALIVE; // Note: if DEAD_CELLS_DISAPPEAR = True, a dead CELL agent remains ALIVE for flamegpu purposes and may still interact with other agents.
   }
   
   float agent_clock = FLAMEGPU->getVariable<float>("clock");
@@ -240,10 +258,10 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
       } else {
         vec3Div(rand_dir_x, rand_dir_y, rand_dir_z, rand_dir_length);
       }
-      //printf("macro n new cells before division: %d \n", (int)MACRO_N_NEW_CELLS);
       const int daughter_cell_id = MACRO_MAX_GLOBAL_CELL_ID.addAtomic(1);
-      MACRO_N_NEW_CELLS.addAtomic(1);
       FLAMEGPU->setVariable<int>("max_global_cell_id", daughter_cell_id); // update parent's max_global_cell_id to ensure unique ids for next divisions
+      FLAMEGPU->setVariable<int>("dead", 0);
+      FLAMEGPU->setVariable<int>("dead_by", -1);
       FLAMEGPU->agent_out.setVariable<int>("id", daughter_cell_id);
       FLAMEGPU->agent_out.setVariable<int>("max_global_cell_id", daughter_cell_id);
       FLAMEGPU->agent_out.setVariable<float>("x", daughter_x);
@@ -273,6 +291,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
       FLAMEGPU->agent_out.setVariable<int>("cycle_phase", 1);
       FLAMEGPU->agent_out.setVariable<int>("cell_type", agent_cell_type);
       FLAMEGPU->agent_out.setVariable<int>("completed_cycles", 0);
+      FLAMEGPU->agent_out.setVariable<int>("dead", 0);
+      FLAMEGPU->agent_out.setVariable<int>("dead_by", -1);
       FLAMEGPU->agent_out.setVariable<float>("focad_birth_cooldown", fmaxf(0.0f, agent_focad_birth_cooldown));
       FLAMEGPU->agent_out.setVariable<float>("damage", damage_share);
 
