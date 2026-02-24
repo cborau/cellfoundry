@@ -188,7 +188,7 @@ INCLUDE_CELL_CELL_INTERACTION = False
 INCLUDE_CELL_CYCLE = False
 PERIODIC_BOUNDARIES_FOR_CELLS = False
 CELL_ORIENTATION_RATE = 1.0  # [1/s] TODO: check whether cell reorient themselves faster than ECM
-N_CELLS = 50
+N_CELLS = 1
 CELL_K_ELAST = 2.0  # [nN/um]
 CELL_D_DUMPING = 0.4  # [nN·s/um]
 CELL_RADIUS = 8.412 #ECM_ECM_EQUILIBRIUM_DISTANCE / 2 # [um]
@@ -197,15 +197,15 @@ CELL_SPEED_REF = 0.75 # [um/s] Another option is to define it according to grid 
 BROWNIAN_MOTION_STRENGTH = CELL_SPEED_REF / 10.0 # [um/s] Strength of random movement added to cell velocity to represent Brownian motion and other non-directed motility.
 print(f'Initial cell speed reference: {CELL_SPEED_REF} um/s')   
 print(f'Initial Brownian motion strength: {BROWNIAN_MOTION_STRENGTH} um/s')
-CYCLE_PHASE_G1_DURATION = 10.0 #[h]
-CYCLE_PHASE_S_DURATION = 8.0
-CYCLE_PHASE_G2_DURATION = 4.0
-CYCLE_PHASE_M_DURATION = 2.0
-CYCLE_PHASE_G1_START = 0.0 #[h]
+CYCLE_PHASE_G1_DURATION = 10.0 * 3600 #[s]
+CYCLE_PHASE_S_DURATION = 8.0 * 3600 #[s]
+CYCLE_PHASE_G2_DURATION = 4.0 * 3600 #[s]
+CYCLE_PHASE_M_DURATION = 2.0 * 3600 #[s]
+CYCLE_PHASE_G1_START = 0.0 #[s]
 CYCLE_PHASE_S_START = CYCLE_PHASE_G1_DURATION
 CYCLE_PHASE_G2_START = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION
 CYCLE_PHASE_M_START = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION + CYCLE_PHASE_G2_DURATION
-CELL_CYCLE_DURATION = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION + CYCLE_PHASE_G2_DURATION + CYCLE_PHASE_M_DURATION # typically 24h [h]
+CELL_CYCLE_DURATION = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION + CYCLE_PHASE_G2_DURATION + CYCLE_PHASE_M_DURATION # typically 24h 
 INIT_ECM_CONCENTRATION_VALS = [0.0, 0.0]  # initial concentration of each species on the ECM agents
 INIT_CELL_CONCENTRATION_VALS = [15.0, 0.0]  # initial concentration of each species on the CELL agents
 INIT_CELL_CONC_MASS_VALS = [x * (4/3 * 3.1415926 * CELL_RADIUS**3) for x in INIT_CELL_CONCENTRATION_VALS]  # initial mass of each species on the CELL agents
@@ -424,7 +424,10 @@ if INCLUDE_CELLS:
         print('ERROR: FOCAD_BIRTH_N_MAX: {0} must be >= FOCAD_BIRTH_N_MIN: {1}'.format(FOCAD_BIRTH_N_MAX, FOCAD_BIRTH_N_MIN))
         critical_error = True
 elif INCLUDE_FOCAL_ADHESIONS:
-    print('ERROR: focal adhesions cannot be included if there are no cells to form them')
+    print('ERROR: focal adhesions cannot be included if there are no cells to form them (INCLUDE_CELLS is set to False)')
+    critical_error= True
+elif INCLUDE_CELL_CYCLE:
+    print('ERROR: cell cycle cannot be included if there are no cells (INCLUDE_CELLS is set to False)')
     critical_error= True
 
 if INCLUDE_FIBRE_NETWORK:
@@ -492,6 +495,7 @@ cell_ecm_interaction_metabolism_file = "cell_ecm_interaction_metabolism.cpp"
 cell_move_file = "cell_move.cpp"
 cell_bucket_location_data_file = "cell_bucket_location_data.cpp"
 cell_focad_update_file = "cell_focad_update.cpp"
+cell_cycle_file = "cell_cycle.cpp"
 
 """
   FOCAD
@@ -1067,6 +1071,10 @@ if INCLUDE_CELLS:
         CELL_agent.newRTCFunctionFile("cell_bucket_location_data", cell_bucket_location_data_file).setMessageOutput("cell_bucket_location_message")
         cell_focad_update_fn = CELL_agent.newRTCFunctionFile("cell_focad_update", cell_focad_update_file)
         cell_focad_update_fn.setMessageInput("focad_bucket_location_message")
+    if INCLUDE_CELL_CYCLE:
+        ccf = CELL_agent.newRTCFunctionFile("cell_cycle", cell_cycle_file)
+        ccf.setAgentOutput(CELL_agent)
+        ccf.setAllowAgentDeath(True) 
         
 """
   FOCAD agent
@@ -1326,6 +1334,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableFloat("radius", CELL_RADIUS)
                 instance.setVariableFloat("nucleus_radius", CELL_NUCLEUS_RADIUS)
                 instance.setVariableFloat("speed_ref", CELL_SPEED_REF)
+                instance.setVariableInt("cell_type", 0) # default cell type 0. Can be used to represent different phenotypes, e.g. for different cell lines or for cancer vs stromal cells. The specific meaning of the values assigned to this variable is up to the user and is not defined by the model.
                 cycle_phase = random.randint(1, 4) # [1:G1] [2:S] [3:G2] [4:M]
                 instance.setVariableInt("cycle_phase", cycle_phase)
                 cycle_clock = 0.0
@@ -1827,9 +1836,11 @@ if INCLUDE_DIFFUSION:
 if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L2_FNODE_Boundary_Interactions").addAgentFunction("FNODE", "fnode_boundary_interaction")
 
-if INCLUDE_CELLS and INCLUDE_DIFFUSION:
-    # L3_Metabolism
+# L3: Metabolism & Cell Cycle
+if INCLUDE_CELLS and INCLUDE_DIFFUSION:    
     model.newLayer("L3_Metabolism").addAgentFunction("CELL", "cell_ecm_interaction_metabolism")
+if INCLUDE_CELLS and INCLUDE_CELL_CYCLE:
+    model.newLayer("L3_Cell_Cycle").addAgentFunction("CELL", "cell_cycle")
 if INCLUDE_DIFFUSION:
     # L4_ECM_Csp_Update
     model.newLayer("L4_ECM_Csp_Update").addAgentFunction("ECM", "ecm_Csp_update")

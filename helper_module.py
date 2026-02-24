@@ -838,6 +838,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
         cell_radius = list()
         cell_clock = list()
         cell_cycle_phase = list()
+        cell_completed_cycles = list()
         cell_type = list()
         cell_anchor_points_x = list()
         cell_anchor_points_y = list()
@@ -856,6 +857,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             radius_ai = ai.getVariableFloat("radius")
             clock_ai = ai.getVariableFloat("clock")
             cycle_phase_ai = ai.getVariableInt("cycle_phase")
+            completed_cycles_ai = ai.getVariableInt("completed_cycles")
             cell_type_ai = ai.getVariableInt("cell_type")
             cell_anchor_points_x.append(ai.getVariableArrayFloat("x_i"))
             cell_anchor_points_y.append(ai.getVariableArrayFloat("y_i"))
@@ -867,6 +869,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             cell_alignment.append(alignment_ai)
             cell_radius.append(radius_ai)
             cell_clock.append(clock_ai)
+            cell_completed_cycles.append(completed_cycles_ai)
             cell_cycle_phase.append(cycle_phase_ai)
             cell_type.append(cell_type_ai)
 
@@ -931,6 +934,14 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             for i in range(num_cells):
                 for _ in range(num_anchor_points):
                     file.write("{} \n".format(cell_cycle_phase[i]))
+                    
+            file.write("SCALARS completed_cycles int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for cc_ai in cell_completed_cycles:
+                file.write("{} \n".format(cc_ai))
+            for i in range(num_cells):
+                for _ in range(num_anchor_points):
+                    file.write("{} \n".format(cell_completed_cycles[i]))
 
             file.write("SCALARS cell_type int 1\n")
             file.write("LOOKUP_TABLE default\n")
