@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Build CELL population reports from CELL VTK outputs.
 

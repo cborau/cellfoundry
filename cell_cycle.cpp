@@ -215,12 +215,12 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
       const float old_agent_x = agent_x;
       const float old_agent_y = agent_y;
       const float old_agent_z = agent_z;
-      const float parent_new_x = old_agent_x + (agent_orx * agent_radius / 2);
-      const float parent_new_y = old_agent_y + (agent_ory * agent_radius / 2);
-      const float parent_new_z = old_agent_z + (agent_orz * agent_radius / 2);
-      const float daughter_x = old_agent_x - (agent_orx * agent_radius / 2);
-      const float daughter_y = old_agent_y - (agent_ory * agent_radius / 2);
-      const float daughter_z = old_agent_z - (agent_orz * agent_radius / 2);
+      const float parent_new_x = old_agent_x + (agent_orx * CELL_RADIUS / 2);
+      const float parent_new_y = old_agent_y + (agent_ory * CELL_RADIUS / 2);
+      const float parent_new_z = old_agent_z + (agent_orz * CELL_RADIUS / 2);
+      const float daughter_x = old_agent_x - (agent_orx * CELL_RADIUS / 2);
+      const float daughter_y = old_agent_y - (agent_ory * CELL_RADIUS / 2);
+      const float daughter_z = old_agent_z - (agent_orz * CELL_RADIUS / 2);
 
       FLAMEGPU->setVariable<float>("x", parent_new_x);
       FLAMEGPU->setVariable<float>("y", parent_new_y);
@@ -228,8 +228,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
       FLAMEGPU->setVariable<float>("vx", 0.0f);
       FLAMEGPU->setVariable<float>("vy", 0.0f);
       FLAMEGPU->setVariable<float>("vz", 0.0f);
-      FLAMEGPU->setVariable<float>("radius", agent_radius / 2);
-      FLAMEGPU->setVariable<float>("nucleus_radius", agent_nucleus_radius / 2);
+      FLAMEGPU->setVariable<float>("radius", CELL_RADIUS / 2); // to prevent diminishing radius over multiple divisions.
+      FLAMEGPU->setVariable<float>("nucleus_radius", CELL_NUCLEUS_RADIUS / 2);
 
       const float damage_share = 0.5f * agent_damage;
       FLAMEGPU->setVariable<float>("damage", damage_share);
@@ -300,8 +300,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
         FLAMEGPU->agent_out.setVariable<float, N_SPECIES>("chemotaxis_sensitivity", i, agent_chemotaxis_sensitivity[i]);
       }
       FLAMEGPU->agent_out.setVariable<float>("speed_ref", agent_speed_ref);
-      FLAMEGPU->agent_out.setVariable<float>("radius", agent_radius / 2);
-      FLAMEGPU->agent_out.setVariable<float>("nucleus_radius", agent_nucleus_radius / 2);
+      FLAMEGPU->agent_out.setVariable<float>("radius", CELL_RADIUS / 2); // to prevent diminishing cell size with each division, set radius to the agent base variable and not the current parent's value.
+      FLAMEGPU->agent_out.setVariable<float>("nucleus_radius", CELL_NUCLEUS_RADIUS / 2);
       FLAMEGPU->agent_out.setVariable<float>("clock", 0.0 + FLAMEGPU->random.uniform<float>(0.0,0.1) * CYCLE_PHASE_G1_DURATION);
       FLAMEGPU->agent_out.setVariable<int>("cycle_phase", 1);
       FLAMEGPU->agent_out.setVariable<int>("cell_type", agent_cell_type);
