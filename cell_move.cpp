@@ -64,6 +64,12 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   float agent_vx = 0.0f;
   float agent_vy = 0.0f;
   float agent_vz = 0.0f;
+  const float agent_cc_dvx = FLAMEGPU->getVariable<float>("cc_dvx");
+  const float agent_cc_dvy = FLAMEGPU->getVariable<float>("cc_dvy");
+  const float agent_cc_dvz = FLAMEGPU->getVariable<float>("cc_dvz");
+  const float agent_cf_dvx = FLAMEGPU->getVariable<float>("cf_dvx");
+  const float agent_cf_dvy = FLAMEGPU->getVariable<float>("cf_dvy");
+  const float agent_cf_dvz = FLAMEGPU->getVariable<float>("cf_dvz");
 
   const uint8_t N_ANCHOR_POINTS = 100; // WARNING: must match main python
   float agent_x_i[N_ANCHOR_POINTS] = {};
@@ -368,6 +374,11 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   agent_vx += dv_x;
   agent_vy += dv_y;
   agent_vz += dv_z;
+
+  // Add short-range interaction contributions (computed in dedicated interaction RTC functions)
+  agent_vx += agent_cc_dvx + agent_cf_dvx;
+  agent_vy += agent_cc_dvy + agent_cf_dvy;
+  agent_vz += agent_cc_dvz + agent_cf_dvz;
 
   // ---------------------------------------------------------------------------
   // Update agent position based on velocity

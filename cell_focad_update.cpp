@@ -581,21 +581,30 @@ FLAMEGPU_AGENT_FUNCTION(cell_focad_update, flamegpu::MessageBucket, flamegpu::Me
 
     const uint32_t n_min = FOCAD_BIRTH_N_MIN;
     const uint32_t n_max = FOCAD_BIRTH_N_MAX;
+    const uint32_t enforced_min = (n_min < n_max) ? n_min : n_max;
+
+    // Enforce one-agent-per-step creation rule: when below minimum, force at most one birth this step.
+    const int force_min_birth = ((current_focad_count < enforced_min) && (current_focad_count < n_max)) ? 1 : 0;
+
     const float h_birth = h_sigma * h_c;
-    const float target_f = static_cast<float>(n_min) + static_cast<float>(n_max - n_min) * h_birth;
+    const float target_f = static_cast<float>(enforced_min) + static_cast<float>(n_max - enforced_min) * h_birth;
     uint32_t target_n = static_cast<uint32_t>(target_f + 0.5f);
-    if (target_n < n_min) target_n = n_min;
+    if (target_n < enforced_min) target_n = enforced_min;
     if (target_n > n_max) target_n = n_max;
 
-    const int can_birth = ((current_focad_count < target_n) && (current_focad_count < n_max) && (agent_focad_birth_cooldown <= 0.0f)) ? 1 : 0;
-    
-    if (can_birth != 0) {
+    int do_birth = 0;
+    if (force_min_birth != 0) {
+      do_birth = 1;
+    } else if ((current_focad_count < target_n) && (current_focad_count < n_max) && (agent_focad_birth_cooldown <= 0.0f)) {
       const float k_birth = fmaxf(0.0f, FOCAD_BIRTH_K_0 + FOCAD_BIRTH_K_MAX * h_birth);
       const float p_birth = 1.0f - expf(-k_birth * TIME_STEP);
       const float r_birth = FLAMEGPU->random.uniform<float>(0.0f, 1.0f);
       if (r_birth < p_birth) {
-        //printf("Cell %d -- Birth FOCAD: count=%d target_n=%d sigma=%.3e h_sigma=%.3f c=%.3e h_c=%.3f h_birth=%.3f k_birth=%.3f p_birth=%.3f\n", 
-        //       agent_id, current_focad_count, target_n, sigma_pos, h_sigma, c, h_c, h_birth, k_birth, p_birth);
+        do_birth = 1;
+      }
+    }
+
+    if (do_birth != 0) {
         const int new_focad_id = FLAMEGPU->agent_out.getID();
         FLAMEGPU->agent_out.setVariable<int>("id", new_focad_id);
         FLAMEGPU->agent_out.setVariable<int>("cell_id", agent_id);
@@ -645,9 +654,11 @@ FLAMEGPU_AGENT_FUNCTION(cell_focad_update, flamegpu::MessageBucket, flamegpu::Me
         FLAMEGPU->agent_out.setVariable<float>("k_off_0_eff_front", 0.0f);
         FLAMEGPU->agent_out.setVariable<float>("k_off_0_eff_rear", 0.0f);
         FLAMEGPU->agent_out.setVariable<float>("linc_prev_total_length", 0.0f);
+        // Keep refractory only for probabilistic births. Forced replenishment can happen in consecutive steps until minimum is reached.
+        if (force_min_birth == 0) {
         agent_focad_birth_cooldown = fmaxf(0.0f, FOCAD_BIRTH_REFRACTORY);
+        }
       }
-    }
   }
 
   FLAMEGPU->setVariable<float>("focad_birth_cooldown", agent_focad_birth_cooldown);

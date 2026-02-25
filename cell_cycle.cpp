@@ -302,6 +302,12 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
       FLAMEGPU->agent_out.setVariable<float>("speed_ref", agent_speed_ref);
       FLAMEGPU->agent_out.setVariable<float>("radius", CELL_RADIUS / 2); // to prevent diminishing cell size with each division, set radius to the agent base variable and not the current parent's value.
       FLAMEGPU->agent_out.setVariable<float>("nucleus_radius", CELL_NUCLEUS_RADIUS / 2);
+      FLAMEGPU->agent_out.setVariable<float>("cc_dvx", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cc_dvy", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cc_dvz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cf_dvx", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cf_dvy", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cf_dvz", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("clock", 0.0 + FLAMEGPU->random.uniform<float>(0.0,0.1) * CYCLE_PHASE_G1_DURATION);
       FLAMEGPU->agent_out.setVariable<int>("cycle_phase", 1);
       FLAMEGPU->agent_out.setVariable<int>("cell_type", agent_cell_type);

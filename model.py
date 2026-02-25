@@ -21,7 +21,6 @@ from helper_module import compute_expected_boundary_pos_from_corners, getRandomV
 
 # TODO LIST:
 # Modify cell_focad_update to create new adhesions when the number is below a minimum number threshold (e.g. right after division)
-# In cell cycle, update anchor points after division.
 # Add cell-fnode repulsion
 # Add FOCAD interaction with other FOCADs from other cells?
 # Include new FOCAD agent generation? (e.g. when a cell starts migrating, it generates new FOCAD agents at its leading edge, which then try to find fibres to attach to. When a FOCAD agent detaches, it can be removed from the simulation or moved back to the cell center to be reused later)
@@ -189,6 +188,7 @@ INCLUDE_CELL_CELL_INTERACTION = False # TODO: implement cell-cell repulsion and 
 INCLUDE_CELL_CYCLE = True # If True, cells go through a simplified cell cycle with G1, S, G2 and M phases, which can affect their behavior. Also includes birth/death dynamics (WARNING: USER-DEFINED in cell_cycle.cpp).
 DEAD_CELLS_DISAPPEAR = False  # If True, dead CELL agents are removed; if False, they remain inert with dead=1.
 PERIODIC_BOUNDARIES_FOR_CELLS = False
+INCLUDE_CELL_FNODE_REPULSION = True
 N_CELLS = 1
 CELL_K_ELAST = 2.0  # [nN/um]
 CELL_D_DUMPING = 0.4  # [nN·s/um]
@@ -196,6 +196,13 @@ CELL_RADIUS = 8.412 #ECM_ECM_EQUILIBRIUM_DISTANCE / 2 # [um]
 CELL_NUCLEUS_RADIUS = CELL_RADIUS / 2 # [um]
 CELL_SPEED_REF = 0.75 # [um/s] Another option is to define it according to grid distance ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / X -> e.g. in how many steps a cell would move the distance between ECM agents. This is important to avoid missing interactions with ECM agents due to large jumps. WARNING: if cell speed is too high, consider increasing the number of ECM agents (N) or reducing the time step (TIME_STEP) to avoid missing interactions.
 BROWNIAN_MOTION_STRENGTH = CELL_SPEED_REF / 10.0 # [um/s] Strength of random movement added to cell velocity to represent Brownian motion and other non-directed motility.
+CELL_CELL_REPULSION_K = 2.0 * CELL_K_ELAST  # [nN/um] contact exclusion stiffness
+CELL_CELL_ADHESION_K = 0.2 * CELL_K_ELAST  # [nN/um] weak cohesion in near-contact shell
+CELL_CELL_ADHESION_RANGE = 0.5 * CELL_RADIUS  # [um] adhesive shell thickness outside contact
+CELL_CELL_DV_MAX = 0.5 * CELL_SPEED_REF  # [um/s] cap for cell-cell interaction velocity contribution
+CELL_FNODE_REPULSION_K = 0.5 * CELL_K_ELAST  # [nN/um] exclusion stiffness around fibre nodes
+CELL_FNODE_EXCLUSION_DISTANCE = CELL_RADIUS  # [um] minimum distance from cell center to fibre nodes
+CELL_FNODE_DV_MAX = 0.5 * CELL_SPEED_REF  # [um/s] cap for cell-fnode interaction velocity contribution
 print(f'Initial cell speed reference: {CELL_SPEED_REF} um/s')   
 print(f'Initial Brownian motion strength: {BROWNIAN_MOTION_STRENGTH} um/s')
 debug_acc = 40000
@@ -520,6 +527,8 @@ ecm_Dsp_update_file = "ecm_Dsp_update.cpp"
 cell_spatial_location_data_file = "cell_spatial_location_data.cpp"
 cell_ecm_interaction_metabolism_file = "cell_ecm_interaction_metabolism.cpp"
 cell_move_file = "cell_move.cpp"
+cell_cell_interaction_file = "cell_cell_interaction.cpp"
+cell_fnode_repulsion_file = "cell_fnode_repulsion.cpp"
 cell_bucket_location_data_file = "cell_bucket_location_data.cpp"
 cell_focad_update_file = "cell_focad_update.cpp"
 cell_cycle_file = "cell_cycle.cpp"
@@ -623,6 +632,7 @@ env.newPropertyFloat("FIBRE_NODE_REPULSION_K", FIBRE_NODE_REPULSION_K)
 
 # Cell properties TODO: MOVE SOME OF THESE PROPERTIES TO THE CELL AGENT 
 env.newPropertyUInt("INCLUDE_CELL_CELL_INTERACTION", INCLUDE_CELL_CELL_INTERACTION)
+env.newPropertyUInt("INCLUDE_CELL_FNODE_REPULSION", INCLUDE_CELL_FNODE_REPULSION)
 env.newPropertyUInt("DEAD_CELLS_DISAPPEAR", DEAD_CELLS_DISAPPEAR)
 env.newPropertyUInt("PERIODIC_BOUNDARIES_FOR_CELLS", PERIODIC_BOUNDARIES_FOR_CELLS)
 env.newPropertyUInt("N_CELLS", N_CELLS)
@@ -634,6 +644,13 @@ env.newPropertyFloat("CELL_SPEED_REF", CELL_SPEED_REF)
 env.newPropertyFloat("BROWNIAN_MOTION_STRENGTH", BROWNIAN_MOTION_STRENGTH)
 env.newPropertyFloat("MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION", MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION)
 env.newPropertyFloat("MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION", MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION)
+env.newPropertyFloat("CELL_CELL_REPULSION_K", CELL_CELL_REPULSION_K)
+env.newPropertyFloat("CELL_CELL_ADHESION_K", CELL_CELL_ADHESION_K)
+env.newPropertyFloat("CELL_CELL_ADHESION_RANGE", CELL_CELL_ADHESION_RANGE)
+env.newPropertyFloat("CELL_CELL_DV_MAX", CELL_CELL_DV_MAX)
+env.newPropertyFloat("CELL_FNODE_REPULSION_K", CELL_FNODE_REPULSION_K)
+env.newPropertyFloat("CELL_FNODE_EXCLUSION_DISTANCE", CELL_FNODE_EXCLUSION_DISTANCE)
+env.newPropertyFloat("CELL_FNODE_DV_MAX", CELL_FNODE_DV_MAX)
 env.newPropertyFloat("CELL_CYCLE_DURATION", CELL_CYCLE_DURATION)
 env.newPropertyFloat("CYCLE_PHASE_G1_DURATION", CYCLE_PHASE_G1_DURATION)
 env.newPropertyFloat("CYCLE_PHASE_S_DURATION", CYCLE_PHASE_S_DURATION)
@@ -762,10 +779,12 @@ if INCLUDE_FIBRE_NETWORK:
     FNODE_spatial_location_message = model.newMessageSpatial3D("fnode_spatial_location_message")
     # If heterogeneous diffusion is included, the search/broadcast radius for fibre nodes must be at least equal to the equilibrium distance to make sure that ECM nodes can find all the fibre nodes when looking for neighbours. 
     # WARNING: increasing this radius will increase the number of messages of fnode_fnode_spatial_interaction and therefore the computational cost of the simulation, so it should be kept as low as possible while making sure that fibre nodes are found by ECM nodes.
+    fnode_spatial_radius = MAX_SEARCH_RADIUS_FNODES
     if (MAX_SEARCH_RADIUS_FNODES < ECM_ECM_EQUILIBRIUM_DISTANCE) and INCLUDE_DIFFUSION and HETEROGENEOUS_DIFFUSION:
-        FNODE_spatial_location_message.setRadius(ECM_ECM_EQUILIBRIUM_DISTANCE) 
-    else:
-        FNODE_spatial_location_message.setRadius(MAX_SEARCH_RADIUS_FNODES)  
+        fnode_spatial_radius = ECM_ECM_EQUILIBRIUM_DISTANCE
+    if INCLUDE_CELLS and INCLUDE_CELL_FNODE_REPULSION and (fnode_spatial_radius < CELL_FNODE_EXCLUSION_DISTANCE):
+        fnode_spatial_radius = CELL_FNODE_EXCLUSION_DISTANCE
+    FNODE_spatial_location_message.setRadius(fnode_spatial_radius)
     FNODE_spatial_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS,MIN_EXPECTED_BOUNDARY_POS)
     FNODE_spatial_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS,MAX_EXPECTED_BOUNDARY_POS)
     FNODE_spatial_location_message.newVariableInt("id") # as an edge can have multiple inner agents, this stores the position within the edge
@@ -1061,6 +1080,12 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableFloat("speed_ref", CELL_SPEED_REF)   
     CELL_agent.newVariableFloat("radius", CELL_RADIUS)
     CELL_agent.newVariableFloat("nucleus_radius", CELL_NUCLEUS_RADIUS)
+    CELL_agent.newVariableFloat("cc_dvx", 0.0)  # [um/s] velocity contribution from cell_cell_interaction in x
+    CELL_agent.newVariableFloat("cc_dvy", 0.0)  # [um/s] velocity contribution from cell_cell_interaction in y
+    CELL_agent.newVariableFloat("cc_dvz", 0.0)  # [um/s] velocity contribution from cell_cell_interaction in z
+    CELL_agent.newVariableFloat("cf_dvx", 0.0)  # [um/s] velocity contribution from cell_fnode_repulsion in x
+    CELL_agent.newVariableFloat("cf_dvy", 0.0)  # [um/s] velocity contribution from cell_fnode_repulsion in y
+    CELL_agent.newVariableFloat("cf_dvz", 0.0)  # [um/s] velocity contribution from cell_fnode_repulsion in z
     CELL_agent.newVariableInt("cycle_phase", 1) # [1:G1] [2:S] [3:G2] [4:M]
     CELL_agent.newVariableInt("cell_type", 0) # to represent different phenotypes, e.g. for different cell lines or for cancer vs stromal cells. The specific meaning of the values assigned to this variable is up to the user and is not defined by the model.
     CELL_agent.newVariableFloat("clock", 0.0) # internal clock of the cell to switch phases
@@ -1075,6 +1100,10 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableInt("marked_for_removal", 0)
     CELL_agent.newVariableFloat("focad_birth_cooldown", 0.0)
     CELL_agent.newRTCFunctionFile("cell_spatial_location_data", cell_spatial_location_data_file).setMessageOutput("cell_spatial_location_message")
+    if INCLUDE_CELL_CELL_INTERACTION:
+        CELL_agent.newRTCFunctionFile("cell_cell_interaction", cell_cell_interaction_file).setMessageInput("cell_spatial_location_message")
+    if INCLUDE_FIBRE_NETWORK and INCLUDE_CELL_FNODE_REPULSION:
+        CELL_agent.newRTCFunctionFile("cell_fnode_repulsion", cell_fnode_repulsion_file).setMessageInput("fnode_spatial_location_message")
     CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ecm_grid_location_message")
     CELL_agent.newRTCFunctionFile("cell_move", cell_move_file)
     CELL_agent.newVariableArrayFloat("x_i", N_ANCHOR_POINTS) # store the position of the anchor points on the cell. Unused if INCLUDE_FOCAL_ADHESIONS is False
@@ -1391,6 +1420,12 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableArrayFloat("k_reaction", INIT_CELL_REACTION_RATES)
                 instance.setVariableFloat("radius", CELL_RADIUS)
                 instance.setVariableFloat("nucleus_radius", CELL_NUCLEUS_RADIUS)
+                instance.setVariableFloat("cc_dvx", 0.0)
+                instance.setVariableFloat("cc_dvy", 0.0)
+                instance.setVariableFloat("cc_dvz", 0.0)
+                instance.setVariableFloat("cf_dvx", 0.0)
+                instance.setVariableFloat("cf_dvy", 0.0)
+                instance.setVariableFloat("cf_dvz", 0.0)
                 instance.setVariableFloat("speed_ref", CELL_SPEED_REF)
                 instance.setVariableInt("cell_type", 0) # default cell type 0. Can be used to represent different phenotypes, e.g. for different cell lines or for cancer vs stromal cells. The specific meaning of the values assigned to this variable is up to the user and is not defined by the model.
                 cycle_phase = random.randint(1, 4) # [1:G1] [2:S] [3:G2] [4:M]
@@ -1933,6 +1968,11 @@ if INCLUDE_FIBRE_NETWORK:
         model.newLayer("L7_FOCAD_Locations_2").addAgentFunction("FOCAD", "focad_bucket_location_data")
         model.newLayer("L7_FNODE_Force_Update").addAgentFunction("FNODE", "fnode_focad_interaction") 
         model.newLayer("L7_CELL_Stress_Update").addAgentFunction("CELL", "cell_focad_update") 
+
+if INCLUDE_CELLS and INCLUDE_CELL_CELL_INTERACTION:
+    model.newLayer("L7_CELL_Cell_Interaction").addAgentFunction("CELL", "cell_cell_interaction")
+if INCLUDE_CELLS and INCLUDE_FIBRE_NETWORK and INCLUDE_CELL_FNODE_REPULSION:
+    model.newLayer("L7_CELL_FNODE_Repulsion").addAgentFunction("CELL", "cell_fnode_repulsion")
 
 # L8_Agent_Movement
 if INCLUDE_CELLS:
