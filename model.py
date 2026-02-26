@@ -1241,7 +1241,7 @@ if INCLUDE_FOCAL_ADHESIONS:
 
 # Agent population initialization 
 # ----------------------------------------------------------------------    
-# IMPORTANT NOTE: agents must be initialized in the following order to make sure that their ids are consistent with the assumptions made in the RTC functions and bucket message bounds:
+# IMPORTANT NOTE: agents must be initialized in the following order to make sure that their ids are consistent with the assumptions made in the RTC functions and bucket message bounds and the vtk files writing:
 # 1) Boundary corners (idx 1 to 8)
 # 2) Fibre nodes (idx 9 to 8+N_NODES) if INCLUDE_FIBRE_NETWORK is True
 # 3) Cell agents (idx 8+N_NODES+1 to 8+N_NODES+N_CELLS)

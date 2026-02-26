@@ -693,7 +693,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
 
         av = agent.getPopulationData()
         for ai in av:
-            id_ai = ai.getVariableInt("id") - 9
+            id_ai = ai.getVariableInt("id") - 9 # WARNING: this assumes that fibre nodes were initialized right after the 8 boundary corners.
             coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
             velocity_ai = (ai.getVariableFloat("vx"), ai.getVariableFloat("vy"), ai.getVariableFloat("vz"))
             force_ai = (ai.getVariableFloat("fx"), ai.getVariableFloat("fy"), ai.getVariableFloat("fz"))
