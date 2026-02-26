@@ -33,6 +33,19 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - MessageSpatial3D payload for downstream consumers
 - - -
 
+## 📄 cell_MaxID_update.cpp
+
+### 🔹 [cell_MaxID_update](https://github.com/cborau/cellfoundry/blob/master/cell_MaxID_update.cpp)
+**Type:** `agent`  
+**Source:** [Open cell_MaxID_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_MaxID_update.cpp)
+
+- 🔸 **Purpose:** Synchronize the agent's max_global_cell_id variable with the environment macro property.
+- ⬇️ **Inputs:**
+  - Environment macro property: MACRO_MAX_GLOBAL_CELL_ID
+- ⬆️ **Outputs:**
+  - Updated agent variable: max_global_cell_id
+- - -
+
 ## 📄 cell_bucket_location_data.cpp
 
 ### 🔹 [cell_bucket_location_data](https://github.com/cborau/cellfoundry/blob/master/cell_bucket_location_data.cpp)
@@ -44,6 +57,84 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - CELL variables: id, position, orientation, anchor arrays
 - ⬆️ **Outputs:**
   - MessageBucket keyed by CELL id containing anchor geometry and pose
+- - -
+
+## 📄 cell_cell_interaction.cpp
+
+### 🔹 [cc_clampf](https://github.com/cborau/cellfoundry/blob/master/cell_cell_interaction.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_cell_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_cell_interaction.cpp)
+
+- 🔸 **Purpose:** Clamp a scalar to the closed interval [lo, hi].
+- ⬇️ **Inputs:**
+  - x: value to clamp
+  - lo: lower bound
+  - hi: upper bound
+- ⬆️ **Outputs:**
+  - Returns clamped value
+- - -
+
+### 🔹 [cc_normalize3](https://github.com/cborau/cellfoundry/blob/master/cell_cell_interaction.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_cell_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_cell_interaction.cpp)
+
+- 🔸 **Purpose:** Normalize a 3D vector in-place; if near-zero, sets a default unit vector.
+- ⬇️ **Inputs:**
+  - x, y, z: vector components (modified)
+- ⬆️ **Outputs:**
+  - x, y, z: normalized vector components
+- - -
+
+### 🔹 [cell_cell_interaction](https://github.com/cborau/cellfoundry/blob/master/cell_cell_interaction.cpp)
+**Type:** `agent`  
+**Source:** [Open cell_cell_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_cell_interaction.cpp)
+
+- 🔸 **Purpose:** Compute short-range CELL-CELL mechanics with strong contact repulsion and weak finite-range adhesion shell (soft cohesion) to promote aggregate compactness while allowing escape under other motility cues.
+- ⬇️ **Inputs:**
+  - cell_spatial_location_message (spatial neighbors)
+  - Environment interaction parameters
+- ⬆️ **Outputs:**
+  - Per-cell interaction velocity contribution (cc_dv*) [um/s]
+- - -
+
+## 📄 cell_cycle.cpp
+
+### 🔹 [vec3Div](https://github.com/cborau/cellfoundry/blob/master/cell_cycle.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_cycle.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_cycle.cpp)
+
+- 🔸 **Purpose:** Divide a 3D vector (x, y, z) by a scalar divisor in-place.
+- ⬇️ **Inputs:**
+  - x, y, z: vector components (modified)
+  - divisor: scalar value
+- ⬆️ **Outputs:**
+  - x, y, z: scaled vector components
+- - -
+
+### 🔹 [vec3Length](https://github.com/cborau/cellfoundry/blob/master/cell_cycle.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_cycle.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_cycle.cpp)
+
+- 🔸 **Purpose:** Compute the Euclidean length of a 3D vector (x, y, z).
+- ⬇️ **Inputs:**
+  - x, y, z: vector components
+- ⬆️ **Outputs:**
+  - Returns the magnitude of the vector
+- - -
+
+### 🔹 [cell_cycle](https://github.com/cborau/cellfoundry/blob/master/cell_cycle.cpp)
+**Type:** `agent`  
+**Source:** [Open cell_cycle.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_cycle.cpp)
+
+- 🔸 **Purpose:** Agent function for cell cycle progression, division, and death. Handles cell phase transitions, damage accumulation, and division logic.
+- ⬇️ **Inputs:**
+  - CELL agent variables: id, cell_type, position, orientation, metabolic rates, anchor arrays, etc.
+  - Environment properties: cell cycle timings, thresholds, rates
+- ⬆️ **Outputs:**
+  - Updated cell state variables (phase, clock, damage, division, daughter creation)
+- 📝 **Notes:**
+  - Dead cells may remain ALIVE for agent purposes if DEAD_CELLS_DISAPPEAR is set.
+  - Division logic includes randomization and mass/anchor inheritance.
 - - -
 
 ## 📄 cell_ecm_interaction_metabolism.cpp
@@ -59,6 +150,20 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 - ⬆️ **Outputs:**
   - Updated CELL species amounts/concentrations
   - Atomic updates to ECM concentration macro-property (C_SP_MACRO)
+- - -
+
+## 📄 cell_fnode_repulsion.cpp
+
+### 🔹 [cell_fnode_repulsion](https://github.com/cborau/cellfoundry/blob/master/cell_fnode_repulsion.cpp)
+**Type:** `agent`  
+**Source:** [Open cell_fnode_repulsion.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_fnode_repulsion.cpp)
+
+- 🔸 **Purpose:** Prevent CELL centers from approaching FNODE points closer than an exclusion distance by adding a short-range repulsive velocity component.
+- ⬇️ **Inputs:**
+  - fnode_spatial_location_message (spatial neighbors)
+  - Environment interaction parameters
+- ⬆️ **Outputs:**
+  - Per-cell FNODE interaction velocity contribution (cf_dv*) [um/s]
 - - -
 
 ## 📄 cell_focad_update.cpp
@@ -162,6 +267,52 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 ecm_Dsp_update.cpp
 
+### 🔹 [vec3CrossProd](https://github.com/cborau/cellfoundry/blob/master/ecm_Dsp_update.cpp)
+**Type:** `helper`  
+**Source:** [Open ecm_Dsp_update.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_Dsp_update.cpp)
+
+- 🔸 **Purpose:** Compute the cross product of two 3D vectors and store result in (x, y, z).
+- ⬇️ **Inputs:**
+  - x1, y1, z1: first vector
+  - x2, y2, z2: second vector
+- ⬆️ **Outputs:**
+  - x, y, z: cross product result (modified)
+- - -
+
+### 🔹 [vec3Div](https://github.com/cborau/cellfoundry/blob/master/ecm_Dsp_update.cpp)
+**Type:** `helper`  
+**Source:** [Open ecm_Dsp_update.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_Dsp_update.cpp)
+
+- 🔸 **Purpose:** Divide a 3D vector (x, y, z) by a scalar divisor in-place.
+- ⬇️ **Inputs:**
+  - x, y, z: vector components (modified)
+  - divisor: scalar value
+- ⬆️ **Outputs:**
+  - x, y, z: scaled vector components
+- - -
+
+### 🔹 [vec3Length](https://github.com/cborau/cellfoundry/blob/master/ecm_Dsp_update.cpp)
+**Type:** `helper`  
+**Source:** [Open ecm_Dsp_update.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_Dsp_update.cpp)
+
+- 🔸 **Purpose:** Compute the Euclidean length of a 3D vector (x, y, z).
+- ⬇️ **Inputs:**
+  - x, y, z: vector components
+- ⬆️ **Outputs:**
+  - Returns the magnitude of the vector
+- - -
+
+### 🔹 [vec3Normalize](https://github.com/cborau/cellfoundry/blob/master/ecm_Dsp_update.cpp)
+**Type:** `helper`  
+**Source:** [Open ecm_Dsp_update.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_Dsp_update.cpp)
+
+- 🔸 **Purpose:** Normalize a 3D vector in-place using its length.
+- ⬇️ **Inputs:**
+  - x, y, z: vector components (modified)
+- ⬆️ **Outputs:**
+  - x, y, z: normalized vector components
+- - -
+
 ### 🔹 [ecm_Dsp_update](https://github.com/cborau/cellfoundry/blob/master/ecm_Dsp_update.cpp)
 **Type:** `agent`  
 **Source:** [Open ecm_Dsp_update.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_Dsp_update.cpp)
@@ -189,6 +340,64 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 - - -
 
 ## 📄 ecm_ecm_interaction.cpp
+
+### 🔹 [vec3CrossProd](https://github.com/cborau/cellfoundry/blob/master/ecm_ecm_interaction.cpp)
+**Type:** `helper`  
+**Source:** [Open ecm_ecm_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_ecm_interaction.cpp)
+
+- 🔸 **Purpose:** Compute the cross product of two 3D vectors and store result in (x, y, z).
+- ⬇️ **Inputs:**
+  - x1, y1, z1: first vector
+  - x2, y2, z2: second vector
+- ⬆️ **Outputs:**
+  - x, y, z: cross product result (modified)
+- - -
+
+### 🔹 [vec3Div](https://github.com/cborau/cellfoundry/blob/master/ecm_ecm_interaction.cpp)
+**Type:** `helper`  
+**Source:** [Open ecm_ecm_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_ecm_interaction.cpp)
+
+- 🔸 **Purpose:** Divide a 3D vector (x, y, z) by a scalar divisor in-place.
+- ⬇️ **Inputs:**
+  - x, y, z: vector components (modified)
+  - divisor: scalar value
+- ⬆️ **Outputs:**
+  - x, y, z: scaled vector components
+- - -
+
+### 🔹 [vec3Length](https://github.com/cborau/cellfoundry/blob/master/ecm_ecm_interaction.cpp)
+**Type:** `helper`  
+**Source:** [Open ecm_ecm_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_ecm_interaction.cpp)
+
+- 🔸 **Purpose:** Compute the Euclidean length of a 3D vector (x, y, z).
+- ⬇️ **Inputs:**
+  - x, y, z: vector components
+- ⬆️ **Outputs:**
+  - Returns the magnitude of the vector
+- - -
+
+### 🔹 [vec3Normalize](https://github.com/cborau/cellfoundry/blob/master/ecm_ecm_interaction.cpp)
+**Type:** `helper`  
+**Source:** [Open ecm_ecm_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_ecm_interaction.cpp)
+
+- 🔸 **Purpose:** Normalize a 3D vector in-place using its length.
+- ⬇️ **Inputs:**
+  - x, y, z: vector components (modified)
+- ⬆️ **Outputs:**
+  - x, y, z: normalized vector components
+- - -
+
+### 🔹 [getAngleBetweenVec](https://github.com/cborau/cellfoundry/blob/master/ecm_ecm_interaction.cpp)
+**Type:** `helper`  
+**Source:** [Open ecm_ecm_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_ecm_interaction.cpp)
+
+- 🔸 **Purpose:** Compute the angle (in radians) between two 3D vectors.
+- ⬇️ **Inputs:**
+  - x1, y1, z1: first vector
+  - x2, y2, z2: second vector
+- ⬆️ **Outputs:**
+  - Returns angle in radians
+- - -
 
 ### 🔹 [ecm_ecm_interaction](https://github.com/cborau/cellfoundry/blob/master/ecm_ecm_interaction.cpp)
 **Type:** `agent`  
@@ -406,6 +615,25 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - Domain and adhesion motion constraints from environment
 - ⬆️ **Outputs:**
   - Updated FOCAD position/velocity within boundary limits
+- - -
+
+## 📄 focad_post_cycle_update.cpp
+
+### 🔹 [focad_post_cycle_update](https://github.com/cborau/cellfoundry/blob/master/focad_post_cycle_update.cpp)
+**Type:** `agent`  
+**Source:** [Open focad_post_cycle_update.cpp](https://github.com/cborau/cellfoundry/blob/master/focad_post_cycle_update.cpp)
+
+- 🔸 **Purpose:** Update FOCAD anchor association after cell division, switching anchor points between parent and daughter cells. Ensures spatial and orientation variables are updated for correct cell association.
+- ⬇️ **Inputs:**
+  - FOCAD agent variables: cell_id, anchor_id, spatial coordinates
+  - MessageBucket: parent cell state
+  - Environment: N_ANCHOR_POINTS
+- ⬆️ **Outputs:**
+  - Updated anchor_id, spatial variables, cell association
+- 📝 **Notes:**
+  - Uses a two-pass loop to select the correct target message, avoiding duplicated anchor update code.
+  - Pass 0: For parent cell, require just_divided message (ensures correct anchor after division).
+  - Pass 1: Fallback, accept any available message if none found in pass 0.
 - - -
 
 ## 📄 focad_spatial_location_data.cpp

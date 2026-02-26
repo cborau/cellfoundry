@@ -297,6 +297,47 @@ def find_mismatches(
                     )
     return mismatches
 
+def apply_fixes(mismatches: List[Mismatch]) -> None:
+    """
+    Apply in-place fixes for mismatched integer assignments.
+    Only replaces the numeric literal, preserving the rest of the line.
+    """
+    # Group mismatches per file
+    by_file: Dict[str, List[Mismatch]] = {}
+    for mm in mismatches:
+        by_file.setdefault(mm.file_path, []).append(mm)
+
+    for path, items in by_file.items():
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+
+        for mm in items:
+            idx = mm.line - 1
+            original = lines[idx]
+
+            # Replace only the integer literal after "="
+            assign_pattern = re.compile(
+                rf"(\b{re.escape(mm.var_name)}\b[^=]*=\s*)(-?\d+)"
+            )
+            define_pattern = re.compile(
+                rf"(^\s*#\s*define\s+{re.escape(mm.var_name)}\s+)(-?\d+)"
+            )
+
+            if assign_pattern.search(original):
+                lines[idx] = assign_pattern.sub(
+                    rf"\g<1>{mm.expected_value}",
+                    original
+                )
+            elif define_pattern.search(original):
+                lines[idx] = define_pattern.sub(
+                    rf"\g<1>{mm.expected_value}",
+                    original
+                )
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+
+    print("Files successfully updated.")
 
 # -----------------------------
 # CLI / Output
@@ -375,8 +416,27 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"  - {rel}:{mm.line}: {mm.var_name} = {mm.found_value} (expected {mm.expected_value})")
         print(f"    {mm.line_text}")
 
-    return 2 if (mismatches and args.fail_on_mismatch) else 0
+    # Collect unique expected values summary
+    unique_expected = {}
+    for mm in mismatches:
+        unique_expected[mm.var_name] = mm.expected_value
 
+    print("\nExpected values summary:")
+    for var, val in unique_expected.items():
+        print(f"  {var} = {val}")
+
+    answer = input(
+        "\nDo you want to automatically update the variables to their expected values "
+        f"{list(unique_expected.items())}? [y/N]: "
+    ).strip().lower()
+
+    if answer in {"y", "yes"}:
+        apply_fixes(mismatches)
+        return 0
+    else:
+        print("No changes applied.")
+        return 2 
+   
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -1,11 +1,54 @@
+/**
+ * vec3Div
+ *
+ * Purpose:
+ *   Divide a 3D vector (x, y, z) by a scalar divisor in-place.
+ *
+ * Inputs:
+ *   - x, y, z: vector components (modified)
+ *   - divisor: scalar value
+ *
+ * Outputs:
+ *   - x, y, z: scaled vector components
+ */
 FLAMEGPU_DEVICE_FUNCTION void vec3Div(float &x, float &y, float &z, const float divisor) {
   x /= divisor;
   y /= divisor;
   z /= divisor;
 }
+/**
+ * vec3Length
+ *
+ * Purpose:
+ *   Compute the Euclidean length of a 3D vector (x, y, z).
+ *
+ * Inputs:
+ *   - x, y, z: vector components
+ *
+ * Outputs:
+ *   - Returns the magnitude of the vector
+ */
 FLAMEGPU_DEVICE_FUNCTION float vec3Length(const float x, const float y, const float z) {
   return sqrtf(x * x + y * y + z * z);
 }
+/**
+ * cell_cycle
+ *
+ * Purpose:
+ *   Agent function for cell cycle progression, division, and death.
+ *   Handles cell phase transitions, damage accumulation, and division logic.
+ *
+ * Inputs:
+ *   - CELL agent variables: id, cell_type, position, orientation, metabolic rates, anchor arrays, etc.
+ *   - Environment properties: cell cycle timings, thresholds, rates
+ *
+ * Outputs:
+ *   - Updated cell state variables (phase, clock, damage, division, daughter creation)
+ *
+ * Notes:
+ *   - Dead cells may remain ALIVE for agent purposes if DEAD_CELLS_DISAPPEAR is set.
+ *   - Division logic includes randomization and mass/anchor inheritance.
+ */
 FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone) {
   int id = FLAMEGPU->getVariable<int>("id");
   auto MACRO_MAX_GLOBAL_CELL_ID = FLAMEGPU->environment.getMacroProperty<int, 1>("MACRO_MAX_GLOBAL_CELL_ID");
@@ -230,6 +273,43 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
       FLAMEGPU->setVariable<float>("vz", 0.0f);
       FLAMEGPU->setVariable<float>("radius", CELL_RADIUS / 2); // to prevent diminishing radius over multiple divisions.
       FLAMEGPU->setVariable<float>("nucleus_radius", CELL_NUCLEUS_RADIUS / 2);
+      FLAMEGPU->setVariable<float>("eps_xx", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_yy", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_zz", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_xy", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_xz", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_yz", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_xx", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_yy", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_zz", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_xy", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_xz", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_yz", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eig_1", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eig_2", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eig_3", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec1_x", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec1_y", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec1_z", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec2_x", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec2_y", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec2_z", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec3_x", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec3_y", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec3_z", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eig_1", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eig_2", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eig_3", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec1_x", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec1_y", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec1_z", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec2_x", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec2_y", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec2_z", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec3_x", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec3_y", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec3_z", 0.0f);
+
 
       const float damage_share = 0.5f * agent_damage;
       FLAMEGPU->setVariable<float>("damage", damage_share);
@@ -348,27 +428,27 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
       FLAMEGPU->agent_out.setVariable<float>("sig_eig_1", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("sig_eig_2", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("sig_eig_3", 0.0f);
-      FLAMEGPU->agent_out.setVariable<float>("sig_eigvec1_x", 1.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_eigvec1_x", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("sig_eigvec1_y", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("sig_eigvec1_z", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("sig_eigvec2_x", 0.0f);
-      FLAMEGPU->agent_out.setVariable<float>("sig_eigvec2_y", 1.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_eigvec2_y", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("sig_eigvec2_z", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("sig_eigvec3_x", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("sig_eigvec3_y", 0.0f);
-      FLAMEGPU->agent_out.setVariable<float>("sig_eigvec3_z", 1.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_eigvec3_z", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("eps_eig_1", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("eps_eig_2", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("eps_eig_3", 0.0f);
-      FLAMEGPU->agent_out.setVariable<float>("eps_eigvec1_x", 1.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_eigvec1_x", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("eps_eigvec1_y", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("eps_eigvec1_z", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("eps_eigvec2_x", 0.0f);
-      FLAMEGPU->agent_out.setVariable<float>("eps_eigvec2_y", 1.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_eigvec2_y", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("eps_eigvec2_z", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("eps_eigvec3_x", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("eps_eigvec3_y", 0.0f);
-      FLAMEGPU->agent_out.setVariable<float>("eps_eigvec3_z", 1.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_eigvec3_z", 0.0f);
 
       agent_vx = 0.0f;
       agent_vy = 0.0f;

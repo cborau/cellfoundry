@@ -20,10 +20,6 @@ import check_hard_coded_values
 from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary
 
 # TODO LIST:
-# Modify cell_focad_update to create new adhesions when the number is below a minimum number threshold (e.g. right after division)
-# Add cell-fnode repulsion
-# Add FOCAD interaction with other FOCADs from other cells?
-# Include new FOCAD agent generation? (e.g. when a cell starts migrating, it generates new FOCAD agents at its leading edge, which then try to find fibres to attach to. When a FOCAD agent detaches, it can be removed from the simulation or moved back to the cell center to be reused later)
 # Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
 # Add matrix degradation / deposition. Easy: Modifying FNODE properties, Complex: removing / adding FNODE agents (which would require updating the connectivity matrix)
 
@@ -878,10 +874,20 @@ if INCLUDE_CELLS:
         CELL_bucket_location_message.newVariableFloat("orx")
         CELL_bucket_location_message.newVariableFloat("ory")
         CELL_bucket_location_message.newVariableFloat("orz")
+        CELL_bucket_location_message.newVariableFloat("nucleus_radius")
+        CELL_bucket_location_message.newVariableFloat("eps_xx")
+        CELL_bucket_location_message.newVariableFloat("eps_yy")
+        CELL_bucket_location_message.newVariableFloat("eps_zz")
+        CELL_bucket_location_message.newVariableFloat("eps_xy")
+        CELL_bucket_location_message.newVariableFloat("eps_xz")
+        CELL_bucket_location_message.newVariableFloat("eps_yz")
         CELL_bucket_location_message.newVariableInt("dead")
         CELL_bucket_location_message.newVariableInt("just_divided")
         CELL_bucket_location_message.newVariableInt("daughter_id")
         CELL_bucket_location_message.newVariableInt("marked_for_removal")
+        CELL_bucket_location_message.newVariableArrayFloat("u_ref_x_i", N_ANCHOR_POINTS)
+        CELL_bucket_location_message.newVariableArrayFloat("u_ref_y_i", N_ANCHOR_POINTS)
+        CELL_bucket_location_message.newVariableArrayFloat("u_ref_z_i", N_ANCHOR_POINTS)
         CELL_bucket_location_message.newVariableArrayFloat("x_i", N_ANCHOR_POINTS)
         CELL_bucket_location_message.newVariableArrayFloat("y_i", N_ANCHOR_POINTS)
         CELL_bucket_location_message.newVariableArrayFloat("z_i", N_ANCHOR_POINTS)

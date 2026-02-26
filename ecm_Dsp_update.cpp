@@ -1,16 +1,69 @@
+/**
+ * vec3CrossProd
+ *
+ * Purpose:
+ *   Compute the cross product of two 3D vectors and store result in (x, y, z).
+ *
+ * Inputs:
+ *   - x1, y1, z1: first vector
+ *   - x2, y2, z2: second vector
+ *
+ * Outputs:
+ *   - x, y, z: cross product result (modified)
+ */
 FLAMEGPU_DEVICE_FUNCTION void vec3CrossProd(float &x, float &y, float &z, float x1, float y1, float z1, float x2, float y2, float z2) {
   x = (y1 * z2 - z1 * y2);
   y = (z1 * x2 - x1 * z2);
   z = (x1 * y2 - y1 * x2);
 }
+
+/**
+ * vec3Div
+ *
+ * Purpose:
+ *   Divide a 3D vector (x, y, z) by a scalar divisor in-place.
+ *
+ * Inputs:
+ *   - x, y, z: vector components (modified)
+ *   - divisor: scalar value
+ *
+ * Outputs:
+ *   - x, y, z: scaled vector components
+ */
 FLAMEGPU_DEVICE_FUNCTION void vec3Div(float &x, float &y, float &z, const float divisor) {
   x /= divisor;
   y /= divisor;
   z /= divisor;
 }
+
+/**
+ * vec3Length
+ *
+ * Purpose:
+ *   Compute the Euclidean length of a 3D vector (x, y, z).
+ *
+ * Inputs:
+ *   - x, y, z: vector components
+ *
+ * Outputs:
+ *   - Returns the magnitude of the vector
+ */
 FLAMEGPU_DEVICE_FUNCTION float vec3Length(const float x, const float y, const float z) {
   return sqrtf(x * x + y * y + z * z);
 }
+
+/**
+ * vec3Normalize
+ *
+ * Purpose:
+ *   Normalize a 3D vector in-place using its length.
+ *
+ * Inputs:
+ *   - x, y, z: vector components (modified)
+ *
+ * Outputs:
+ *   - x, y, z: normalized vector components
+ */
 FLAMEGPU_DEVICE_FUNCTION void vec3Normalize(float &x, float &y, float &z) {
   float length = vec3Length(x, y, z);
   vec3Div(x, y, z, length);

@@ -1,7 +1,33 @@
+/**
+ * cc_clampf
+ *
+ * Purpose:
+ *   Clamp a scalar to the closed interval [lo, hi].
+ *
+ * Inputs:
+ *   - x: value to clamp
+ *   - lo: lower bound
+ *   - hi: upper bound
+ *
+ * Outputs:
+ *   - Returns clamped value
+ */
 FLAMEGPU_DEVICE_FUNCTION float cc_clampf(const float x, const float lo, const float hi) {
   return fminf(hi, fmaxf(lo, x));
 }
 
+/**
+ * cc_normalize3
+ *
+ * Purpose:
+ *   Normalize a 3D vector in-place; if near-zero, sets a default unit vector.
+ *
+ * Inputs:
+ *   - x, y, z: vector components (modified)
+ *
+ * Outputs:
+ *   - x, y, z: normalized vector components
+ */
 FLAMEGPU_DEVICE_FUNCTION void cc_normalize3(float &x, float &y, float &z) {
   const float n2 = x * x + y * y + z * z;
   if (n2 > 1e-20f) {

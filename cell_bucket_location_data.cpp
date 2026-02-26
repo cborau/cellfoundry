@@ -19,6 +19,13 @@ FLAMEGPU_AGENT_FUNCTION(cell_bucket_location_data, flamegpu::MessageNone, flameg
   FLAMEGPU->message_out.setVariable<float>("orx", FLAMEGPU->getVariable<float>("orx"));
   FLAMEGPU->message_out.setVariable<float>("ory", FLAMEGPU->getVariable<float>("ory"));
   FLAMEGPU->message_out.setVariable<float>("orz", FLAMEGPU->getVariable<float>("orz"));
+  FLAMEGPU->message_out.setVariable<float>("nucleus_radius", FLAMEGPU->getVariable<float>("nucleus_radius"));
+  FLAMEGPU->message_out.setVariable<float>("eps_xx", FLAMEGPU->getVariable<float>("eps_xx"));
+  FLAMEGPU->message_out.setVariable<float>("eps_yy", FLAMEGPU->getVariable<float>("eps_yy"));
+  FLAMEGPU->message_out.setVariable<float>("eps_zz", FLAMEGPU->getVariable<float>("eps_zz"));
+  FLAMEGPU->message_out.setVariable<float>("eps_xy", FLAMEGPU->getVariable<float>("eps_xy"));
+  FLAMEGPU->message_out.setVariable<float>("eps_xz", FLAMEGPU->getVariable<float>("eps_xz"));
+  FLAMEGPU->message_out.setVariable<float>("eps_yz", FLAMEGPU->getVariable<float>("eps_yz"));
   FLAMEGPU->message_out.setVariable<int>("dead", FLAMEGPU->getVariable<int>("dead"));
   FLAMEGPU->message_out.setVariable<int>("just_divided", FLAMEGPU->getVariable<int>("just_divided"));
   FLAMEGPU->message_out.setVariable<int>("daughter_id", FLAMEGPU->getVariable<int>("daughter_id"));
@@ -27,6 +34,13 @@ FLAMEGPU_AGENT_FUNCTION(cell_bucket_location_data, flamegpu::MessageNone, flameg
   const uint8_t N_ANCHOR_POINTS = 100; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
 
   for (int i = 0; i < N_ANCHOR_POINTS; i++) {
+    float u_ref_x = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("u_ref_x_i", i);
+    FLAMEGPU->message_out.setVariable<float, N_ANCHOR_POINTS>("u_ref_x_i", i, u_ref_x);
+    float u_ref_y = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("u_ref_y_i", i);
+    FLAMEGPU->message_out.setVariable<float, N_ANCHOR_POINTS>("u_ref_y_i", i, u_ref_y);
+    float u_ref_z = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("u_ref_z_i", i);
+    FLAMEGPU->message_out.setVariable<float, N_ANCHOR_POINTS>("u_ref_z_i", i, u_ref_z);
+
     float val1 = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("x_i", i);
     FLAMEGPU->message_out.setVariable<float, N_ANCHOR_POINTS>("x_i", i, val1);
     float val2 = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("y_i", i);
