@@ -690,10 +690,12 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
         velocity = list()
         force = list()
         elastic_energy = list()
+        degradation = list()
+        linked_nodes_all = list()
 
         av = agent.getPopulationData()
         for ai in av:
-            id_ai = ai.getVariableInt("id") - 9 # WARNING: this assumes that fibre nodes were initialized right after the 8 boundary corners.
+            id_ai = ai.getVariableInt("id")
             coords_ai = (ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z"))
             velocity_ai = (ai.getVariableFloat("vx"), ai.getVariableFloat("vy"), ai.getVariableFloat("vz"))
             force_ai = (ai.getVariableFloat("fx"), ai.getVariableFloat("fy"), ai.getVariableFloat("fz"))
@@ -702,6 +704,14 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             velocity.append(velocity_ai)
             force.append(force_ai)
             elastic_energy.append(ai.getVariableFloat("elastic_energy"))
+            degradation.append(ai.getVariableFloat("degradation"))
+            linked_nodes_all.append(ai.getVariableArrayFloat("linked_nodes"))
+
+        if len(ids) > 0:
+            min_id = min(ids)
+            ids = [fid - min_id for fid in ids if fid > 0]
+            for i in range(len(linked_nodes_all)):
+                linked_nodes_all[i] = [linked_id - min_id for linked_id in linked_nodes_all[i] if linked_id > 0] + [linked_id for linked_id in linked_nodes_all[i] if linked_id <= 0]
 
         sorted_indices = np.argsort(ids)
         ids = [ids[i] for i in sorted_indices]
@@ -709,24 +719,33 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
         velocity = [velocity[i] for i in sorted_indices]
         force = [force[i] for i in sorted_indices]
         elastic_energy = [elastic_energy[i] for i in sorted_indices]
+        degradation = [degradation[i] for i in sorted_indices]
+        linked_nodes_all = [linked_nodes_all[i] for i in sorted_indices]
+
+        n_fnodes = len(ids)
+        id_to_point_idx = {fid: i for i, fid in enumerate(ids)}
 
         added_lines = set()
         cell_connectivity = []
-        for node_index, connections in initial_network_connectivity.items():
-            for connected_node_index in connections:
-                if connected_node_index != -1:
-                    line = tuple(sorted((node_index, connected_node_index)))
+        for i, fid in enumerate(ids):
+            links = linked_nodes_all[i]
+            for linked_id_raw in links:
+                linked_id = int(round(linked_id_raw))
+                if linked_id < 0 or linked_id == fid:
+                    continue
+                if linked_id in id_to_point_idx:
+                    line = tuple(sorted((id_to_point_idx[fid], id_to_point_idx[linked_id])))
                     if line not in added_lines:
                         added_lines.add(line)
                         cell_connectivity.append(line)
 
-        num_cells = len(cell_connectivity)
+        num_cells = len(cell_connectivity) # WARNING: Vtk cells, nothing to do with cell agents
 
         with open(str(file_path), 'w') as file:
             for line in save_context["fibrenodedata"]:
                 file.write(line + '\n')
 
-            file.write("POINTS {} float \n".format(8 + n_nodes))
+            file.write("POINTS {} float \n".format(8 + n_fnodes))
             for coords_ai in coords:
                 file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
 
@@ -803,7 +822,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             file.write(str(sum_bz_neg_x) + '\n')
             file.write(str(sum_bz_neg_y) + '\n')
 
-            file.write("POINT_DATA {} \n".format(8 + n_nodes))
+            file.write("POINT_DATA {} \n".format(8 + n_fnodes))
             file.write("SCALARS is_corner int 1\n")
             file.write("LOOKUP_TABLE default\n")
             for _ in elastic_energy:
@@ -815,6 +834,13 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             file.write("LOOKUP_TABLE default\n")
             for ee_ai in elastic_energy:
                 file.write("{:.4f} \n".format(ee_ai))
+            for _ in range(8):
+                file.write("0.0 \n")
+
+            file.write("SCALARS degradation float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for d_ai in degradation:
+                file.write("{:.4f} \n".format(d_ai))
             for _ in range(8):
                 file.write("0.0 \n")
 

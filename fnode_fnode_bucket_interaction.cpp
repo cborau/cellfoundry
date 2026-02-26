@@ -88,8 +88,9 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket,
   
   // Elastic constant of the fibre 
   float k_elast = 0.0; //Equivalent elastic constant of two springs in series (agent and message)
-  // Elastic constant and orientation of the fibers
-  float agent_k_elast = FLAMEGPU->getVariable<float>("k_elast");
+  const float FIBRE_SEGMENT_K_ELAST = FLAMEGPU->environment.getProperty<float>("FIBRE_SEGMENT_K_ELAST");
+  const float agent_degradation = FLAMEGPU->getVariable<float>("degradation");
+  const float agent_k_elast = fmaxf(0.0f, FIBRE_SEGMENT_K_ELAST * (1.0f - agent_degradation));
    
   // Dumping constant of the fibre 
   const float d_dumping = FLAMEGPU->getVariable<float>("d_dumping");
@@ -118,6 +119,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket,
   float message_vx = 0.0;
   float message_vy = 0.0;
   float message_vz = 0.0;
+  float message_degradation = 0.0;
   float message_k_elast = 0.0;
 
   // Initialize other variables
@@ -156,7 +158,8 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket,
       message_vx = message.getVariable<float>("vx");
       message_vy = message.getVariable<float>("vy");
       message_vz = message.getVariable<float>("vz");
-      message_k_elast = message.getVariable<float>("k_elast");
+      message_degradation = message.getVariable<float>("degradation");
+      message_k_elast = fmaxf(0.0f, FIBRE_SEGMENT_K_ELAST * (1.0f - message_degradation));
       
       dir_x = agent_x - message_x; 
       dir_y = agent_y - message_y; 
@@ -165,7 +168,11 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket,
      
 
       // compute equivalent stiffness 
-      k_elast = (agent_k_elast * message_k_elast) / ((agent_k_elast) + (message_k_elast));
+      if ((agent_k_elast + message_k_elast) > 1e-12f) {
+        k_elast = (agent_k_elast * message_k_elast) / ((agent_k_elast) + (message_k_elast));
+      } else {
+        k_elast = 0.0f;
+      }
       
       cos_x = (1.0 * dir_x + 0.0 * dir_y + 0.0 * dir_z) / distance;
       cos_y = (0.0 * dir_x + 1.0 * dir_y + 0.0 * dir_z) / distance;
@@ -208,7 +215,9 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket,
           agent_fz_abs += fabsf(total_f * cos_z);
         }
 
-        agent_elastic_energy += 0.5 * (total_f * total_f) / k_elast;
+        if (k_elast > 1e-12f) {
+          agent_elastic_energy += 0.5f * (total_f * total_f) / k_elast;
+        }
 
         agent_fx += -1 * total_f * cos_x; // minus comes from the direction definition (agent-message)
         agent_fy += -1 * total_f * cos_y;

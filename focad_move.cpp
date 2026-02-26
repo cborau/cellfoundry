@@ -100,10 +100,12 @@ FLAMEGPU_AGENT_FUNCTION(focad_move, flamegpu::MessageBucket, flamegpu::MessageNo
     }
     else {
       // move with the FNODE agent
+      int found_parent_fnode = 0;
       for (const auto& message : FLAMEGPU->message_in(agent_fnode_id)) {
         float message_x = message.getVariable<float>("x");
         float message_y = message.getVariable<float>("y");
         float message_z = message.getVariable<float>("z");
+        found_parent_fnode = 1;
         agent_x = message_x;
         agent_y = message_y;
         agent_z = message_z;
@@ -122,7 +124,14 @@ FLAMEGPU_AGENT_FUNCTION(focad_move, flamegpu::MessageBucket, flamegpu::MessageNo
         FLAMEGPU->setVariable<float>("vz", agent_vz);
 
         return flamegpu::ALIVE;
-      }      
+      }
+      if (found_parent_fnode == 0) {
+        // Parent FNODE no longer exists (e.g. remodeled away). Detach and continue with free motion branch below.
+        agent_attached = 0;
+        agent_fnode_id = -1;
+        FLAMEGPU->setVariable<int>("attached", agent_attached);
+        FLAMEGPU->setVariable<int>("fnode_id", agent_fnode_id);
+      }
     }
   }
 

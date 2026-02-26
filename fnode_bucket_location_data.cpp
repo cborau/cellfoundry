@@ -21,6 +21,8 @@ FLAMEGPU_AGENT_FUNCTION(fnode_bucket_location_data, flamegpu::MessageNone, flame
   FLAMEGPU->message_out.setVariable<float>("vz", FLAMEGPU->getVariable<float>("vz"));
   FLAMEGPU->message_out.setVariable<float>("k_elast", FLAMEGPU->getVariable<float>("k_elast"));
   FLAMEGPU->message_out.setVariable<float>("d_dumping", FLAMEGPU->getVariable<float>("d_dumping"));
+  FLAMEGPU->message_out.setVariable<float>("degradation", FLAMEGPU->getVariable<float>("degradation"));
+  FLAMEGPU->message_out.setVariable<int>("marked_for_removal", FLAMEGPU->getVariable<int>("marked_for_removal"));
   const uint8_t MAX_CONNECTIVITY = 8; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function. TODO: declare it somehow at compile time
   for (int i = 0; i < MAX_CONNECTIVITY; i++) {
       int idx = FLAMEGPU->getVariable<int, MAX_CONNECTIVITY>("linked_nodes", i);

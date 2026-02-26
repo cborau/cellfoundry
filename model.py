@@ -22,6 +22,7 @@ from helper_module import compute_expected_boundary_pos_from_corners, getRandomV
 # TODO LIST:
 # Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
 # Add matrix degradation / deposition. Easy: Modifying FNODE properties, Complex: removing / adding FNODE agents (which would require updating the connectivity matrix)
+# Include in materials and methods matrix remodeling, including network mechanics
 
 start_time = time.time()
 
@@ -161,6 +162,21 @@ FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE = 0.0
 MAX_SEARCH_RADIUS_FNODES = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / 10.0 # must me smaller than FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
 FIBRE_NODE_REPULSION_K = 0.2 * FIBRE_SEGMENT_K_ELAST  # [nN/um] Short-range FNODE-FNODE exclusion stiffness (kept below segment stiffness)
 
+# FNODE remodeling (degradation/deposition + birth/death)
+INCLUDE_NETWORK_REMODELING = True
+FNODE_DEGRADATION_RATE = 5.0e-4  # [1/s] per-neighbor degradation contribution
+FNODE_DEPOSITION_RATE = 2.0e-4  # [1/s] baseline repair/deposition
+FNODE_CELL_DEGRADATION_RADIUS = 0.75 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE  # [um]
+FNODE_BIRTH_K_0 = 2.0e-3  # [1/s] baseline probability rate for CELL-driven FNODE birth
+FNODE_BIRTH_SPECIES_INDEX = 0
+FNODE_BIRTH_K_C = 5.0  # concentration half-saturation for birth gate
+FNODE_BIRTH_HILL_CONC = 2.0
+FNODE_BIRTH_K_SIGMA = 0.1  # [kPa] stress half-saturation for birth gate
+FNODE_BIRTH_HILL_SIGMA = 1.0
+FNODE_BIRTH_RADIUS = 0.5 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE  # [um] newborn offset around CELL center
+FNODE_BIRTH_LINK_MAX_DISTANCE = 2.0 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE  # [um] parent FNODE search radius
+FNODE_BIRTH_REFRACTORY = 20.0  # [s]
+
 
 # +====================================================================+
 # | DIFFUSION PARAMETERS                                               |
@@ -241,7 +257,7 @@ if INCLUDE_CELLS and INCLUDE_CELL_CYCLE and CELL_CYCLE_DURATION > 0.0:
     print(f"Estimated maximum cell population at the end of the simulation: {MAX_EXPECTED_N_CELLS} (doublings: {_doublings:.2f})")
 else:
     MAX_EXPECTED_N_CELLS = N_CELLS + 1 # add 1 as bucket messages requires min <> max bounds.
-    
+
 
 # +====================================================================+
 # | FOCAL ADHESION PARAMETERS  (units: um, s, nN)                      |
@@ -525,6 +541,7 @@ cell_ecm_interaction_metabolism_file = "cell_ecm_interaction_metabolism.cpp"
 cell_move_file = "cell_move.cpp"
 cell_cell_interaction_file = "cell_cell_interaction.cpp"
 cell_fnode_repulsion_file = "cell_fnode_repulsion.cpp"
+cell_fnode_remodel_file = "cell_fnode_remodel.cpp"
 cell_bucket_location_data_file = "cell_bucket_location_data.cpp"
 cell_focad_update_file = "cell_focad_update.cpp"
 cell_cycle_file = "cell_cycle.cpp"
@@ -554,6 +571,8 @@ fnode_bucket_location_data_file = "fnode_bucket_location_data.cpp"
 fnode_boundary_interaction_file = "fnode_boundary_interaction.cpp"
 fnode_fnode_spatial_interaction_file = "fnode_fnode_spatial_interaction.cpp"
 fnode_fnode_bucket_interaction_file = "fnode_fnode_bucket_interaction.cpp"
+fnode_remodel_file = "fnode_remodel.cpp"
+fnode_apply_remodel_updates_file = "fnode_apply_remodel_updates.cpp"
 fnode_move_file = "fnode_move.cpp"
 fnode_focad_interaction_file = "fnode_focad_interaction.cpp"
 
@@ -617,6 +636,7 @@ env.newMacroPropertyFloat("BOUNDARY_CONC_INIT_MULTI", N_SPECIES,
 env.newMacroPropertyFloat("BOUNDARY_CONC_FIXED_MULTI", N_SPECIES,
                           6)  # a 2D matrix with the 6 boundary conditions (columns) for each species (rows)
 env.newMacroPropertyInt("MACRO_MAX_GLOBAL_CELL_ID", 1)  # shared current max CELL id across all proliferating cells
+env.newMacroPropertyInt("MACRO_MAX_GLOBAL_FNODE_ID", 1)  # shared current max FNODE id across all remodeling cells
 env.newPropertyUInt("ECM_POPULATION_SIZE", ECM_POPULATION_SIZE)
 
 # Fibre network parameters
@@ -625,6 +645,19 @@ env.newPropertyFloat("MAX_SEARCH_RADIUS_FNODES",MAX_SEARCH_RADIUS_FNODES)
 env.newPropertyFloat("FIBRE_SEGMENT_K_ELAST",FIBRE_SEGMENT_K_ELAST)
 env.newPropertyFloat("FIBRE_SEGMENT_D_DUMPING",FIBRE_SEGMENT_D_DUMPING)
 env.newPropertyFloat("FIBRE_NODE_REPULSION_K", FIBRE_NODE_REPULSION_K)
+env.newPropertyUInt("INCLUDE_NETWORK_REMODELING", INCLUDE_NETWORK_REMODELING)
+env.newPropertyFloat("FNODE_DEGRADATION_RATE", FNODE_DEGRADATION_RATE)
+env.newPropertyFloat("FNODE_DEPOSITION_RATE", FNODE_DEPOSITION_RATE)
+env.newPropertyFloat("FNODE_CELL_DEGRADATION_RADIUS", FNODE_CELL_DEGRADATION_RADIUS)
+env.newPropertyFloat("FNODE_BIRTH_K_0", FNODE_BIRTH_K_0)
+env.newPropertyUInt("FNODE_BIRTH_SPECIES_INDEX", FNODE_BIRTH_SPECIES_INDEX)
+env.newPropertyFloat("FNODE_BIRTH_K_C", FNODE_BIRTH_K_C)
+env.newPropertyFloat("FNODE_BIRTH_HILL_CONC", FNODE_BIRTH_HILL_CONC)
+env.newPropertyFloat("FNODE_BIRTH_K_SIGMA", FNODE_BIRTH_K_SIGMA)
+env.newPropertyFloat("FNODE_BIRTH_HILL_SIGMA", FNODE_BIRTH_HILL_SIGMA)
+env.newPropertyFloat("FNODE_BIRTH_RADIUS", FNODE_BIRTH_RADIUS)
+env.newPropertyFloat("FNODE_BIRTH_LINK_MAX_DISTANCE", FNODE_BIRTH_LINK_MAX_DISTANCE)
+env.newPropertyFloat("FNODE_BIRTH_REFRACTORY", FNODE_BIRTH_REFRACTORY)
 
 # Cell properties TODO: MOVE SOME OF THESE PROPERTIES TO THE CELL AGENT 
 env.newPropertyUInt("INCLUDE_CELL_CELL_INTERACTION", INCLUDE_CELL_CELL_INTERACTION)
@@ -780,16 +813,24 @@ if INCLUDE_FIBRE_NETWORK:
         fnode_spatial_radius = ECM_ECM_EQUILIBRIUM_DISTANCE
     if INCLUDE_CELLS and INCLUDE_CELL_FNODE_REPULSION and (fnode_spatial_radius < CELL_FNODE_EXCLUSION_DISTANCE):
         fnode_spatial_radius = CELL_FNODE_EXCLUSION_DISTANCE
+    if INCLUDE_CELLS and INCLUDE_NETWORK_REMODELING and (fnode_spatial_radius < (FNODE_BIRTH_LINK_MAX_DISTANCE + FNODE_BIRTH_RADIUS)):
+        fnode_spatial_radius = FNODE_BIRTH_LINK_MAX_DISTANCE + FNODE_BIRTH_RADIUS
     FNODE_spatial_location_message.setRadius(fnode_spatial_radius)
     FNODE_spatial_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS,MIN_EXPECTED_BOUNDARY_POS)
     FNODE_spatial_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS,MAX_EXPECTED_BOUNDARY_POS)
     FNODE_spatial_location_message.newVariableInt("id") # as an edge can have multiple inner agents, this stores the position within the edge
+    FNODE_spatial_location_message.newVariableUInt8("connectivity_count")
+    FNODE_spatial_location_message.newVariableInt("closest_fnode_id")
+    FNODE_spatial_location_message.newVariableInt("marked_for_removal")
 
     FNODE_bucket_location_message = model.newMessageBucket("fnode_bucket_location_message")
     # Set the range and bounds.
     # setBounds(min, max) where min and max are the min and max ids of the message buckets. This is independent of the number of agents (there can be more agents than buckets and vice versa).
     # Here, we assign one bucket per fibre node so that each fibre node can be found in its own bucket when searching for neighbours.
-    FNODE_bucket_location_message.setBounds(8+1,N_NODES + 8) # +8 because domain corners have idx from 1 to 8. WARNING: make sure to initialize fibre nodes starting from index 9
+    max_expected_fnodes = N_NODES
+    if INCLUDE_CELLS and INCLUDE_NETWORK_REMODELING:
+        max_expected_fnodes += MAX_EXPECTED_N_CELLS * STEPS
+    FNODE_bucket_location_message.setBounds(8 + 1, 8 + max_expected_fnodes) # +8 because domain corners have idx from 1 to 8. WARNING: make sure to initialize fibre nodes starting from index 9
 
     FNODE_bucket_location_message.newVariableInt("id")
     FNODE_bucket_location_message.newVariableFloat("x")
@@ -800,6 +841,8 @@ if INCLUDE_FIBRE_NETWORK:
     FNODE_bucket_location_message.newVariableFloat("vz")
     FNODE_bucket_location_message.newVariableFloat("k_elast")
     FNODE_bucket_location_message.newVariableFloat("d_dumping")
+    FNODE_bucket_location_message.newVariableFloat("degradation")
+    FNODE_bucket_location_message.newVariableInt("marked_for_removal")
     FNODE_bucket_location_message.newVariableArrayFloat("equilibrium_distance", MAX_CONNECTIVITY) # each segment can have a different equilibrium distance depending on the rest length assigned during network generation
     FNODE_bucket_location_message.newVariableArrayInt("linked_nodes", MAX_CONNECTIVITY) # store the index of the linked nodes, which is a proxy for the bucket id
 
@@ -1003,6 +1046,10 @@ if INCLUDE_FIBRE_NETWORK:
     FNODE_agent.newVariableFloat("f_extension")
     FNODE_agent.newVariableFloat("f_compression")
     FNODE_agent.newVariableFloat("elastic_energy")
+    FNODE_agent.newVariableUInt8("connectivity_count", 0)
+    FNODE_agent.newVariableFloat("degradation", 0.0)
+    FNODE_agent.newVariableInt("marked_for_removal", 0)
+    FNODE_agent.newVariableInt("closest_fnode_id", -1)
     FNODE_agent.newVariableArrayFloat("linked_nodes", MAX_CONNECTIVITY)
     FNODE_agent.newVariableUInt8("clamped_bx_pos")
     FNODE_agent.newVariableUInt8("clamped_bx_neg")
@@ -1016,6 +1063,11 @@ if INCLUDE_FIBRE_NETWORK:
     FNODE_agent.newRTCFunctionFile("fnode_boundary_interaction", fnode_boundary_interaction_file)
     FNODE_agent.newRTCFunctionFile("fnode_fnode_spatial_interaction", fnode_fnode_spatial_interaction_file).setMessageInput("fnode_spatial_location_message")
     FNODE_agent.newRTCFunctionFile("fnode_fnode_bucket_interaction", fnode_fnode_bucket_interaction_file).setMessageInput("fnode_bucket_location_message")
+    if INCLUDE_CELLS and INCLUDE_NETWORK_REMODELING:
+        FNODE_agent.newRTCFunctionFile("fnode_remodel", fnode_remodel_file).setMessageInput("cell_spatial_location_message")
+        fna = FNODE_agent.newRTCFunctionFile("fnode_apply_remodel_updates", fnode_apply_remodel_updates_file)
+        fna.setMessageInput("fnode_spatial_location_message")
+        fna.setAllowAgentDeath(True)
     FNODE_agent.newRTCFunctionFile("fnode_move", fnode_move_file)
     if INCLUDE_FOCAL_ADHESIONS:
         FNODE_agent.newRTCFunctionFile("fnode_focad_interaction", fnode_focad_interaction_file).setMessageInput("focad_spatial_location_message")
@@ -1104,12 +1156,17 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableInt("daughter_id", -1)
     CELL_agent.newVariableInt("just_divided", 0)
     CELL_agent.newVariableInt("marked_for_removal", 0)
+    CELL_agent.newVariableFloat("fnode_birth_cooldown", 0.0)
     CELL_agent.newVariableFloat("focad_birth_cooldown", 0.0)
     CELL_agent.newRTCFunctionFile("cell_spatial_location_data", cell_spatial_location_data_file).setMessageOutput("cell_spatial_location_message")
     if INCLUDE_CELL_CELL_INTERACTION:
         CELL_agent.newRTCFunctionFile("cell_cell_interaction", cell_cell_interaction_file).setMessageInput("cell_spatial_location_message")
     if INCLUDE_FIBRE_NETWORK and INCLUDE_CELL_FNODE_REPULSION:
         CELL_agent.newRTCFunctionFile("cell_fnode_repulsion", cell_fnode_repulsion_file).setMessageInput("fnode_spatial_location_message")
+    if INCLUDE_FIBRE_NETWORK and INCLUDE_NETWORK_REMODELING:
+        cfr = CELL_agent.newRTCFunctionFile("cell_fnode_remodel", cell_fnode_remodel_file)
+        cfr.setMessageInput("fnode_spatial_location_message")
+        cfr.setAgentOutput(FNODE_agent)
     CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ecm_grid_location_message")
     CELL_agent.newRTCFunctionFile("cell_move", cell_move_file)
     CELL_agent.newVariableArrayFloat("x_i", N_ANCHOR_POINTS) # store the position of the anchor points on the cell. Unused if INCLUDE_FOCAL_ADHESIONS is False
@@ -1373,6 +1430,10 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableFloat("f_extension", 0.0)
                 instance.setVariableFloat("f_compression", 0.0)
                 instance.setVariableFloat("elastic_energy", 0.0)
+                instance.setVariableUInt8("connectivity_count", int(np.sum(linked_nodes > -1)))
+                instance.setVariableFloat("degradation", 0.0)
+                instance.setVariableInt("marked_for_removal", 0)
+                instance.setVariableInt("closest_fnode_id", -1)
                 instance.setVariableUInt8("clamped_bx_pos", 0)
                 instance.setVariableUInt8("clamped_bx_neg", 0)
                 instance.setVariableUInt8("clamped_by_pos", 0)
@@ -1383,6 +1444,8 @@ class initAgentPopulations(pyflamegpu.HostFunction):
 
 
             FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
+            max_global_fnode_id_macro = FLAMEGPU.environment.getMacroPropertyInt("MACRO_MAX_GLOBAL_FNODE_ID")
+            max_global_fnode_id_macro[0] = current_id + count
 
             
         # CELLS
@@ -1459,6 +1522,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableInt("daughter_id", -1)
                 instance.setVariableInt("just_divided", 0)
                 instance.setVariableInt("marked_for_removal", 0)
+                instance.setVariableFloat("fnode_birth_cooldown", 0.0)
                 instance.setVariableFloat("focad_birth_cooldown", 0.0)
                 
                 anchor_pos = getRandomCoordsAroundPoint(N_ANCHOR_POINTS, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_NUCLEUS_RADIUS, on_surface=True)
@@ -1890,8 +1954,8 @@ class UpdateAgentCount(pyflamegpu.HostFunction): # if cells proliferate, N_CELLS
 
     def run(self, FLAMEGPU):
         FLAMEGPU.environment.setPropertyUInt("N_CELLS", FLAMEGPU.agent("CELL").count())
-         
-        
+
+
 if INCLUDE_DIFFUSION:
     ubcm = UpdateBoundaryConcentrationMulti()
     model.addStepFunction(ubcm)
@@ -1944,6 +2008,10 @@ if INCLUDE_DIFFUSION:
     model.newLayer("L2_ECM_Boundary_Interactions").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
 if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L2_FNODE_Boundary_Interactions").addAgentFunction("FNODE", "fnode_boundary_interaction")
+if INCLUDE_FIBRE_NETWORK and INCLUDE_CELLS and INCLUDE_NETWORK_REMODELING:
+    model.newLayer("L2_CELL_FNODE_Remodel").addAgentFunction("CELL", "cell_fnode_remodel")
+    model.newLayer("L2_FNODE_Remodel").addAgentFunction("FNODE", "fnode_remodel")
+    model.newLayer("L2_FNODE_Remodel_Apply").addAgentFunction("FNODE", "fnode_apply_remodel_updates")
 
 # L3: Metabolism & Cell Cycle
 if INCLUDE_CELLS and INCLUDE_DIFFUSION:    

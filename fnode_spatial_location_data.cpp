@@ -15,6 +15,9 @@ FLAMEGPU_AGENT_FUNCTION(fnode_spatial_location_data, flamegpu::MessageNone, flam
   FLAMEGPU->message_out.setVariable<float>("x", FLAMEGPU->getVariable<float>("x"));
   FLAMEGPU->message_out.setVariable<float>("y", FLAMEGPU->getVariable<float>("y"));
   FLAMEGPU->message_out.setVariable<float>("z", FLAMEGPU->getVariable<float>("z"));
+  FLAMEGPU->message_out.setVariable<uint8_t>("connectivity_count", FLAMEGPU->getVariable<uint8_t>("connectivity_count"));
+  FLAMEGPU->message_out.setVariable<int>("closest_fnode_id", FLAMEGPU->getVariable<int>("closest_fnode_id"));
+  FLAMEGPU->message_out.setVariable<int>("marked_for_removal", FLAMEGPU->getVariable<int>("marked_for_removal"));
 
   return flamegpu::ALIVE;
 }
