@@ -2,8 +2,7 @@
  * fnode_remodel
  *
  * Purpose:
- *   Update FNODE degradation/deposition state from nearby CELLs, scale
- *   stiffness, and register removal requests when degradation reaches 1.
+ *   Update FNODE degradation/deposition state from nearby CELLs and register removal requests when degradation reaches 1.
  *
  * Inputs:
  *   - CELL spatial messages (x, y, z, dead)
@@ -11,7 +10,7 @@
  *   - Remodeling environment properties and removal macro buffers
  *
  * Outputs:
- *   - Updated FNODE `degradation`, `k_elast`, `marked_for_removal`
+ *   - Updated FNODE `degradation`, `marked_for_removal`
  */
 FLAMEGPU_AGENT_FUNCTION(fnode_remodel, flamegpu::MessageSpatial3D, flamegpu::MessageNone) {
   const uint32_t INCLUDE_NETWORK_REMODELING = FLAMEGPU->environment.getProperty<uint32_t>("INCLUDE_NETWORK_REMODELING");
@@ -54,7 +53,6 @@ FLAMEGPU_AGENT_FUNCTION(fnode_remodel, flamegpu::MessageSpatial3D, flamegpu::Mes
   degradation = fminf(1.0f, fmaxf(0.0f, degradation));
 
   FLAMEGPU->setVariable<float>("degradation", degradation);
-  FLAMEGPU->setVariable<float>("k_elast", fmaxf(0.0f, FIBRE_SEGMENT_K_ELAST * (1.0f - degradation)));
 
   if (degradation >= 1.0f) {
     FLAMEGPU->setVariable<int>("marked_for_removal", 1);

@@ -24,7 +24,8 @@ from helper_module import compute_expected_boundary_pos_from_corners, getRandomV
 # Add matrix degradation / deposition. Easy: Modifying FNODE properties, Complex: removing / adding FNODE agents (which would require updating the connectivity matrix)
 # Include in materials and methods matrix remodeling, including network mechanics
 # Add matrix remodeling report
-# Check for extra links added on newborn FNODES
+# Add a new variable for FNODE reinforcement (e.g. crosslinking, or matrix deposition)
+# Add a new variable to track new FNODES born from remodeling
 
 start_time = time.time()
 
@@ -1873,7 +1874,7 @@ class MoveBoundaries(pyflamegpu.HostFunction):
 
 class SaveDataToFile(pyflamegpu.HostFunction):
     def __init__(self):
-        global ECM_AGENTS_PER_DIR, INCLUDE_FIBRE_NETWORK, N_NODES
+        global ECM_AGENTS_PER_DIR, INCLUDE_FIBRE_NETWORK, N_NODES, INCLUDE_NETWORK_REMODELING
         super().__init__()
         self.save_context = build_save_data_context(
             ecm_agents_per_dir=ECM_AGENTS_PER_DIR,
@@ -1901,6 +1902,7 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                 "INCLUDE_CELLS": INCLUDE_CELLS,
                 "ECM_POPULATION_SIZE": ECM_POPULATION_SIZE,
                 "INCLUDE_FOCAL_ADHESIONS": INCLUDE_FOCAL_ADHESIONS,
+                "INCLUDE_NETWORK_REMODELING": INCLUDE_NETWORK_REMODELING,
                 "pyflamegpu": pyflamegpu,
             },
         )
@@ -2013,12 +2015,12 @@ if INCLUDE_FIBRE_NETWORK:
 if INCLUDE_DIFFUSION:
     model.newLayer("L2_ECM_Boundary_Interactions").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
 if INCLUDE_FIBRE_NETWORK:
-    model.newLayer("L2_FNODE_Boundary_Interactions").addAgentFunction("FNODE", "fnode_boundary_interaction")
-    model.newLayer("L2_FNODE_Update_Links").addAgentFunction("FNODE", "fnode_update_links")
+    model.newLayer("L2_FNODE_Boundary_Interactions").addAgentFunction("FNODE", "fnode_boundary_interaction")    
 if INCLUDE_FIBRE_NETWORK and INCLUDE_CELLS and INCLUDE_NETWORK_REMODELING:
     model.newLayer("L2_CELL_FNODE_Remodel").addAgentFunction("CELL", "cell_fnode_remodel")
     model.newLayer("L2_FNODE_Remodel").addAgentFunction("FNODE", "fnode_remodel")
     model.newLayer("L2_FNODE_Remodel_Apply").addAgentFunction("FNODE", "fnode_apply_remodel_updates")
+    model.newLayer("L2_FNODE_Update_Links").addAgentFunction("FNODE", "fnode_update_links")
 
 # L3: Metabolism & Cell Cycle
 if INCLUDE_CELLS and INCLUDE_DIFFUSION:    

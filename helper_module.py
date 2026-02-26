@@ -568,7 +568,7 @@ def build_save_data_context(ecm_agents_per_dir, include_fibre_network, n_nodes):
         domaindata.append(' '.join(str(x) for x in cube_conn[i]))
 
     context["domaindata"] = domaindata
-
+      
     if include_fibre_network:
         domaindata_network = []
         cube_conn_network = [
@@ -651,6 +651,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
     include_cells = config["INCLUDE_CELLS"]
     ecm_population_size = config["ECM_POPULATION_SIZE"]
     include_focal_adhesions = config["INCLUDE_FOCAL_ADHESIONS"]
+    include_network_remodeling = config["INCLUDE_NETWORK_REMODELING"]
     pyflamegpu = config["pyflamegpu"]
 
     stepCounter = FLAMEGPU.getStepCounter() + 1
@@ -761,8 +762,26 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             file.write(f"CELLS {num_cells + 6} {num_cells * 3 + 6 * 5}\n")
             for conn in cell_connectivity:
                 file.write(f"2 {conn[0]} {conn[1]}\n")
-            for line in save_context["domaindata_network"]:
-                file.write(line + '\n')
+            if include_network_remodeling:
+                domaindata_network = []
+                cube_conn_network = [
+                    [4, 0, 3, 7, 4],
+                    [4, 1, 2, 6, 5],
+                    [4, 1, 0, 4, 5],
+                    [4, 2, 3, 7, 6],
+                    [4, 0, 1, 2, 3],
+                    [4, 4, 5, 6, 7],
+                ]
+                for i in range(len(cube_conn_network)):
+                    for j in range(len(cube_conn_network[i])):
+                        if j > 0:
+                            cube_conn_network[i][j] = cube_conn_network[i][j] + n_fnodes
+                    domaindata_network.append(' '.join(str(x) for x in cube_conn_network[i]))
+                for line in domaindata_network:
+                    file.write(line + '\n')                
+            else:
+                for line in save_context["domaindata_network"]:
+                    file.write(line + '\n')
 
             file.write(f"CELL_TYPES {num_cells + 6}\n")
             for _ in range(num_cells):
