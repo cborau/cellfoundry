@@ -569,6 +569,7 @@ bcorner_move_file = "bcorner_move.cpp"
 fnode_spatial_location_data_file = "fnode_spatial_location_data.cpp"
 fnode_bucket_location_data_file = "fnode_bucket_location_data.cpp"
 fnode_boundary_interaction_file = "fnode_boundary_interaction.cpp"
+fnode_update_links_file = "fnode_update_links.cpp"
 fnode_fnode_spatial_interaction_file = "fnode_fnode_spatial_interaction.cpp"
 fnode_fnode_bucket_interaction_file = "fnode_fnode_bucket_interaction.cpp"
 fnode_remodel_file = "fnode_remodel.cpp"
@@ -1061,6 +1062,7 @@ if INCLUDE_FIBRE_NETWORK:
     FNODE_agent.newRTCFunctionFile("fnode_spatial_location_data", fnode_spatial_location_data_file).setMessageOutput("fnode_spatial_location_message")
     FNODE_agent.newRTCFunctionFile("fnode_bucket_location_data", fnode_bucket_location_data_file).setMessageOutput("fnode_bucket_location_message")
     FNODE_agent.newRTCFunctionFile("fnode_boundary_interaction", fnode_boundary_interaction_file)
+    FNODE_agent.newRTCFunctionFile("fnode_update_links", fnode_update_links_file).setMessageInput("fnode_bucket_location_message")
     FNODE_agent.newRTCFunctionFile("fnode_fnode_spatial_interaction", fnode_fnode_spatial_interaction_file).setMessageInput("fnode_spatial_location_message")
     FNODE_agent.newRTCFunctionFile("fnode_fnode_bucket_interaction", fnode_fnode_bucket_interaction_file).setMessageInput("fnode_bucket_location_message")
     if INCLUDE_CELLS and INCLUDE_NETWORK_REMODELING:
@@ -2008,6 +2010,7 @@ if INCLUDE_DIFFUSION:
     model.newLayer("L2_ECM_Boundary_Interactions").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
 if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L2_FNODE_Boundary_Interactions").addAgentFunction("FNODE", "fnode_boundary_interaction")
+    model.newLayer("L2_FNODE_Update_Links").addAgentFunction("FNODE", "fnode_update_links")
 if INCLUDE_FIBRE_NETWORK and INCLUDE_CELLS and INCLUDE_NETWORK_REMODELING:
     model.newLayer("L2_CELL_FNODE_Remodel").addAgentFunction("CELL", "cell_fnode_remodel")
     model.newLayer("L2_FNODE_Remodel").addAgentFunction("FNODE", "fnode_remodel")

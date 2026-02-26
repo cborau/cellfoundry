@@ -34,21 +34,13 @@ FLAMEGPU_AGENT_FUNCTION(fnode_apply_remodel_updates, flamegpu::MessageSpatial3D,
     equilibrium_distance[i] = FLAMEGPU->getVariable<float, MAX_CONNECTIVITY>("equilibrium_distance", i);
   }
 
-  // Build local cache of nearby node ids and candidate newborn links
-  int nearby_ids[LOCAL_CACHE_SIZE] = {};
-  int nearby_marked[LOCAL_CACHE_SIZE] = {};
-  int nearby_count = 0;
+  // Build local cache of candidate newborn links
   int newborn_ids[LOCAL_CACHE_SIZE] = {};
   float newborn_dist[LOCAL_CACHE_SIZE] = {};
   int newborn_count = 0;
 
   for (const auto &message : FLAMEGPU->message_in(agent_x, agent_y, agent_z)) {
     const int mid = message.getVariable<int>("id");
-    if (nearby_count < LOCAL_CACHE_SIZE) {
-      nearby_ids[nearby_count] = mid;
-      nearby_marked[nearby_count] = message.getVariable<int>("marked_for_removal");
-      nearby_count++;
-    }
 
     const int closest_fnode_id = message.getVariable<int>("closest_fnode_id");
     if (closest_fnode_id == id && mid != id && newborn_count < LOCAL_CACHE_SIZE) {
@@ -58,26 +50,6 @@ FLAMEGPU_AGENT_FUNCTION(fnode_apply_remodel_updates, flamegpu::MessageSpatial3D,
       newborn_ids[newborn_count] = mid;
       newborn_dist[newborn_count] = fmaxf(1e-6f, sqrtf(dx * dx + dy * dy + dz * dz));
       newborn_count++;
-    }
-  }
-
-  // Remove stale links (neighbor no longer present)
-  for (int i = 0; i < MAX_CONNECTIVITY; i++) {
-    const int ln = static_cast<int>(linked_nodes[i]);
-    if (ln < 0) {
-      continue;
-    }
-    int found = 0;
-    int found_marked_for_removal = 0;
-    for (int j = 0; j < nearby_count; j++) {
-      if (nearby_ids[j] == ln) {
-        found = 1;
-        found_marked_for_removal = nearby_marked[j];
-        break;
-      }
-    }
-    if (!found || found_marked_for_removal == 1) {
-      linked_nodes[i] = -1.0f;
     }
   }
 

@@ -58,6 +58,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_remodel, flamegpu::MessageSpatial3D, flamegpu::Mes
 
   if (degradation >= 1.0f) {
     FLAMEGPU->setVariable<int>("marked_for_removal", 1);
+    printf("FNODE %d at (%f, %f, %f) is marked for removal due to degradation\n", id, agent_x, agent_y, agent_z);
   } else {
     FLAMEGPU->setVariable<int>("marked_for_removal", 0);
   }
