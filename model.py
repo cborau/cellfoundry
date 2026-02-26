@@ -23,6 +23,8 @@ from helper_module import compute_expected_boundary_pos_from_corners, getRandomV
 # Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
 # Add matrix degradation / deposition. Easy: Modifying FNODE properties, Complex: removing / adding FNODE agents (which would require updating the connectivity matrix)
 # Include in materials and methods matrix remodeling, including network mechanics
+# Add matrix remodeling report
+# Check for extra links added on newborn FNODES
 
 start_time = time.time()
 
@@ -167,7 +169,8 @@ INCLUDE_NETWORK_REMODELING = True
 FNODE_DEGRADATION_RATE = 5.0e-4  # [1/s] per-neighbor degradation contribution
 FNODE_DEPOSITION_RATE = 2.0e-4  # [1/s] baseline repair/deposition
 FNODE_CELL_DEGRADATION_RADIUS = 0.75 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE  # [um]
-FNODE_BIRTH_K_0 = 2.0e-3  # [1/s] baseline probability rate for CELL-driven FNODE birth
+FNODE_BIRTH_K_0 = 1000 * 2.0e-3  # [1/s] baseline probability rate for CELL-driven FNODE birth
+FNODE_BIRTH_K_MAX = 1000 * 2.0e-3  # [1/s] gated additive birth-rate gain (matches FOCAD-style formulation)
 FNODE_BIRTH_SPECIES_INDEX = 0
 FNODE_BIRTH_K_C = 5.0  # concentration half-saturation for birth gate
 FNODE_BIRTH_HILL_CONC = 2.0
@@ -651,6 +654,7 @@ env.newPropertyFloat("FNODE_DEGRADATION_RATE", FNODE_DEGRADATION_RATE)
 env.newPropertyFloat("FNODE_DEPOSITION_RATE", FNODE_DEPOSITION_RATE)
 env.newPropertyFloat("FNODE_CELL_DEGRADATION_RADIUS", FNODE_CELL_DEGRADATION_RADIUS)
 env.newPropertyFloat("FNODE_BIRTH_K_0", FNODE_BIRTH_K_0)
+env.newPropertyFloat("FNODE_BIRTH_K_MAX", FNODE_BIRTH_K_MAX)
 env.newPropertyUInt("FNODE_BIRTH_SPECIES_INDEX", FNODE_BIRTH_SPECIES_INDEX)
 env.newPropertyFloat("FNODE_BIRTH_K_C", FNODE_BIRTH_K_C)
 env.newPropertyFloat("FNODE_BIRTH_HILL_CONC", FNODE_BIRTH_HILL_CONC)

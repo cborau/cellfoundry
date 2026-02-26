@@ -58,6 +58,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_remodel, flamegpu::MessageSpatial3D, flamegpu
 
   const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
   const float FNODE_BIRTH_K_0 = FLAMEGPU->environment.getProperty<float>("FNODE_BIRTH_K_0");
+  const float FNODE_BIRTH_K_MAX = FLAMEGPU->environment.getProperty<float>("FNODE_BIRTH_K_MAX");
   const uint32_t FNODE_BIRTH_SPECIES_INDEX = FLAMEGPU->environment.getProperty<uint32_t>("FNODE_BIRTH_SPECIES_INDEX");
   const float FNODE_BIRTH_K_C = FLAMEGPU->environment.getProperty<float>("FNODE_BIRTH_K_C");
   const float FNODE_BIRTH_HILL_CONC = FLAMEGPU->environment.getProperty<float>("FNODE_BIRTH_HILL_CONC");
@@ -72,6 +73,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_remodel, flamegpu::MessageSpatial3D, flamegpu
 
   float cooldown = FLAMEGPU->getVariable<float>("fnode_birth_cooldown");
   cooldown = fmaxf(0.0f, cooldown - TIME_STEP);
+  printf("CELL %d at (%f, %f, %f) has fnode_birth_cooldown = %f\n", FLAMEGPU->getVariable<int>("id"), FLAMEGPU->getVariable<float>("x"), FLAMEGPU->getVariable<float>("y"), FLAMEGPU->getVariable<float>("z"), cooldown);
   FLAMEGPU->setVariable<float>("fnode_birth_cooldown", cooldown);
   if (cooldown > 0.0f) {
     return flamegpu::ALIVE;
@@ -82,9 +84,22 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_remodel, flamegpu::MessageSpatial3D, flamegpu
     c_sp0 = FLAMEGPU->getVariable<float, N_SPECIES>("C_sp", FNODE_BIRTH_SPECIES_INDEX);
   }
   const float sig_l1 = fmaxf(0.0f, FLAMEGPU->getVariable<float>("sig_eig_1"));
-  const float gate_c = cfnr_hill(c_sp0, FNODE_BIRTH_K_C, FNODE_BIRTH_HILL_CONC);
-  const float gate_s = cfnr_hill(sig_l1, FNODE_BIRTH_K_SIGMA, FNODE_BIRTH_HILL_SIGMA);
-  const float k_birth = fmaxf(0.0f, FNODE_BIRTH_K_0) * (0.25f + 0.75f * gate_c) * (0.25f + 0.75f * gate_s);
+
+  const float hill_sigma = fmaxf(1.0f, FNODE_BIRTH_HILL_SIGMA);
+  const float sigma_pow = powf(sig_l1, hill_sigma);
+  const float ks_pow = powf(fmaxf(1e-12f, FNODE_BIRTH_K_SIGMA), hill_sigma);
+  const float hs_denom = fmaxf(1e-12f, ks_pow + sigma_pow);
+  const float h_sigma = sigma_pow / hs_denom;
+
+  const float c_pos = fmaxf(0.0f, c_sp0);
+  const float hill_conc = fmaxf(1.0f, FNODE_BIRTH_HILL_CONC);
+  const float c_pow = powf(c_pos, hill_conc);
+  const float kc_pow = powf(fmaxf(1e-12f, FNODE_BIRTH_K_C), hill_conc);
+  const float hc_denom = fmaxf(1e-12f, kc_pow + c_pow);
+  const float h_c = c_pow / hc_denom;
+
+  const float h_birth = h_sigma * h_c;
+  const float k_birth = fmaxf(0.0f, FNODE_BIRTH_K_0 + FNODE_BIRTH_K_MAX * h_birth);
   const float p_birth = 1.0f - expf(-k_birth * TIME_STEP);
   if (FLAMEGPU->random.uniform<float>(0.0f, 1.0f) >= p_birth) {
     return flamegpu::ALIVE;
@@ -207,6 +222,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_remodel, flamegpu::MessageSpatial3D, flamegpu
     FLAMEGPU->agent_out.setVariable<float, MAX_CONNECTIVITY>("equilibrium_distance", i, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE);
   }
 
+  printf("CELL %d is requesting reciprocal link update from parent FNODE %d for new FNODE %d\n", FLAMEGPU->getVariable<int>("id"), closest_fnode_id, new_fnode_id);
   FLAMEGPU->setVariable<float>("fnode_birth_cooldown", fmaxf(0.0f, FNODE_BIRTH_REFRACTORY));
 
   return flamegpu::ALIVE;
