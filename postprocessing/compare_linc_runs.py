@@ -41,7 +41,7 @@ def last20_mean(df: pd.DataFrame, col: str) -> float:
 
 def main() -> None:
     args = parse_args()
-    outdir = Path(args.outdir)
+    outdir = Path(args.outdir).resolve()
 
     def resolve_csv(kind: str, tag: str) -> Path:
         candidates = [

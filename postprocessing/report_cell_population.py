@@ -68,7 +68,8 @@ def _read_scalar(lines: list[str], name: str, n: int) -> list[int]:
     return out
 
 
-def read_cells_vtk(path: Path) -> dict[int, tuple[int, int]]:
+def read_cells_vtk(path: Path) -> dict[int, tuple[int, int, int]]:
+    """Return ``{cell_id: (dead, dead_by, cell_type)}`` from a VTK file."""
     lines = [line.strip() for line in path.read_text().splitlines()]
     point_data_idx = next(i for i, l in enumerate(lines) if l.startswith("POINT_DATA"))
     n_points = int(lines[point_data_idx].split()[1])
@@ -77,10 +78,16 @@ def read_cells_vtk(path: Path) -> dict[int, tuple[int, int]]:
     dead = _read_scalar(lines, "dead", n_points)
     dead_by = _read_scalar(lines, "dead_by", n_points)
 
-    by_cell: dict[int, tuple[int, int]] = {}
-    for cid, d, db in zip(ids, dead, dead_by):
+    # cell_type may not be present in older VTK outputs — default to 0
+    try:
+        cell_types = _read_scalar(lines, "cell_type", n_points)
+    except ValueError:
+        cell_types = [0] * n_points
+
+    by_cell: dict[int, tuple[int, int, int]] = {}
+    for cid, d, db, ct in zip(ids, dead, dead_by, cell_types):
         if cid not in by_cell:
-            by_cell[cid] = (d, db)
+            by_cell[cid] = (d, db, ct)
     return by_cell
 
 
@@ -88,6 +95,7 @@ def build_timeseries_from_vtk(vtk_files: list[Path]) -> pd.DataFrame:
     rows = []
     prev_ids: set[int] | None = None
     prev_dead_map: dict[int, int] = {}
+    all_cell_types: set[int] = set()  # collect every cell_type seen
 
     for vtk in vtk_files:
         step_match = re.search(r"t(\d+)\.vtk$", vtk.name)
@@ -96,13 +104,22 @@ def build_timeseries_from_vtk(vtk_files: list[Path]) -> pd.DataFrame:
         cell_map = read_cells_vtk(vtk)
         ids = set(cell_map.keys())
 
-        alive = sum(1 for d, _ in cell_map.values() if d == 0)
-        dead = sum(1 for d, _ in cell_map.values() if d != 0)
+        alive = sum(1 for d, _, _ in cell_map.values() if d == 0)
+        dead = sum(1 for d, _, _ in cell_map.values() if d != 0)
 
         cause_counts = {k: 0 for k in (0, 1, 2, 3)}
-        for d, db in cell_map.values():
+        for d, db, _ in cell_map.values():
             if d != 0 and db in cause_counts:
                 cause_counts[db] += 1
+
+        # --- Per-cell-type alive/total counts ---
+        type_alive: dict[int, int] = {}
+        type_total: dict[int, int] = {}
+        for d, _, ct in cell_map.values():
+            all_cell_types.add(ct)
+            type_total[ct] = type_total.get(ct, 0) + 1
+            if d == 0:
+                type_alive[ct] = type_alive.get(ct, 0) + 1
 
         if prev_ids is None:
             new_ids = len(ids)
@@ -117,37 +134,47 @@ def build_timeseries_from_vtk(vtk_files: list[Path]) -> pd.DataFrame:
 
             newly_dead_by = {k: 0 for k in (0, 1, 2, 3)}
             newly_dead_ids = 0
-            for cid, (d, db) in cell_map.items():
+            for cid, (d, db, _) in cell_map.items():
                 prev_d = prev_dead_map.get(cid, 0)
                 if d != 0 and prev_d == 0:
                     newly_dead_ids += 1
                     if db in newly_dead_by:
                         newly_dead_by[db] += 1
 
-        rows.append(
-            {
-                "step": step,
-                "n_cells_total": len(ids),
-                "n_cells_alive": alive,
-                "n_cells_dead": dead,
-                "new_cell_ids": new_ids,
-                "lost_cell_ids": lost_ids,
-                "newly_dead_ids": newly_dead_ids,
-                "newly_dead_hypoxia": newly_dead_by[0],
-                "newly_dead_starvation": newly_dead_by[1],
-                "newly_dead_mechanical": newly_dead_by[2],
-                "newly_dead_cumulative_damage": newly_dead_by[3],
-                "dead_hypoxia_total": cause_counts[0],
-                "dead_starvation_total": cause_counts[1],
-                "dead_mechanical_total": cause_counts[2],
-                "dead_cumulative_damage_total": cause_counts[3],
-            }
-        )
+        row = {
+            "step": step,
+            "n_cells_total": len(ids),
+            "n_cells_alive": alive,
+            "n_cells_dead": dead,
+            "new_cell_ids": new_ids,
+            "lost_cell_ids": lost_ids,
+            "newly_dead_ids": newly_dead_ids,
+            "newly_dead_hypoxia": newly_dead_by[0],
+            "newly_dead_starvation": newly_dead_by[1],
+            "newly_dead_mechanical": newly_dead_by[2],
+            "newly_dead_cumulative_damage": newly_dead_by[3],
+            "dead_hypoxia_total": cause_counts[0],
+            "dead_starvation_total": cause_counts[1],
+            "dead_mechanical_total": cause_counts[2],
+            "dead_cumulative_damage_total": cause_counts[3],
+        }
+        # Per-type columns
+        for ct in sorted(all_cell_types):
+            row[f"n_alive_type_{ct}"] = type_alive.get(ct, 0)
+            row[f"n_total_type_{ct}"] = type_total.get(ct, 0)
+
+        rows.append(row)
 
         prev_ids = ids
-        prev_dead_map = {cid: d for cid, (d, _) in cell_map.items()}
+        prev_dead_map = {cid: d for cid, (d, _, _) in cell_map.items()}
 
-    return pd.DataFrame(rows).sort_values("step").reset_index(drop=True)
+    df = pd.DataFrame(rows).sort_values("step").reset_index(drop=True)
+
+    # Back-fill per-type columns for early rows where a type wasn't yet seen
+    type_cols = [c for c in df.columns if c.startswith("n_alive_type_") or c.startswith("n_total_type_")]
+    df[type_cols] = df[type_cols].fillna(0).astype(int)
+
+    return df
 
 
 def build_timeseries_from_pickle(pickle_path: Path) -> pd.DataFrame:
@@ -198,18 +225,48 @@ def save_summary(df: pd.DataFrame, outdir: Path, tag: str) -> None:
 
 
 def make_plots(df: pd.DataFrame, outdir: Path, tag: str, show: bool) -> None:
+    # ---- 1. Overall population trends -----------------------------------
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(df["step"], df["n_cells_total"], label="total", linewidth=2)
     ax.plot(df["step"], df["n_cells_alive"], label="alive", linewidth=2)
     ax.plot(df["step"], df["n_cells_dead"], label="dead", linewidth=2)
     ax.set_xlabel("Step")
     ax.set_ylabel("CELL count")
+    ax.set_title("Cell Population Over Time")
     ax.grid(alpha=0.25)
     ax.legend(loc="best")
     fig.tight_layout()
     fig.savefig(outdir / f"cell_population_trends_{tag}.png", dpi=180)
 
-    # Events plot only when per-ID data is available (VTK source)
+    # ---- 2. Per-cell-type alive population (VTK only) -------------------
+    alive_type_cols = sorted([c for c in df.columns if c.startswith("n_alive_type_")])
+    if alive_type_cols:
+        fig, ax = plt.subplots(figsize=(10, 5))
+        for col in alive_type_cols:
+            ct_label = col.replace("n_alive_type_", "type ")
+            ax.plot(df["step"], df[col], label=ct_label, linewidth=2)
+        ax.set_xlabel("Step")
+        ax.set_ylabel("Alive CELL count")
+        ax.set_title("Cell Population Over Time — Per Cell Type")
+        ax.grid(alpha=0.25)
+        ax.legend(loc="best")
+        fig.tight_layout()
+        fig.savefig(outdir / f"cell_population_per_type_{tag}.png", dpi=180)
+
+    # ---- 3. Per-cell-type stacked area plot (VTK only) ------------------
+    if alive_type_cols:
+        fig, ax = plt.subplots(figsize=(10, 5))
+        labels = [col.replace("n_alive_type_", "type ") for col in alive_type_cols]
+        ax.stackplot(df["step"], *[df[col] for col in alive_type_cols], labels=labels, alpha=0.7)
+        ax.set_xlabel("Step")
+        ax.set_ylabel("Alive CELL count")
+        ax.set_title("Cell Population (Stacked) — Per Cell Type")
+        ax.grid(alpha=0.25)
+        ax.legend(loc="best")
+        fig.tight_layout()
+        fig.savefig(outdir / f"cell_population_stacked_{tag}.png", dpi=180)
+
+    # ---- 4. Events plot (VTK only) --------------------------------------
     if not df["new_cell_ids"].isna().all():
         fig, ax = plt.subplots(figsize=(10, 5))
         ax.plot(df["step"], df["new_cell_ids"], label="new_cell_ids", linewidth=2)
@@ -217,6 +274,7 @@ def make_plots(df: pd.DataFrame, outdir: Path, tag: str, show: bool) -> None:
         ax.plot(df["step"], df["lost_cell_ids"], label="lost_cell_ids", linewidth=2)
         ax.set_xlabel("Step")
         ax.set_ylabel("Events per step")
+        ax.set_title("Cell Population Events Per Step")
         ax.grid(alpha=0.25)
         ax.legend(loc="best")
         fig.tight_layout()
@@ -230,7 +288,7 @@ def make_plots(df: pd.DataFrame, outdir: Path, tag: str, show: bool) -> None:
 
 def main() -> None:
     args = parse_args()
-    outdir = Path(args.outdir)
+    outdir = Path(args.outdir).resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
     if args.source == "vtk":

@@ -7,8 +7,12 @@
 # +====================================================================+
 # | IMPORTS                                                            |
 # +====================================================================+
+import sys as _sys
+import sys                                     # keep 'sys' available for existing usage
+import pathlib
+_ORIGINAL_ARGV = list(_sys.argv)          # snapshot BEFORE pyflamegpu touches sys.argv
 from pyflamegpu import *
-import pathlib, time, math, sys
+import time, math
 from dataclasses import make_dataclass
 import pandas as pd
 import numpy as np
@@ -347,9 +351,13 @@ DUROTAXIS_USE_STRESS = True   # True: use stress eigenpair, False: use strain ei
 # | PARAMETER OVERRIDES (for optimization / batch runs)                 |
 # +====================================================================+
 # Load overrides from --overrides <file.json> CLI argument (if any).
+# e.g. python model.py --overrides ./optimizer/optuna_results/best_params.json
 # This must run AFTER all defaults above so that derived values can be
 # recomputed from the (possibly overridden) base parameters.
-_PARAM_OVERRIDES, _RESULT_DIR_OVERRIDE = load_param_overrides_from_cli()
+_PARAM_OVERRIDES, _RESULT_DIR_OVERRIDE = load_param_overrides_from_cli(_ORIGINAL_ARGV)
+print(f"[DIAG] _ORIGINAL_ARGV = {_ORIGINAL_ARGV}")
+print(f"[DIAG] _PARAM_OVERRIDES keys = {list(_PARAM_OVERRIDES.keys()) if _PARAM_OVERRIDES else '(none)'}")
+print(f"[DIAG] _RESULT_DIR_OVERRIDE = {_RESULT_DIR_OVERRIDE}")
 if _PARAM_OVERRIDES:
     print(f"Applying {len(_PARAM_OVERRIDES)} parameter override(s): {list(_PARAM_OVERRIDES.keys())}")
     apply_param_overrides(globals(), _PARAM_OVERRIDES)
@@ -358,6 +366,9 @@ if _RESULT_DIR_OVERRIDE:
     RES_PATH.mkdir(parents=True, exist_ok=True)
     print(f"Result directory overridden to: {RES_PATH}")
 
+# When running inside an Optuna trial, suppress verbose summaries.
+_OPTUNA_QUIET = bool(_PARAM_OVERRIDES)
+print(f"[DIAG] After overrides: STEPS={STEPS}, SAVE_PICKLE={SAVE_PICKLE}, RES_PATH={RES_PATH}, _OPTUNA_QUIET={_OPTUNA_QUIET}")
 
 # +====================================================================+
 # | OTHER DERIVED PARAMETERS AND MODEL CHECKS                          |
@@ -492,7 +503,7 @@ elif INCLUDE_CELL_CYCLE:
     print('ERROR: cell cycle cannot be included if there are no cells (INCLUDE_CELLS is set to False)')
     critical_error= True
 
-if INCLUDE_FIBRE_NETWORK:
+if INCLUDE_FIBRE_NETWORK and not _OPTUNA_QUIET:
     print_fibre_calibration_summary(
         fibre_segment_k_elast=FIBRE_SEGMENT_K_ELAST,
         fibre_segment_d_dumping=FIBRE_SEGMENT_D_DUMPING,
@@ -500,7 +511,7 @@ if INCLUDE_FIBRE_NETWORK:
         dt = TIME_STEP,
     )
 
-if INCLUDE_CELLS and INCLUDE_FOCAL_ADHESIONS and ENABLE_FOCAD_BIRTH:
+if INCLUDE_CELLS and INCLUDE_FOCAL_ADHESIONS and ENABLE_FOCAD_BIRTH and not _OPTUNA_QUIET:
     print_focad_birth_calibration_summary(
         dt=TIME_STEP,
         init_n_focad_per_cell=INIT_N_FOCAD_PER_CELL,
@@ -521,10 +532,11 @@ if critical_error:
     quit()
 
 MODEL_CONFIG = build_model_config_from_namespace(globals())
-MODEL_CONFIG.print_configuration_summary(
-    n_nodes=locals().get('N_NODES'),
-    n_fibres=locals().get('N_FIBRES'),
-)
+if not _OPTUNA_QUIET:
+    MODEL_CONFIG.print_configuration_summary(
+        n_nodes=locals().get('N_NODES'),
+        n_fibres=locals().get('N_FIBRES'),
+    )
 # +====================================================================+
 # | FLAMEGPU2 IMPLEMENTATION                                           |
 # +====================================================================+
@@ -2292,11 +2304,13 @@ if pyflamegpu.VISUALISATION and VISUALISATION and not ENSEMBLE:
 """
   Execution
 """
+print(f"[DIAG] About to simulate: ENSEMBLE={ENSEMBLE}, STEPS={STEPS}")
 if ENSEMBLE:
     # Execute the ensemble using the specified RunPlans
     errs = ensemble.simulate(ensemble_runs)
 else:
     simulation.simulate()
+print("[DIAG] simulation.simulate() completed")
 
 
 if pyflamegpu.VISUALISATION and VISUALISATION and not ENSEMBLE:
@@ -2540,9 +2554,11 @@ def manageLogs(steps, is_ensemble, idx):
             print(CELL_METRICS_OVER_TIME)
             print()
     # Saving pickle
+    print(f"[DIAG] manageLogs: SAVE_PICKLE={SAVE_PICKLE}, RES_PATH={RES_PATH}, idx={idx}")
     if SAVE_PICKLE:
         file_name = f'output_data_{idx}.pickle'
         file_path = RES_PATH / file_name
+        print(f"[DIAG] Saving pickle to: {file_path}")
         with open(str(file_path), 'wb') as file:
             pickle.dump({'BPOS_OVER_TIME': BPOS_OVER_TIME,
                          'BFORCE_OVER_TIME': BFORCE_OVER_TIME,
@@ -2576,6 +2592,7 @@ def manageLogs(steps, is_ensemble, idx):
             )
 
 # Deal with logs
+print("[DIAG] Processing logs...")
 if ENSEMBLE:
     logs = simulation.getLogs()
     for i in range(len(logs)):
@@ -2584,4 +2601,6 @@ if ENSEMBLE:
 else:
     logs = simulation.getRunLog()
     steps = logs.getStepLog()
+    print(f"[DIAG] Got {len(steps)} step log entries")
     manageLogs(steps, ENSEMBLE, 0)
+print("[DIAG] All done.")

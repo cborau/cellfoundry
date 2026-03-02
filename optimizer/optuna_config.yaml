@@ -1,8 +1,11 @@
 # ============================================================================
-# CellFoundry — Optuna Optimization Configuration
+# CellFoundry — Optuna Optimization Configuration  (cell-population test)
 # ============================================================================
 #
-# Usage:  python optimize.py --config optuna_config.yaml
+# Usage:
+#    python -m optimizer.optimize --config optimizer/optuna_config.yaml
+#    # or from the optimizer/ directory:
+#    python optimize.py --config optuna_config.yaml
 #
 # This file defines:
 #   1. The Optuna study settings (sampler, storage, number of trials).
@@ -17,28 +20,33 @@
 #   - focad_attached_ratio_error  — fits focal-adhesion attachment ratio
 #   - poisson_ratio_error         — fits Poisson ratio (scalar or time-series)
 #   - matrix_remodeling_error     — fits fibre-network remodeling metrics
+#   - final_cell_count_error      — scalar: final alive count (+ per cell type)
+#   - final_focad_per_cell_error  — scalar: final avg FOCAD per alive cell
 #
 # You can add custom objectives in objectives.py and reference them by name.
 # ============================================================================
 
 # --- Optuna study settings ------------------------------------------------
 study:
-  name: "cellfoundry_stress_strain"
-  n_trials: 50               # total number of trials to run
+  name: "cellfoundry_cell_population"
+  n_trials: 20               # keep low for a quick test
   sampler: TPE                # TPE | RANDOM | CMAES
   seed: 42                    # random seed for reproducibility (null = random)
   direction: minimize         # minimize | maximize
-  storage: "sqlite:///cellfoundry_study.db"   # Optuna storage backend
+  storage: "sqlite:///cellfoundry_cell_pop.db"
 
 # --- Objective function ---------------------------------------------------
+#  final_cell_count_error compares the alive-cell count at the final step
+#  against a target value specified either as a scalar kwarg or via CSV.
+#  Here we use a reference CSV with per-type targets.
 objective:
-  function: stress_strain_curve_error     # registered name from objectives.py
-  reference: "reference_data/target_stress_strain.csv"  # path to reference CSV
-  # Optional extra keyword arguments passed to the objective function:
-  # kwargs:
-  #   strain_axis: 1          # 0=x, 1=y, 2=z (default: 0)
+  function: final_cell_count_error
+  reference: "optimizer/reference_data/target_cell_count.csv"
+  kwargs:
+    normalize: true           # average error across target rows
 
 # --- Parameters to optimize -----------------------------------------------
+#
 # Each entry specifies a model parameter (must match an UPPER_CASE variable
 # in model.py) and how Optuna should explore it.
 #
@@ -51,58 +59,67 @@ objective:
 # parameters (e.g., CELL_CELL_REPULSION_K = 2*CELL_K_ELAST) are automatically
 # recomputed.  You do NOT need to tune the derived parameters separately.
 #
-# Examples covering different biophysical aspects:
+# Tuning cell-relevant biophysical parameters that affect proliferation,
+# survival, and migration — a good starting set for a cell-population test.
 parameters:
-  ECM_K_ELAST:
-    type: float
-    low: 0.05
-    high: 5.0
-    log: true                 # explore orders of magnitude
+  N_CELLS:
+    type: int
+    low: 1
+    high: 10
 
-  FIBRE_SEGMENT_K_ELAST:
+  CELL_SPEED_REF:
     type: float
     low: 0.1
-    high: 10.0
+    high: 3.0
+    log: false
+
+  CELL_HYPOXIA_THRESHOLD:
+    type: float
+    low: 0.005
+    high: 0.1
     log: true
 
-  # CELL_K_ELAST:
+  CELL_NUTRIENT_THRESHOLD:
+    type: float
+    low: 0.005
+    high: 0.1
+    log: true
+
+  # Uncomment to also tune cycle duration (accelerated with debug_acc)
+  # CYCLE_PHASE_G1_DURATION:
   #   type: float
-  #   low: 0.5
-  #   high: 20.0
+  #   low: 0.1
+  #   high: 5.0
+
+  # Uncomment to tune stress-related survival
+  # CELL_STRESS_THRESHOLD:
+  #   type: float
+  #   low: 2.0
+  #   high: 30.0
   #   log: true
 
-  # FNODE_DEGRADATION_RATE:
-  #   type: float
-  #   low: 1.0e-5
-  #   high: 1.0e-2
-  #   log: true
-
+  # Uncomment to tune focal-adhesion stiffness
   # FOCAD_K_FA:
   #   type: float
   #   low: 0.1
   #   high: 50.0
   #   log: true
 
-  # N_CELLS:
-  #   type: int
-  #   low: 1
-  #   high: 20
-
-  # INCLUDE_NETWORK_REMODELING:
-  #   type: categorical
-  #   choices: [true, false]
-
 # --- Model execution settings ---------------------------------------------
 model:
-  result_dir: "optuna_results"       # base directory for all trial outputs
+  result_dir: "optuna_results"       # base dir for trial outputs (inside optimizer/)
   timeout: 0                         # max seconds per trial (0 = unlimited)
   cleanup_trials: false              # if true, delete trial dirs after evaluation
 
-  # Fixed overrides applied to every trial (disable visualization, plotting, etc.)
+  # Extra overrides applied to every trial (short test runs, no GUI).
   extra_overrides:
+    STEPS: 100                       # short run for testing
+    SAVE_EVERY_N_STEPS: 10
+    INCLUDE_CELLS: true
+    INCLUDE_CELL_CYCLE: true
+    INCLUDE_FOCAL_ADHESIONS: true
     VISUALISATION: false
     SHOW_PLOTS: false
-    SAVE_DATA_TO_FILE: false          # VTK files are not needed during optimization
-    SAVE_PICKLE: true                 # required — the pickle is how results are read
-    # Optionally reduce simulation length for faster iteration:
-    # STEPS: 100
+    SAVE_DATA_TO_FILE: false         # VTK not needed for optimization of final cell count
+    SAVE_PICKLE: true                # required — pickle is how results are read
+

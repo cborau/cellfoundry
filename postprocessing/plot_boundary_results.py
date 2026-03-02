@@ -98,7 +98,7 @@ def print_summary(data):
 def main():
     args = parse_args()
     pickle_file = args.pickle_positional if args.pickle_positional else args.pickle
-    outdir = pathlib.Path(args.outdir)
+    outdir = pathlib.Path(args.outdir).resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
     try:

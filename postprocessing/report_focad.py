@@ -508,7 +508,7 @@ Important interpretation notes
 
 def main() -> None:
     args = parse_args()
-    outdir = Path(args.outdir)
+    outdir = Path(args.outdir).resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
     n_cells = None

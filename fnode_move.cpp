@@ -159,16 +159,6 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
   agent_fy += agent_boundary_fy;
   agent_fz += agent_boundary_fz;
 
-  
-  if (DEBUG_PRINTING == 1 && (id == 9 || id == 10 || id == 14 || id == 25 || id == 26 || id == 29 || id == 30)){
-    printf("ECM move ID: %d clamps before -> (%d, %d, %d, %d, %d, %d)\n", id, clamped_bx_pos, clamped_bx_neg, clamped_by_pos, clamped_by_neg, clamped_bz_pos, clamped_bz_neg);
-    printf("ECM move ID: %d pos -> (%2.6f, %2.6f, %2.6f)\n", id, agent_x, agent_y, agent_z);
-    printf("ECM move ID: %d vel -> (%2.6f, %2.6f, %2.6f)\n", id, agent_vx, agent_vy, agent_vz);
-    printf("ECM move ID: %d f -> (%2.6f, %2.6f, %2.6f)\n", id, agent_fx, agent_fy, agent_fz);
-    printf("ECM move ID: %d bf -> (%2.6f, %2.6f, %2.6f)\n", id, agent_boundary_fx, agent_boundary_fy, agent_boundary_fz);
-    printf("ECM move ID: %d f after -> (%2.6f, %2.6f, %2.6f)\n", id, agent_fx, agent_fy, agent_fz);
-  }
-
   //Get the new position and velocity: 
   // SUM(F) = ETA * v;
   // v(t) = SUM(F) / ETA; 
@@ -439,23 +429,14 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
     f_bz_neg += agent_boundary_fz;
   }
   
-  //if (id == 9 || id == 10 || id == 13 || id == 14 || id == 25 || id == 26 || id == 29 || id == 30) {
-  if (DEBUG_PRINTING == 1 && (id == 9 || id == 10 || id == 11 || id == 12)) {
-      printf("agent %d position EN MEDIO (%2.4f, %2.4f, %2.4f) ->  boundary pos: [%2.4f, %2.4f, %2.4f, %2.4f, %2.4f, %2.4f], clamping: [%d, %d, %d, %d, %d, %d] \n", id, agent_x, agent_y, agent_z, COORD_BOUNDARY_X_POS, COORD_BOUNDARY_X_NEG, COORD_BOUNDARY_Y_POS, COORD_BOUNDARY_Y_NEG, COORD_BOUNDARY_Z_POS, COORD_BOUNDARY_Z_NEG, clamped_bx_pos, clamped_bx_neg, clamped_by_pos, clamped_by_neg, clamped_bz_pos, clamped_bz_neg);
-  }
-   
+
   boundPosition(id,agent_x, agent_y, agent_z, 
                 clamped_bx_pos, clamped_bx_neg, clamped_by_pos, clamped_by_neg, clamped_bz_pos, clamped_bz_neg, 
                 COORD_BOUNDARY_X_POS, COORD_BOUNDARY_X_NEG, COORD_BOUNDARY_Y_POS, COORD_BOUNDARY_Y_NEG, COORD_BOUNDARY_Z_POS, COORD_BOUNDARY_Z_NEG,
                 CLAMP_AGENT_TOUCHING_BOUNDARY_X_POS, CLAMP_AGENT_TOUCHING_BOUNDARY_X_NEG, CLAMP_AGENT_TOUCHING_BOUNDARY_Y_POS, CLAMP_AGENT_TOUCHING_BOUNDARY_Y_NEG, CLAMP_AGENT_TOUCHING_BOUNDARY_Z_POS, CLAMP_AGENT_TOUCHING_BOUNDARY_Z_NEG,
                 FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE);
 
-  
-  //if (id == 9 || id == 10 || id == 13 || id == 14 || id == 25 || id == 26 || id == 29 || id == 30) {
-  if (DEBUG_PRINTING == 1 && (id == 9 || id == 10 || id == 11 || id == 12)) {
-    printf("agent %d position DESPUES (%2.4f, %2.4f, %2.4f) ->  boundary pos: [%2.4f, %2.4f, %2.4f, %2.4f, %2.4f, %2.4f], clamping: [%d, %d, %d, %d, %d, %d] \n", id, agent_x, agent_y, agent_z, COORD_BOUNDARY_X_POS, COORD_BOUNDARY_X_NEG, COORD_BOUNDARY_Y_POS, COORD_BOUNDARY_Y_NEG, COORD_BOUNDARY_Z_POS, COORD_BOUNDARY_Z_NEG, clamped_bx_pos, clamped_bx_neg, clamped_by_pos, clamped_by_neg, clamped_bz_pos, clamped_bz_neg);
-  }
-  
+ 
   //printf("ECM move ID: %d clamps after -> (%d, %d, %d, %d, %d, %d)\n", id, clamped_bx_pos, clamped_bx_neg, clamped_by_pos, clamped_by_neg, clamped_bz_pos, clamped_bz_neg);
 
   //Update the agents position and velocity

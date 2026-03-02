@@ -1,0 +1,79 @@
+# ============================================================================
+# CellFoundry — Organoid Growth Multi-Objective Optimization
+# ============================================================================
+#
+# This config optimizes TWO objectives simultaneously:
+#   1. Organoid size (radius of gyration of alive cells → target 50 µm)
+#   2. Final alive-cell count (→ target 15 cells)
+#
+# Optuna uses NSGA-II to maintain a Pareto front of trade-off solutions.
+#
+# IMPORTANT: organoid_size_error reads cell positions from VTK files,
+#            so SAVE_DATA_TO_FILE must be true in extra_overrides.
+#
+# Usage:
+#    python -m optimizer.optimize --config optimizer/optuna_config_organoid.yaml
+# ============================================================================
+
+study:
+  name: "cellfoundry_organoid_growth"
+  n_trials: 30
+  sampler: NSGA-II             # auto-selected for multi-obj, but explicit here
+  seed: 42
+  directions: [minimize, minimize]   # one per objective
+  storage: "sqlite:///cellfoundry_organoid.db"
+
+# --- Multiple objectives (Pareto multi-objective) -------------------------
+objectives:
+  - function: organoid_size_error
+    kwargs:
+      target_size: 50.0        # target radius of gyration [µm]
+      metric: radius_of_gyration   # or: max_span, equivalent_sphere_radius
+
+  - function: final_cell_count_error
+    kwargs:
+      target_cell_count: 15    # target number of alive cells at end
+
+# --- Parameters to tune ----------------------------------------------------
+parameters:
+  N_CELLS:
+    type: int
+    low: 1
+    high: 10
+
+  CELL_SPEED_REF:
+    type: float
+    low: 0.1
+    high: 3.0
+    log: false
+
+  CELL_HYPOXIA_THRESHOLD:
+    type: float
+    low: 0.005
+    high: 0.1
+    log: true
+
+  CELL_NUTRIENT_THRESHOLD:
+    type: float
+    low: 0.005
+    high: 0.1
+    log: true
+
+
+# --- Model execution settings ----------------------------------------------
+model:
+  result_dir: "optuna_organoid_results"   # inside optimizer/
+  timeout: 0
+  cleanup_trials: false
+
+  extra_overrides:
+    STEPS: 200
+    SAVE_EVERY_N_STEPS: 20
+    INCLUDE_CELLS: true
+    INCLUDE_CELL_CYCLE: true
+    INCLUDE_FOCAL_ADHESIONS: true
+    VISUALISATION: false
+    SHOW_PLOTS: false
+    # VTK output IS needed for organoid_size_error (reads cell positions)
+    SAVE_DATA_TO_FILE: true
+    SAVE_PICKLE: true

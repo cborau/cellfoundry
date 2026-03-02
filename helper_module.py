@@ -209,18 +209,18 @@ def print_fibre_calibration_summary(
     print(f"d_dumping = {d_pair:.4g} nN*s/um  (dashpot in parallel)")
     print(f"L0 = {L:.4g} um, dt = {dt:.4g} s")
     print(f"Relaxation time tau = d_pair/k_pair = {tau:.4g} s")
-    print(f"That is about {tau_steps:.3g} timesteps if Δt = {dt:.4g} s")
+    print(f"That is about {tau_steps:.3g} timesteps if dt = {dt:.4g} s")
 
     # Suggested damping values for stable explicit integration
-    print("\nSuggested stabilization targets (tau ≈ 10–100 timesteps):")
+    print("\nSuggested stabilization targets (tau ~ 10-100 timesteps):")
     for m in tau_multipliers:
         tau_target = m * dt
         d_suggest = tau_target * k_pair
-        print(f"  tau = {m:.0f}*dt = {tau_target:.4g} s  ->  d_dumping ≈ {d_suggest:.4g} nN*s/um")
+        print(f"  tau = {m:.0f}*dt = {tau_target:.4g} s  ->  d_dumping ~= {d_suggest:.4g} nN*s/um")
 
     print("\nTuning guideline:")
-    print("  - Too jittery or oscillatory: increase τ (increase d_dumping)")
-    print("  - Too sluggish / takes forever to settle: decrease τ (decrease d_dumping)")
+    print("  - Too jittery or oscillatory: increase tau (increase d_dumping)")
+    print("  - Too sluggish / takes forever to settle: decrease tau (decrease d_dumping)")
 
     # Forward mapping: modulus -> implied diameter
     print("\nForward mapping (given E -> implied fibre diameter):")
@@ -229,7 +229,7 @@ def print_fibre_calibration_summary(
         area = (k_pair * L) / max(E, eps)
         r = math.sqrt(max(area, 0.0) / math.pi)
         d_nm = 2.0 * r * 1000.0
-        print(f"  E = {E_mpa:.4g} MPa -> diameter ≈ {d_nm:.3f} nm")
+        print(f"  E = {E_mpa:.4g} MPa -> diameter ~= {d_nm:.3f} nm")
 
     # Inverse mapping: target diameter -> required stiffness and damping
     print("\nInverse mapping (target E, diameter -> required k_node and d_dumping):")
@@ -249,9 +249,9 @@ def print_fibre_calibration_summary(
 
             print(
                 f"  E={E_mpa:.4g} MPa, d={diam_nm:.4g} nm -> "
-                f"k_node≈{k_node_req:.4g} nN/um, "
-                f"d_dumping≈{d_req:.4g} nN*s/um "
-                f"(tau≈{tau:.4g} s ≈ {tau_req_steps:.3g} steps)"
+                f"k_node~={k_node_req:.4g} nN/um, "
+                f"d_dumping~={d_req:.4g} nN*s/um "
+                f"(tau~={tau:.4g} s ~= {tau_req_steps:.3g} steps)"
             )
     print()
 
@@ -347,7 +347,7 @@ def print_focad_birth_calibration_summary(
     if math.isfinite(max_births_per_min_refractory):
         print(
             f"refractory = {refractory_s:.4g} s (~{refractory_steps:.3g} steps), "
-            f"absolute cap ≈ {max_births_per_min_refractory:.4g} births/cell/min"
+            f"absolute cap ~= {max_births_per_min_refractory:.4g} births/cell/min"
         )
     else:
         print("refractory disabled (<=0): no refractory cap")
@@ -355,7 +355,7 @@ def print_focad_birth_calibration_summary(
     if math.isfinite(est_fill_time_s):
         print(
             f"estimated time to go from init ({init_n}) to n_max ({n_max}) at max drive (ignoring deaths) "
-            f"≈ {est_fill_time_s:.4g} s ({est_fill_time_s/60.0:.4g} min)"
+            f"~= {est_fill_time_s:.4g} s ({est_fill_time_s/60.0:.4g} min)"
         )
     else:
         print(
@@ -2838,8 +2838,15 @@ def apply_param_overrides(ns: dict, overrides: dict) -> None:
     recompute_derived_params(ns)
 
 
-def load_param_overrides_from_cli():
+def load_param_overrides_from_cli(argv=None):
     """Parse --overrides and --result-dir from command-line arguments.
+
+    Parameters
+    ----------
+    argv : list[str] or None
+        Argument list to parse (pass a saved copy of sys.argv captured
+        *before* pyflamegpu imports, since FLAMEGPU may strip or modify
+        sys.argv).  Falls back to ``sys.argv`` if *None*.
 
     Returns
     -------
@@ -2848,16 +2855,23 @@ def load_param_overrides_from_cli():
     result_dir : str or None
         Override for the result output directory.
     """
-    import argparse, json
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--overrides", type=str, default=None,
-                        help="Path to JSON file with parameter overrides")
-    parser.add_argument("--result-dir", type=str, default=None,
-                        help="Override result output directory")
-    args, _ = parser.parse_known_args()
+    import json
+    if argv is None:
+        import sys
+        argv = sys.argv
+
+    def _get_flag(flag):
+        """Return the value after *flag* in *argv*, or None."""
+        for i, arg in enumerate(argv):
+            if arg == flag and i + 1 < len(argv):
+                return argv[i + 1]
+        return None
+
+    overrides_path = _get_flag("--overrides")
+    result_dir = _get_flag("--result-dir")
 
     overrides = {}
-    if args.overrides and os.path.isfile(args.overrides):
-        with open(args.overrides, "r") as f:
+    if overrides_path and os.path.isfile(overrides_path):
+        with open(overrides_path, "r") as f:
             overrides = json.load(f)
-    return overrides, args.result_dir
+    return overrides, result_dir

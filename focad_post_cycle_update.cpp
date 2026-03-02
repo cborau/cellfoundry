@@ -63,7 +63,7 @@ FLAMEGPU_AGENT_FUNCTION(focad_post_cycle_update, flamegpu::MessageBucket, flameg
     const float switch_draw = FLAMEGPU->random.uniform<float>(0.0f, 1.0f);
     const int switch_to_daughter = (switch_draw < 0.5f) ? 1 : 0;
     const int target_cell_id = (switch_to_daughter == 1) ? parent_daughter_id : agent_cell_id;
-    printf("FOCAD [cell_id: %d] just_divided parent [id: %d, daughter_id: %d], switch_draw: %.3f, switch_to_daughter: %d \n", agent_cell_id, agent_cell_id, parent_daughter_id, switch_draw, switch_to_daughter);
+    //printf("FOCAD [cell_id: %d] just_divided parent [id: %d, daughter_id: %d], switch_draw: %.3f, switch_to_daughter: %d \n", agent_cell_id, agent_cell_id, parent_daughter_id, switch_draw, switch_to_daughter);
 
     if (switch_to_daughter == 1) { // This FOCAD will now be associated with the daughter cell, so we update the cell_id and reset anchor_id to detach from the parent.
       FLAMEGPU->setVariable<int>("cell_id", parent_daughter_id);
@@ -141,7 +141,7 @@ FLAMEGPU_AGENT_FUNCTION(focad_post_cycle_update, flamegpu::MessageBucket, flameg
           FLAMEGPU->setVariable<float>("x_i", best_xi);
           FLAMEGPU->setVariable<float>("y_i", best_yi);
           FLAMEGPU->setVariable<float>("z_i", best_zi);
-          printf("FOCAD [cell_id: %d] SWITCHED to %s cell [id: %d] \n", agent_cell_id, (switch_to_daughter == 1) ? "DAUGHTER" : "PARENT", target_cell_id);
+          //printf("FOCAD [cell_id: %d] SWITCHED to %s cell [id: %d] \n", agent_cell_id, (switch_to_daughter == 1) ? "DAUGHTER" : "PARENT", target_cell_id);
         }
         found_target_message = 1;
         break;

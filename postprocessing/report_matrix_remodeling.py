@@ -324,7 +324,7 @@ def make_plots(df: pd.DataFrame, outdir: Path, tag: str, show: bool) -> None:
 
 def main() -> None:
     args = parse_args()
-    outdir = Path(args.outdir)
+    outdir = Path(args.outdir).resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
     if args.source == "vtk":
