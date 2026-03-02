@@ -1,0 +1,108 @@
+# ============================================================================
+# CellFoundry — Optuna Optimization Configuration
+# ============================================================================
+#
+# Usage:  python optimize.py --config optuna_config.yaml
+#
+# This file defines:
+#   1. The Optuna study settings (sampler, storage, number of trials).
+#   2. Which model parameters to tune, with their search ranges.
+#   3. The objective (error) function and reference data to compare against.
+#   4. Extra model overrides applied to every trial (e.g., disable plotting).
+#
+# Available objective functions (defined in objectives.py):
+#   - stress_strain_curve_error   — fits boundary force-displacement curve
+#   - boundary_force_curve_error  — fits boundary forces over time
+#   - cell_population_error       — fits alive-cell count over time
+#   - focad_attached_ratio_error  — fits focal-adhesion attachment ratio
+#   - poisson_ratio_error         — fits Poisson ratio (scalar or time-series)
+#   - matrix_remodeling_error     — fits fibre-network remodeling metrics
+#
+# You can add custom objectives in objectives.py and reference them by name.
+# ============================================================================
+
+# --- Optuna study settings ------------------------------------------------
+study:
+  name: "cellfoundry_stress_strain"
+  n_trials: 50               # total number of trials to run
+  sampler: TPE                # TPE | RANDOM | CMAES
+  seed: 42                    # random seed for reproducibility (null = random)
+  direction: minimize         # minimize | maximize
+  storage: "sqlite:///cellfoundry_study.db"   # Optuna storage backend
+
+# --- Objective function ---------------------------------------------------
+objective:
+  function: stress_strain_curve_error     # registered name from objectives.py
+  reference: "reference_data/target_stress_strain.csv"  # path to reference CSV
+  # Optional extra keyword arguments passed to the objective function:
+  # kwargs:
+  #   strain_axis: 1          # 0=x, 1=y, 2=z (default: 0)
+
+# --- Parameters to optimize -----------------------------------------------
+# Each entry specifies a model parameter (must match an UPPER_CASE variable
+# in model.py) and how Optuna should explore it.
+#
+# Supported types:
+#   float:       continuous, with low/high bounds; set log: true for log-scale
+#   int:         discrete integer, with low/high bounds
+#   categorical: pick from a list of choices
+#
+# IMPORTANT: if you tune a "base" parameter (e.g., CELL_K_ELAST), its derived
+# parameters (e.g., CELL_CELL_REPULSION_K = 2*CELL_K_ELAST) are automatically
+# recomputed.  You do NOT need to tune the derived parameters separately.
+#
+# Examples covering different biophysical aspects:
+parameters:
+  ECM_K_ELAST:
+    type: float
+    low: 0.05
+    high: 5.0
+    log: true                 # explore orders of magnitude
+
+  FIBRE_SEGMENT_K_ELAST:
+    type: float
+    low: 0.1
+    high: 10.0
+    log: true
+
+  # CELL_K_ELAST:
+  #   type: float
+  #   low: 0.5
+  #   high: 20.0
+  #   log: true
+
+  # FNODE_DEGRADATION_RATE:
+  #   type: float
+  #   low: 1.0e-5
+  #   high: 1.0e-2
+  #   log: true
+
+  # FOCAD_K_FA:
+  #   type: float
+  #   low: 0.1
+  #   high: 50.0
+  #   log: true
+
+  # N_CELLS:
+  #   type: int
+  #   low: 1
+  #   high: 20
+
+  # INCLUDE_NETWORK_REMODELING:
+  #   type: categorical
+  #   choices: [true, false]
+
+# --- Model execution settings ---------------------------------------------
+model:
+  result_dir: "optuna_results"       # base directory for all trial outputs
+  timeout: 0                         # max seconds per trial (0 = unlimited)
+  cleanup_trials: false              # if true, delete trial dirs after evaluation
+
+  # Fixed overrides applied to every trial (disable visualization, plotting, etc.)
+  extra_overrides:
+    VISUALISATION: false
+    SHOW_PLOTS: false
+    SAVE_DATA_TO_FILE: false          # VTK files are not needed during optimization
+    SAVE_PICKLE: true                 # required — the pickle is how results are read
+    # Optionally reduce simulation length for faster iteration:
+    # STEPS: 100

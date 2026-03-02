@@ -1776,6 +1776,12 @@ class ModelParameterConfig:
         ecm_agents_per_dir: list = None,
         time_step: float = None,
         steps: int = None,
+        # Simulation control
+        ensemble: bool = None,
+        ensemble_runs: int = None,
+        visualisation: bool = None,
+        debug_printing: bool = None,
+        pause_every_step: bool = None,
         # Domain / boundary
         boundary_coords: list = None,
         boundary_disp_rates: list = None,
@@ -1786,6 +1792,9 @@ class ModelParameterConfig:
         boundary_dumping: list = None,
         clamp_agent_touching_boundary: list = None,
         allow_agent_sliding: list = None,
+        relative_boundary_stiffness: list = None,
+        boundary_stiffness_value: float = None,
+        boundary_dumping_value: float = None,
         moving_boundaries: bool = None,
         epsilon: float = None,
         # ECM mechanics
@@ -1814,6 +1823,22 @@ class ModelParameterConfig:
         fibre_node_boundary_interaction_radius: float = None,
         fibre_node_boundary_equilibrium_distance: float = None,
         max_search_radius_fnodes: float = None,
+        fibre_node_repulsion_k: float = None,
+        # Fibre network remodeling
+        include_network_remodeling: bool = None,
+        fnode_degradation_rate: float = None,
+        fnode_deposition_rate: float = None,
+        fnode_cell_degradation_radius: float = None,
+        fnode_birth_k_0: float = None,
+        fnode_birth_k_max: float = None,
+        fnode_birth_species_index: int = None,
+        fnode_birth_k_c: float = None,
+        fnode_birth_hill_conc: float = None,
+        fnode_birth_k_sigma: float = None,
+        fnode_birth_hill_sigma: float = None,
+        fnode_birth_radius: float = None,
+        fnode_birth_link_max_distance: float = None,
+        fnode_birth_refractory: float = None,
         # Diffusion
         include_diffusion: bool = None,
         heterogeneous_diffusion: bool = None,
@@ -1852,6 +1877,30 @@ class ModelParameterConfig:
         init_cell_consumption_rates: list = None,
         init_cell_production_rates: list = None,
         init_cell_reaction_rates: list = None,
+        # Cell interactions & derived
+        dead_cells_disappear: bool = None,
+        include_cell_fnode_repulsion: bool = None,
+        cell_nucleus_radius: float = None,
+        brownian_motion_strength: float = None,
+        cell_cell_repulsion_k: float = None,
+        cell_cell_adhesion_k: float = None,
+        cell_cell_adhesion_range: float = None,
+        cell_cell_dv_max: float = None,
+        cell_fnode_repulsion_k: float = None,
+        cell_fnode_exclusion_distance: float = None,
+        cell_fnode_dv_max: float = None,
+        max_expected_n_cells: int = None,
+        # Cell damage & death
+        cell_hypoxia_threshold: float = None,
+        cell_nutrient_threshold: float = None,
+        cell_stress_threshold: float = None,
+        cell_hypoxia_damage_rate: float = None,
+        cell_nutrient_damage_rate: float = None,
+        cell_stress_damage_rate: float = None,
+        cell_basal_damage_repair_rate: float = None,
+        cell_acute_hypoxia_threshold: float = None,
+        cell_acute_nutrient_threshold: float = None,
+        cell_acute_stress_threshold: float = None,
         # Focal adhesions
         include_focal_adhesions: bool = None,
         init_n_focad_per_cell: int = None,
@@ -1878,6 +1927,22 @@ class ModelParameterConfig:
         focad_polarity_kon_front_gain: float = None,
         focad_polarity_koff_front_reduction: float = None,
         focad_polarity_koff_rear_gain: float = None,
+        # Focal adhesion lifecycle & birth
+        focad_f_mature: float = None,
+        focad_t_nascent_max: float = None,
+        focad_t_detached_grace: float = None,
+        focad_t_disassembly: float = None,
+        enable_focad_birth: bool = None,
+        focad_birth_species_index: int = None,
+        focad_birth_n_min: int = None,
+        focad_birth_n_max: int = None,
+        focad_birth_k_0: float = None,
+        focad_birth_k_max: float = None,
+        focad_birth_k_sigma: float = None,
+        focad_birth_hill_sigma: float = None,
+        focad_birth_k_c: float = None,
+        focad_birth_hill_conc: float = None,
+        focad_birth_refractory: float = None,
         focad_mobility_mu: float = None,
         include_linc_coupling: bool = None,
         linc_k_elast: float = None,
@@ -1888,6 +1953,19 @@ class ModelParameterConfig:
         nucleus_nu: float = None,
         nucleus_tau: float = None,
         nucleus_eps_clamp: float = None,
+        # Chemotaxis
+        include_chemotaxis: bool = None,
+        chemotaxis_sensitivity: list = None,
+        chemotaxis_only_dir: bool = None,
+        chemotaxis_chi: float = None,
+        # Durotaxis / cell migration
+        include_durotaxis: bool = None,
+        durotaxis_only_dir: bool = None,
+        include_orientation_align: bool = None,
+        orientation_align_rate: float = None,
+        orientation_align_use_stress: bool = None,
+        durotaxis_blend_beta: float = None,
+        durotaxis_use_stress: bool = None,
         # Oscillatory assay
         oscillatory_shear_assay: bool = None,
         max_strain: float = None,
@@ -1910,6 +1988,11 @@ class ModelParameterConfig:
         self.ECM_AGENTS_PER_DIR = ecm_agents_per_dir
         self.TIME_STEP = time_step
         self.STEPS = steps
+        self.ENSEMBLE = ensemble
+        self.ENSEMBLE_RUNS = ensemble_runs
+        self.VISUALISATION = visualisation
+        self.DEBUG_PRINTING = debug_printing
+        self.PAUSE_EVERY_STEP = pause_every_step
         self.BOUNDARY_COORDS = boundary_coords
         self.BOUNDARY_DISP_RATES = boundary_disp_rates
         self.BOUNDARY_DISP_RATES_PARALLEL = boundary_disp_rates_parallel
@@ -1919,6 +2002,9 @@ class ModelParameterConfig:
         self.BOUNDARY_DUMPING = boundary_dumping
         self.CLAMP_AGENT_TOUCHING_BOUNDARY = clamp_agent_touching_boundary
         self.ALLOW_AGENT_SLIDING = allow_agent_sliding
+        self.RELATIVE_BOUNDARY_STIFFNESS = relative_boundary_stiffness
+        self.BOUNDARY_STIFFNESS_VALUE = boundary_stiffness_value
+        self.BOUNDARY_DUMPING_VALUE = boundary_dumping_value
         self.MOVING_BOUNDARIES = moving_boundaries
         self.EPSILON = epsilon
         self.ECM_K_ELAST = ecm_k_elast
@@ -1945,6 +2031,21 @@ class ModelParameterConfig:
         self.FIBRE_NODE_BOUNDARY_INTERACTION_RADIUS = fibre_node_boundary_interaction_radius
         self.FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE = fibre_node_boundary_equilibrium_distance
         self.MAX_SEARCH_RADIUS_FNODES = max_search_radius_fnodes
+        self.FIBRE_NODE_REPULSION_K = fibre_node_repulsion_k
+        self.INCLUDE_NETWORK_REMODELING = include_network_remodeling
+        self.FNODE_DEGRADATION_RATE = fnode_degradation_rate
+        self.FNODE_DEPOSITION_RATE = fnode_deposition_rate
+        self.FNODE_CELL_DEGRADATION_RADIUS = fnode_cell_degradation_radius
+        self.FNODE_BIRTH_K_0 = fnode_birth_k_0
+        self.FNODE_BIRTH_K_MAX = fnode_birth_k_max
+        self.FNODE_BIRTH_SPECIES_INDEX = fnode_birth_species_index
+        self.FNODE_BIRTH_K_C = fnode_birth_k_c
+        self.FNODE_BIRTH_HILL_CONC = fnode_birth_hill_conc
+        self.FNODE_BIRTH_K_SIGMA = fnode_birth_k_sigma
+        self.FNODE_BIRTH_HILL_SIGMA = fnode_birth_hill_sigma
+        self.FNODE_BIRTH_RADIUS = fnode_birth_radius
+        self.FNODE_BIRTH_LINK_MAX_DISTANCE = fnode_birth_link_max_distance
+        self.FNODE_BIRTH_REFRACTORY = fnode_birth_refractory
         self.INCLUDE_DIFFUSION = include_diffusion
         self.HETEROGENEOUS_DIFFUSION = heterogeneous_diffusion
         self.N_SPECIES = n_species
@@ -1981,6 +2082,28 @@ class ModelParameterConfig:
         self.INIT_CELL_CONSUMPTION_RATES = init_cell_consumption_rates
         self.INIT_CELL_PRODUCTION_RATES = init_cell_production_rates
         self.INIT_CELL_REACTION_RATES = init_cell_reaction_rates
+        self.DEAD_CELLS_DISAPPEAR = dead_cells_disappear
+        self.INCLUDE_CELL_FNODE_REPULSION = include_cell_fnode_repulsion
+        self.CELL_NUCLEUS_RADIUS = cell_nucleus_radius
+        self.BROWNIAN_MOTION_STRENGTH = brownian_motion_strength
+        self.CELL_CELL_REPULSION_K = cell_cell_repulsion_k
+        self.CELL_CELL_ADHESION_K = cell_cell_adhesion_k
+        self.CELL_CELL_ADHESION_RANGE = cell_cell_adhesion_range
+        self.CELL_CELL_DV_MAX = cell_cell_dv_max
+        self.CELL_FNODE_REPULSION_K = cell_fnode_repulsion_k
+        self.CELL_FNODE_EXCLUSION_DISTANCE = cell_fnode_exclusion_distance
+        self.CELL_FNODE_DV_MAX = cell_fnode_dv_max
+        self.MAX_EXPECTED_N_CELLS = max_expected_n_cells
+        self.CELL_HYPOXIA_THRESHOLD = cell_hypoxia_threshold
+        self.CELL_NUTRIENT_THRESHOLD = cell_nutrient_threshold
+        self.CELL_STRESS_THRESHOLD = cell_stress_threshold
+        self.CELL_HYPOXIA_DAMAGE_RATE = cell_hypoxia_damage_rate
+        self.CELL_NUTRIENT_DAMAGE_RATE = cell_nutrient_damage_rate
+        self.CELL_STRESS_DAMAGE_RATE = cell_stress_damage_rate
+        self.CELL_BASAL_DAMAGE_REPAIR_RATE = cell_basal_damage_repair_rate
+        self.CELL_ACUTE_HYPOXIA_THRESHOLD = cell_acute_hypoxia_threshold
+        self.CELL_ACUTE_NUTRIENT_THRESHOLD = cell_acute_nutrient_threshold
+        self.CELL_ACUTE_STRESS_THRESHOLD = cell_acute_stress_threshold
         self.INCLUDE_FOCAL_ADHESIONS = include_focal_adhesions
         self.INIT_N_FOCAD_PER_CELL = init_n_focad_per_cell
         self.N_ANCHOR_POINTS = n_anchor_points
@@ -2006,6 +2129,21 @@ class ModelParameterConfig:
         self.FOCAD_POLARITY_KON_FRONT_GAIN = focad_polarity_kon_front_gain
         self.FOCAD_POLARITY_KOFF_FRONT_REDUCTION = focad_polarity_koff_front_reduction
         self.FOCAD_POLARITY_KOFF_REAR_GAIN = focad_polarity_koff_rear_gain
+        self.FOCAD_F_MATURE = focad_f_mature
+        self.FOCAD_T_NASCENT_MAX = focad_t_nascent_max
+        self.FOCAD_T_DETACHED_GRACE = focad_t_detached_grace
+        self.FOCAD_T_DISASSEMBLY = focad_t_disassembly
+        self.ENABLE_FOCAD_BIRTH = enable_focad_birth
+        self.FOCAD_BIRTH_SPECIES_INDEX = focad_birth_species_index
+        self.FOCAD_BIRTH_N_MIN = focad_birth_n_min
+        self.FOCAD_BIRTH_N_MAX = focad_birth_n_max
+        self.FOCAD_BIRTH_K_0 = focad_birth_k_0
+        self.FOCAD_BIRTH_K_MAX = focad_birth_k_max
+        self.FOCAD_BIRTH_K_SIGMA = focad_birth_k_sigma
+        self.FOCAD_BIRTH_HILL_SIGMA = focad_birth_hill_sigma
+        self.FOCAD_BIRTH_K_C = focad_birth_k_c
+        self.FOCAD_BIRTH_HILL_CONC = focad_birth_hill_conc
+        self.FOCAD_BIRTH_REFRACTORY = focad_birth_refractory
         self.FOCAD_MOBILITY_MU = focad_mobility_mu
         self.INCLUDE_LINC_COUPLING = include_linc_coupling
         self.LINC_K_ELAST = linc_k_elast
@@ -2015,6 +2153,17 @@ class ModelParameterConfig:
         self.NUCLEUS_NU = nucleus_nu
         self.NUCLEUS_TAU = nucleus_tau
         self.NUCLEUS_EPS_CLAMP = nucleus_eps_clamp
+        self.INCLUDE_CHEMOTAXIS = include_chemotaxis
+        self.CHEMOTAXIS_SENSITIVITY = chemotaxis_sensitivity
+        self.CHEMOTAXIS_ONLY_DIR = chemotaxis_only_dir
+        self.CHEMOTAXIS_CHI = chemotaxis_chi
+        self.INCLUDE_DUROTAXIS = include_durotaxis
+        self.DUROTAXIS_ONLY_DIR = durotaxis_only_dir
+        self.INCLUDE_ORIENTATION_ALIGN = include_orientation_align
+        self.ORIENTATION_ALIGN_RATE = orientation_align_rate
+        self.ORIENTATION_ALIGN_USE_STRESS = orientation_align_use_stress
+        self.DUROTAXIS_BLEND_BETA = durotaxis_blend_beta
+        self.DUROTAXIS_USE_STRESS = durotaxis_use_stress
         self.OSCILLATORY_SHEAR_ASSAY = oscillatory_shear_assay
         self.MAX_STRAIN = max_strain
         self.OSCILLATORY_AMPLITUDE = oscillatory_amplitude
@@ -2388,6 +2537,11 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         ecm_agents_per_dir=ns.get("ECM_AGENTS_PER_DIR"),
         time_step=ns.get("TIME_STEP"),
         steps=ns.get("STEPS"),
+        ensemble=ns.get("ENSEMBLE"),
+        ensemble_runs=ns.get("ENSEMBLE_RUNS"),
+        visualisation=ns.get("VISUALISATION"),
+        debug_printing=ns.get("DEBUG_PRINTING"),
+        pause_every_step=ns.get("PAUSE_EVERY_STEP"),
         boundary_coords=ns.get("BOUNDARY_COORDS"),
         boundary_disp_rates=ns.get("BOUNDARY_DISP_RATES"),
         boundary_disp_rates_parallel=ns.get("BOUNDARY_DISP_RATES_PARALLEL"),
@@ -2397,6 +2551,9 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         boundary_dumping=ns.get("BOUNDARY_DUMPING"),
         clamp_agent_touching_boundary=ns.get("CLAMP_AGENT_TOUCHING_BOUNDARY"),
         allow_agent_sliding=ns.get("ALLOW_AGENT_SLIDING"),
+        relative_boundary_stiffness=ns.get("RELATIVE_BOUNDARY_STIFFNESS"),
+        boundary_stiffness_value=ns.get("BOUNDARY_STIFFNESS_VALUE"),
+        boundary_dumping_value=ns.get("BOUNDARY_DUMPING_VALUE"),
         moving_boundaries=ns.get("MOVING_BOUNDARIES"),
         epsilon=ns.get("EPSILON"),
         ecm_k_elast=ns.get("ECM_K_ELAST"),
@@ -2423,6 +2580,21 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         fibre_node_boundary_interaction_radius=ns.get("FIBRE_NODE_BOUNDARY_INTERACTION_RADIUS"),
         fibre_node_boundary_equilibrium_distance=ns.get("FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE"),
         max_search_radius_fnodes=ns.get("MAX_SEARCH_RADIUS_FNODES"),
+        fibre_node_repulsion_k=ns.get("FIBRE_NODE_REPULSION_K"),
+        include_network_remodeling=ns.get("INCLUDE_NETWORK_REMODELING"),
+        fnode_degradation_rate=ns.get("FNODE_DEGRADATION_RATE"),
+        fnode_deposition_rate=ns.get("FNODE_DEPOSITION_RATE"),
+        fnode_cell_degradation_radius=ns.get("FNODE_CELL_DEGRADATION_RADIUS"),
+        fnode_birth_k_0=ns.get("FNODE_BIRTH_K_0"),
+        fnode_birth_k_max=ns.get("FNODE_BIRTH_K_MAX"),
+        fnode_birth_species_index=ns.get("FNODE_BIRTH_SPECIES_INDEX"),
+        fnode_birth_k_c=ns.get("FNODE_BIRTH_K_C"),
+        fnode_birth_hill_conc=ns.get("FNODE_BIRTH_HILL_CONC"),
+        fnode_birth_k_sigma=ns.get("FNODE_BIRTH_K_SIGMA"),
+        fnode_birth_hill_sigma=ns.get("FNODE_BIRTH_HILL_SIGMA"),
+        fnode_birth_radius=ns.get("FNODE_BIRTH_RADIUS"),
+        fnode_birth_link_max_distance=ns.get("FNODE_BIRTH_LINK_MAX_DISTANCE"),
+        fnode_birth_refractory=ns.get("FNODE_BIRTH_REFRACTORY"),
         include_diffusion=ns.get("INCLUDE_DIFFUSION"),
         heterogeneous_diffusion=ns.get("HETEROGENEOUS_DIFFUSION"),
         n_species=ns.get("N_SPECIES"),
@@ -2459,6 +2631,28 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         init_cell_consumption_rates=ns.get("INIT_CELL_CONSUMPTION_RATES"),
         init_cell_production_rates=ns.get("INIT_CELL_PRODUCTION_RATES"),
         init_cell_reaction_rates=ns.get("INIT_CELL_REACTION_RATES"),
+        dead_cells_disappear=ns.get("DEAD_CELLS_DISAPPEAR"),
+        include_cell_fnode_repulsion=ns.get("INCLUDE_CELL_FNODE_REPULSION"),
+        cell_nucleus_radius=ns.get("CELL_NUCLEUS_RADIUS"),
+        brownian_motion_strength=ns.get("BROWNIAN_MOTION_STRENGTH"),
+        cell_cell_repulsion_k=ns.get("CELL_CELL_REPULSION_K"),
+        cell_cell_adhesion_k=ns.get("CELL_CELL_ADHESION_K"),
+        cell_cell_adhesion_range=ns.get("CELL_CELL_ADHESION_RANGE"),
+        cell_cell_dv_max=ns.get("CELL_CELL_DV_MAX"),
+        cell_fnode_repulsion_k=ns.get("CELL_FNODE_REPULSION_K"),
+        cell_fnode_exclusion_distance=ns.get("CELL_FNODE_EXCLUSION_DISTANCE"),
+        cell_fnode_dv_max=ns.get("CELL_FNODE_DV_MAX"),
+        max_expected_n_cells=ns.get("MAX_EXPECTED_N_CELLS"),
+        cell_hypoxia_threshold=ns.get("CELL_HYPOXIA_THRESHOLD"),
+        cell_nutrient_threshold=ns.get("CELL_NUTRIENT_THRESHOLD"),
+        cell_stress_threshold=ns.get("CELL_STRESS_THRESHOLD"),
+        cell_hypoxia_damage_rate=ns.get("CELL_HYPOXIA_DAMAGE_RATE"),
+        cell_nutrient_damage_rate=ns.get("CELL_NUTRIENT_DAMAGE_RATE"),
+        cell_stress_damage_rate=ns.get("CELL_STRESS_DAMAGE_RATE"),
+        cell_basal_damage_repair_rate=ns.get("CELL_BASAL_DAMAGE_REPAIR_RATE"),
+        cell_acute_hypoxia_threshold=ns.get("CELL_ACUTE_HYPOXIA_THRESHOLD"),
+        cell_acute_nutrient_threshold=ns.get("CELL_ACUTE_NUTRIENT_THRESHOLD"),
+        cell_acute_stress_threshold=ns.get("CELL_ACUTE_STRESS_THRESHOLD"),
         include_focal_adhesions=ns.get("INCLUDE_FOCAL_ADHESIONS"),
         init_n_focad_per_cell=ns.get("INIT_N_FOCAD_PER_CELL"),
         n_anchor_points=ns.get("N_ANCHOR_POINTS"),
@@ -2484,6 +2678,21 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         focad_polarity_kon_front_gain=ns.get("FOCAD_POLARITY_KON_FRONT_GAIN"),
         focad_polarity_koff_front_reduction=ns.get("FOCAD_POLARITY_KOFF_FRONT_REDUCTION"),
         focad_polarity_koff_rear_gain=ns.get("FOCAD_POLARITY_KOFF_REAR_GAIN"),
+        focad_f_mature=ns.get("FOCAD_F_MATURE"),
+        focad_t_nascent_max=ns.get("FOCAD_T_NASCENT_MAX"),
+        focad_t_detached_grace=ns.get("FOCAD_T_DETACHED_GRACE"),
+        focad_t_disassembly=ns.get("FOCAD_T_DISASSEMBLY"),
+        enable_focad_birth=ns.get("ENABLE_FOCAD_BIRTH"),
+        focad_birth_species_index=ns.get("FOCAD_BIRTH_SPECIES_INDEX"),
+        focad_birth_n_min=ns.get("FOCAD_BIRTH_N_MIN"),
+        focad_birth_n_max=ns.get("FOCAD_BIRTH_N_MAX"),
+        focad_birth_k_0=ns.get("FOCAD_BIRTH_K_0"),
+        focad_birth_k_max=ns.get("FOCAD_BIRTH_K_MAX"),
+        focad_birth_k_sigma=ns.get("FOCAD_BIRTH_K_SIGMA"),
+        focad_birth_hill_sigma=ns.get("FOCAD_BIRTH_HILL_SIGMA"),
+        focad_birth_k_c=ns.get("FOCAD_BIRTH_K_C"),
+        focad_birth_hill_conc=ns.get("FOCAD_BIRTH_HILL_CONC"),
+        focad_birth_refractory=ns.get("FOCAD_BIRTH_REFRACTORY"),
         focad_mobility_mu=ns.get("FOCAD_MOBILITY_MU"),
         include_linc_coupling=ns.get("INCLUDE_LINC_COUPLING"),
         linc_k_elast=ns.get("LINC_K_ELAST"),
@@ -2493,6 +2702,17 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         nucleus_nu=ns.get("NUCLEUS_NU"),
         nucleus_tau=ns.get("NUCLEUS_TAU"),
         nucleus_eps_clamp=ns.get("NUCLEUS_EPS_CLAMP"),
+        include_chemotaxis=ns.get("INCLUDE_CHEMOTAXIS"),
+        chemotaxis_sensitivity=ns.get("CHEMOTAXIS_SENSITIVITY"),
+        chemotaxis_only_dir=ns.get("CHEMOTAXIS_ONLY_DIR"),
+        chemotaxis_chi=ns.get("CHEMOTAXIS_CHI"),
+        include_durotaxis=ns.get("INCLUDE_DUROTAXIS"),
+        durotaxis_only_dir=ns.get("DUROTAXIS_ONLY_DIR"),
+        include_orientation_align=ns.get("INCLUDE_ORIENTATION_ALIGN"),
+        orientation_align_rate=ns.get("ORIENTATION_ALIGN_RATE"),
+        orientation_align_use_stress=ns.get("ORIENTATION_ALIGN_USE_STRESS"),
+        durotaxis_blend_beta=ns.get("DUROTAXIS_BLEND_BETA"),
+        durotaxis_use_stress=ns.get("DUROTAXIS_USE_STRESS"),
         oscillatory_shear_assay=ns.get("OSCILLATORY_SHEAR_ASSAY"),
         max_strain=ns.get("MAX_STRAIN"),
         oscillatory_amplitude=ns.get("OSCILLATORY_AMPLITUDE"),
@@ -2509,3 +2729,135 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
     )
 
 
+def recompute_derived_params(ns: dict) -> None:
+    """Re-compute derived parameters from base values after applying overrides.
+
+    Call this after injecting parameter overrides into the model namespace so
+    that values which depend on other parameters are kept consistent.  Only
+    the *simple* algebraic relations are handled here; domain-level
+    re-gridding (ECM_AGENTS_PER_DIR, ECM_POPULATION_SIZE, etc.) is
+    intentionally left out because changing the grid seed (N) or
+    BOUNDARY_COORDS has far-reaching consequences that should be set
+    explicitly.
+    """
+    import math
+
+    # --- Boundary stiffness / damping arrays ---
+    if "RELATIVE_BOUNDARY_STIFFNESS" in ns and "BOUNDARY_STIFFNESS_VALUE" in ns:
+        ns["BOUNDARY_STIFFNESS"] = [ns["BOUNDARY_STIFFNESS_VALUE"] * r for r in ns["RELATIVE_BOUNDARY_STIFFNESS"]]
+    if "RELATIVE_BOUNDARY_STIFFNESS" in ns and "BOUNDARY_DUMPING_VALUE" in ns:
+        ns["BOUNDARY_DUMPING"] = [ns["BOUNDARY_DUMPING_VALUE"] * r for r in ns["RELATIVE_BOUNDARY_STIFFNESS"]]
+    ns["MOVING_BOUNDARIES"] = (
+        any(r != 0.0 for r in ns.get("BOUNDARY_DISP_RATES_PARALLEL", [0]))
+        or any(r != 0.0 for r in ns.get("BOUNDARY_DISP_RATES", [0]))
+    )
+
+    # --- Oscillatory ---
+    if ns.get("OSCILLATORY_SHEAR_ASSAY") and "MAX_STRAIN" in ns and "BOUNDARY_COORDS" in ns:
+        bc = ns["BOUNDARY_COORDS"]
+        ns["OSCILLATORY_AMPLITUDE"] = ns["MAX_STRAIN"] * (bc[2] - bc[3])
+        ns["OSCILLATORY_W"] = 2 * math.pi * ns.get("OSCILLATORY_FREQ", 0.05) * ns.get("TIME_STEP", 0.1)
+
+    # --- Fibre network derived ---
+    if "FIBRE_SEGMENT_K_ELAST" in ns:
+        ns["FIBRE_NODE_REPULSION_K"] = 0.2 * ns["FIBRE_SEGMENT_K_ELAST"]
+    if "FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE" in ns:
+        eq = ns["FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE"]
+        ns["FNODE_CELL_DEGRADATION_RADIUS"] = 0.75 * eq
+        ns["FNODE_BIRTH_RADIUS"] = 0.5 * eq
+        ns["FNODE_BIRTH_LINK_MAX_DISTANCE"] = 2.0 * eq
+        ns["MAX_SEARCH_RADIUS_FNODES"] = eq / 10.0
+
+    # --- Cell derived ---
+    if "CELL_RADIUS" in ns:
+        ns["CELL_NUCLEUS_RADIUS"] = ns["CELL_RADIUS"] / 2
+        ns["CELL_FNODE_EXCLUSION_DISTANCE"] = ns["CELL_RADIUS"]
+        ns["CELL_CELL_ADHESION_RANGE"] = 0.5 * ns["CELL_RADIUS"]
+    if "CELL_SPEED_REF" in ns:
+        ns["BROWNIAN_MOTION_STRENGTH"] = ns["CELL_SPEED_REF"] / 10.0
+        ns["CELL_CELL_DV_MAX"] = 0.5 * ns["CELL_SPEED_REF"]
+        ns["CELL_FNODE_DV_MAX"] = 0.5 * ns["CELL_SPEED_REF"]
+    if "CELL_K_ELAST" in ns:
+        ns["CELL_CELL_REPULSION_K"] = 2.0 * ns["CELL_K_ELAST"]
+        ns["CELL_CELL_ADHESION_K"] = 0.2 * ns["CELL_K_ELAST"]
+        ns["CELL_FNODE_REPULSION_K"] = 0.5 * ns["CELL_K_ELAST"]
+
+    # --- Cycle phase starts ---
+    g1 = ns.get("CYCLE_PHASE_G1_DURATION")
+    s = ns.get("CYCLE_PHASE_S_DURATION")
+    g2 = ns.get("CYCLE_PHASE_G2_DURATION")
+    m = ns.get("CYCLE_PHASE_M_DURATION")
+    if all(v is not None for v in (g1, s, g2, m)):
+        ns["CYCLE_PHASE_G1_START"] = 0.0
+        ns["CYCLE_PHASE_S_START"] = g1
+        ns["CYCLE_PHASE_G2_START"] = g1 + s
+        ns["CYCLE_PHASE_M_START"] = g1 + s + g2
+        ns["CELL_CYCLE_DURATION"] = g1 + s + g2 + m
+
+    # --- Cell concentration mass ---
+    if "INIT_CELL_CONCENTRATION_VALS" in ns and "CELL_RADIUS" in ns:
+        r = ns["CELL_RADIUS"]
+        ns["INIT_CELL_CONC_MASS_VALS"] = [c * (4/3 * 3.1415926 * r**3) for c in ns["INIT_CELL_CONCENTRATION_VALS"]]
+
+    # --- FOCAD derived ---
+    if "CELL_RADIUS" in ns and "CELL_NUCLEUS_RADIUS" in ns:
+        ns["FOCAD_REST_LENGTH_0"] = ns["CELL_RADIUS"] - ns["CELL_NUCLEUS_RADIUS"]
+        ns["FOCAD_MIN_REST_LENGTH"] = ns["FOCAD_REST_LENGTH_0"] / 10.0
+    if "INIT_N_FOCAD_PER_CELL" in ns:
+        ns["FOCAD_BIRTH_N_MAX"] = 3 * ns["INIT_N_FOCAD_PER_CELL"]
+
+    # --- Max expected N cells ---
+    steps = ns.get("STEPS", 0)
+    dt = ns.get("TIME_STEP", 0.1)
+    n_cells = ns.get("N_CELLS", 0)
+    cycle_dur = ns.get("CELL_CYCLE_DURATION", 0)
+    if ns.get("INCLUDE_CELLS") and ns.get("INCLUDE_CELL_CYCLE") and cycle_dur > 0:
+        doublings = (steps * dt) / cycle_dur
+        ns["MAX_EXPECTED_N_CELLS"] = max(n_cells, int(math.ceil(n_cells * (2.0 ** doublings) * 2.0)))
+    else:
+        ns["MAX_EXPECTED_N_CELLS"] = n_cells + 1
+
+
+def apply_param_overrides(ns: dict, overrides: dict) -> None:
+    """Apply parameter overrides to a namespace dict and recompute derived values.
+
+    Parameters
+    ----------
+    ns : dict
+        Typically ``globals()`` from model.py.
+    overrides : dict
+        ``{PARAM_NAME: value}`` pairs to override.
+    """
+    for key, val in overrides.items():
+        if key.startswith("_"):
+            continue
+        if key in ns:
+            ns[key] = val
+        else:
+            print(f"WARNING: override key '{key}' not found in model parameters, ignoring")
+    recompute_derived_params(ns)
+
+
+def load_param_overrides_from_cli():
+    """Parse --overrides and --result-dir from command-line arguments.
+
+    Returns
+    -------
+    overrides : dict
+        Parameter overrides loaded from the JSON file (empty if none).
+    result_dir : str or None
+        Override for the result output directory.
+    """
+    import argparse, json
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--overrides", type=str, default=None,
+                        help="Path to JSON file with parameter overrides")
+    parser.add_argument("--result-dir", type=str, default=None,
+                        help="Override result output directory")
+    args, _ = parser.parse_known_args()
+
+    overrides = {}
+    if args.overrides and os.path.isfile(args.overrides):
+        with open(args.overrides, "r") as f:
+            overrides = json.load(f)
+    return overrides, args.result_dir

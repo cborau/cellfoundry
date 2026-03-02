@@ -6,6 +6,11 @@ matplotlib
 PySide6
 scipy
 
+# Optimization / parameter tuning
+optuna
+pyyaml
+# optuna-dashboard    # optional: web-based live dashboard for Optuna studies
+
 # Note: `pyflamegpu` must be installed from the FLAME GPU wheelhouse
 # because it is provided as prebuilt wheels matching CUDA versions.
 # Example (see README for CUDA-specific wheel):

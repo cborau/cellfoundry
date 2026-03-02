@@ -17,7 +17,7 @@ import os
 import pickle
 import matplotlib.pyplot as plt
 import check_hard_coded_values
-from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary
+from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary, apply_param_overrides, load_param_overrides_from_cli
 
 # TODO LIST:
 # Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
@@ -341,6 +341,22 @@ ORIENTATION_ALIGN_RATE  = 1.0  # Alignment rate [1/time] -> ~ ORIENTATION_ALIGN_
 ORIENTATION_ALIGN_USE_STRESS = True  # True: align to stress eigvec1, False: align to strain eigvec1
 DUROTAXIS_BLEND_BETA = 0.5   # 0: traction only, 1: principal direction only
 DUROTAXIS_USE_STRESS = True   # True: use stress eigenpair, False: use strain eigenpair
+
+
+# +====================================================================+
+# | PARAMETER OVERRIDES (for optimization / batch runs)                 |
+# +====================================================================+
+# Load overrides from --overrides <file.json> CLI argument (if any).
+# This must run AFTER all defaults above so that derived values can be
+# recomputed from the (possibly overridden) base parameters.
+_PARAM_OVERRIDES, _RESULT_DIR_OVERRIDE = load_param_overrides_from_cli()
+if _PARAM_OVERRIDES:
+    print(f"Applying {len(_PARAM_OVERRIDES)} parameter override(s): {list(_PARAM_OVERRIDES.keys())}")
+    apply_param_overrides(globals(), _PARAM_OVERRIDES)
+if _RESULT_DIR_OVERRIDE:
+    RES_PATH = pathlib.Path(_RESULT_DIR_OVERRIDE)
+    RES_PATH.mkdir(parents=True, exist_ok=True)
+    print(f"Result directory overridden to: {RES_PATH}")
 
 
 # +====================================================================+
