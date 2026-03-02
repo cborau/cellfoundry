@@ -10,7 +10,7 @@ from PySide6.QtGui import QColor, QFont, QTextCursor, QSyntaxHighlighter, QTextC
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFileDialog, QPlainTextEdit, QTextEdit,
     QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, QPushButton, QLineEdit,
-    QCheckBox, QLabel, QMessageBox, QSplitter, QGridLayout
+    QCheckBox, QLabel, QMessageBox, QSplitter, QGridLayout, QScrollArea
 )
 
 
@@ -272,8 +272,19 @@ class MainWindow(QMainWindow):
             "TIME_STEP", "STEPS", "SAVE_EVERY_N_STEPS",
             "BOUNDARY_COORDS", "BOUNDARY_DISP_RATES", "BOUNDARY_DISP_RATES_PARALLEL",
             "CLAMP_AGENT_TOUCHING_BOUNDARY", "ALLOW_AGENT_SLIDING",
-            "INCLUDE_FIBRE_NETWORK", "INCLUDE_DIFFUSION", "INCLUDE_CELLS"
+            "INCLUDE_FIBRE_NETWORK", "INCLUDE_NETWORK_REMODELING",
+            "INCLUDE_DIFFUSION", "HETEROGENEOUS_DIFFUSION",
+            "INCLUDE_CELLS", "INCLUDE_LINC_COUPLING",
+            "INCLUDE_CHEMOTAXIS", "INCLUDE_DUROTAXIS", "INCLUDE_CELL_CYCLE",
         ]
+
+        # Parent-child mapping: parent var -> list of (child var, child checkbox attr name)
+        self._parent_children = {
+            "INCLUDE_FIBRE_NETWORK": ["INCLUDE_NETWORK_REMODELING"],
+            "INCLUDE_DIFFUSION": ["HETEROGENEOUS_DIFFUSION"],
+            "INCLUDE_CELLS": ["INCLUDE_LINC_COUPLING", "INCLUDE_CHEMOTAXIS",
+                              "INCLUDE_DUROTAXIS", "INCLUDE_CELL_CYCLE"],
+        }
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -337,7 +348,7 @@ class MainWindow(QMainWindow):
         self.btn_stop = btn_stop
         self.btn_toggle_log = btn_toggle_log
         self._log_only = False
-        self._splitter_v_sizes = None
+        self._saved_splitter_sizes = None
 
         # Parameter panels
         panel = QWidget()
@@ -350,14 +361,13 @@ class MainWindow(QMainWindow):
         self.ed_time_step = QLineEdit()
         self.ed_steps = QLineEdit()
         self.ed_save_every = QLineEdit()
-        fl_global.addRow("TIME_STEP", self.ed_time_step)
+        self.btn_goto_global = QPushButton("Go to section")
+        row_ts = QHBoxLayout()
+        row_ts.addWidget(self.ed_time_step)
+        row_ts.addWidget(self.btn_goto_global)
+        fl_global.addRow("TIME_STEP", row_ts)
         fl_global.addRow("STEPS", self.ed_steps)
         fl_global.addRow("SAVE_EVERY_N_STEPS", self.ed_save_every)
-        self.btn_goto_global = QPushButton("Go to section")
-        goto_global_row = QHBoxLayout()
-        goto_global_row.addStretch(1)
-        goto_global_row.addWidget(self.btn_goto_global)
-        fl_global.addRow("", goto_global_row)
 
         # 2) BOUNDARY BEHAVIOUR
         gb_boundary = QGroupBox("BOUNDARY BEHAVIOUR")
@@ -407,20 +417,16 @@ class MainWindow(QMainWindow):
             clamp_layout.addWidget(cb)
         clamp_layout.addStretch(1)
 
-        slide_widget = QWidget()
-        slide_layout = QHBoxLayout(slide_widget)
-        slide_layout.setContentsMargins(0, 0, 0, 0)
-        for cb in self.cb_slide:
-            slide_layout.addWidget(cb)
-        slide_layout.addStretch(1)
-
         fl_boundary.addRow("CLAMP_AGENT_TOUCHING_BOUNDARY", clamp_widget)
-        fl_boundary.addRow("ALLOW_AGENT_SLIDING", slide_widget)
         self.btn_goto_boundary = QPushButton("Go to section")
-        goto_boundary_row = QHBoxLayout()
-        goto_boundary_row.addStretch(1)
-        goto_boundary_row.addWidget(self.btn_goto_boundary)
-        fl_boundary.addRow("", goto_boundary_row)
+        slide_goto_widget = QWidget()
+        slide_goto_layout = QHBoxLayout(slide_goto_widget)
+        slide_goto_layout.setContentsMargins(0, 0, 0, 0)
+        for cb in self.cb_slide:
+            slide_goto_layout.addWidget(cb)
+        slide_goto_layout.addStretch(1)
+        slide_goto_layout.addWidget(self.btn_goto_boundary)
+        fl_boundary.addRow("ALLOW_AGENT_SLIDING", slide_goto_widget)
 
         # 3) FIBRE NETWORK
         gb_fibre = QGroupBox("FIBRE NETWORK")
@@ -433,6 +439,15 @@ class MainWindow(QMainWindow):
         row_fibre.addWidget(self.btn_goto_fibre)
         vb_fibre.addLayout(row_fibre)
 
+        self.cb_remodeling = QCheckBox("INCLUDE_NETWORK_REMODELING")
+        self.btn_goto_remodeling = QPushButton("Go to section")
+        row_remodeling = QHBoxLayout()
+        row_remodeling.addSpacing(20)
+        row_remodeling.addWidget(self.cb_remodeling)
+        row_remodeling.addStretch(1)
+        row_remodeling.addWidget(self.btn_goto_remodeling)
+        vb_fibre.addLayout(row_remodeling)
+
         # 4) SPECIES DIFFUSION
         gb_diff = QGroupBox("SPECIES DIFFUSION")
         vb_diff = QVBoxLayout(gb_diff)
@@ -444,6 +459,15 @@ class MainWindow(QMainWindow):
         row_diff.addWidget(self.btn_goto_diff)
         vb_diff.addLayout(row_diff)
 
+        self.cb_hetero_diff = QCheckBox("HETEROGENEOUS_DIFFUSION")
+        self.btn_goto_hetero_diff = QPushButton("Go to section")
+        row_hetero = QHBoxLayout()
+        row_hetero.addSpacing(20)
+        row_hetero.addWidget(self.cb_hetero_diff)
+        row_hetero.addStretch(1)
+        row_hetero.addWidget(self.btn_goto_hetero_diff)
+        vb_diff.addLayout(row_hetero)
+
         # 5) CELLS
         gb_cells = QGroupBox("CELLS")
         vb_cells = QVBoxLayout(gb_cells)
@@ -454,6 +478,56 @@ class MainWindow(QMainWindow):
         row_cells.addStretch(1)
         row_cells.addWidget(self.btn_goto_cells)
         vb_cells.addLayout(row_cells)
+
+        # -- CELLS child options --
+        self.cb_linc = QCheckBox("INCLUDE_LINC_COUPLING")
+        self.btn_goto_linc = QPushButton("Go to section")
+        row_linc = QHBoxLayout()
+        row_linc.addSpacing(20)
+        row_linc.addWidget(self.cb_linc)
+        row_linc.addStretch(1)
+        row_linc.addWidget(self.btn_goto_linc)
+        vb_cells.addLayout(row_linc)
+
+        self.cb_chemotaxis = QCheckBox("INCLUDE_CHEMOTAXIS")
+        self.btn_goto_chemotaxis = QPushButton("Go to section")
+        row_chemo = QHBoxLayout()
+        row_chemo.addSpacing(20)
+        row_chemo.addWidget(self.cb_chemotaxis)
+        row_chemo.addStretch(1)
+        row_chemo.addWidget(self.btn_goto_chemotaxis)
+        vb_cells.addLayout(row_chemo)
+
+        self.cb_durotaxis = QCheckBox("INCLUDE_DUROTAXIS")
+        self.btn_goto_durotaxis = QPushButton("Go to section")
+        row_duro = QHBoxLayout()
+        row_duro.addSpacing(20)
+        row_duro.addWidget(self.cb_durotaxis)
+        row_duro.addStretch(1)
+        row_duro.addWidget(self.btn_goto_durotaxis)
+        vb_cells.addLayout(row_duro)
+
+        self.cb_cell_cycle = QCheckBox("INCLUDE_CELL_CYCLE")
+        self.btn_goto_cell_cycle = QPushButton("Go to section")
+        row_cycle = QHBoxLayout()
+        row_cycle.addSpacing(20)
+        row_cycle.addWidget(self.cb_cell_cycle)
+        row_cycle.addStretch(1)
+        row_cycle.addWidget(self.btn_goto_cell_cycle)
+        vb_cells.addLayout(row_cycle)
+
+        # Mapping from variable name to checkbox widget (for parent-child logic)
+        self._var_to_checkbox = {
+            "INCLUDE_FIBRE_NETWORK": self.cb_fibre,
+            "INCLUDE_NETWORK_REMODELING": self.cb_remodeling,
+            "INCLUDE_DIFFUSION": self.cb_diff,
+            "HETEROGENEOUS_DIFFUSION": self.cb_hetero_diff,
+            "INCLUDE_CELLS": self.cb_cells,
+            "INCLUDE_LINC_COUPLING": self.cb_linc,
+            "INCLUDE_CHEMOTAXIS": self.cb_chemotaxis,
+            "INCLUDE_DUROTAXIS": self.cb_durotaxis,
+            "INCLUDE_CELL_CYCLE": self.cb_cell_cycle,
+        }
 
         # 6) FLAMEGPU IMPLEMENTATION
         gb_impl = QGroupBox("FLAMEGPU IMPLEMENTATION")
@@ -507,26 +581,34 @@ class MainWindow(QMainWindow):
         panel_layout.addWidget(gb_impl)
         panel_layout.addStretch(1)
 
-        # Split view: left parameters, right editor, bottom log
+        # Wrap the parameter panel in a scroll area
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(panel)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        # Split view: left scrollable parameters (full height),
+        #             right = editor (top) + log (bottom)
+        splitter_right = QSplitter(Qt.Vertical)
+        splitter_right.addWidget(self.editor)
+        splitter_right.addWidget(self.log)
+        splitter_right.setStretchFactor(0, 3)
+        splitter_right.setStretchFactor(1, 1)
+
         splitter_h = QSplitter(Qt.Horizontal)
-        splitter_h.addWidget(panel)
-        splitter_h.addWidget(self.editor)
+        splitter_h.addWidget(scroll_area)
+        splitter_h.addWidget(splitter_right)
         splitter_h.setStretchFactor(0, 0)
         splitter_h.setStretchFactor(1, 1)
-        splitter_h.setSizes([300, 900])
-
-        splitter_v = QSplitter(Qt.Vertical)
-        splitter_v.addWidget(splitter_h)
-        splitter_v.addWidget(self.log)
-        splitter_v.setStretchFactor(0, 3)
-        splitter_v.setStretchFactor(1, 1)
+        splitter_h.setSizes([600, 750])
 
         self.splitter_h = splitter_h
-        self.splitter_v = splitter_v
+        self.splitter_right = splitter_right
 
         layout = QVBoxLayout(root)
         layout.addLayout(top)
-        layout.addWidget(splitter_v)
+        layout.addWidget(splitter_h)
 
         # Wire auto-update
         self._debounce = QTimer()
@@ -549,15 +631,30 @@ class MainWindow(QMainWindow):
         for cb in self.cb_slide:
             cb.stateChanged.connect(lambda _, v="ALLOW_AGENT_SLIDING", boxes=self.cb_slide: self.on_toggle_list(v, boxes, goto=True))
 
-        self.cb_fibre.stateChanged.connect(lambda _: self.on_toggle_bool("INCLUDE_FIBRE_NETWORK", self.cb_fibre, goto=True))
-        self.cb_diff.stateChanged.connect(lambda _: self.on_toggle_bool("INCLUDE_DIFFUSION", self.cb_diff, goto=True))
-        self.cb_cells.stateChanged.connect(lambda _: self.on_toggle_bool("INCLUDE_CELLS", self.cb_cells, goto=True))
+        # Parent checkboxes: toggle bool + cascade to children
+        self.cb_fibre.stateChanged.connect(lambda _: self._on_parent_toggled("INCLUDE_FIBRE_NETWORK", self.cb_fibre))
+        self.cb_diff.stateChanged.connect(lambda _: self._on_parent_toggled("INCLUDE_DIFFUSION", self.cb_diff))
+        self.cb_cells.stateChanged.connect(lambda _: self._on_parent_toggled("INCLUDE_CELLS", self.cb_cells))
+
+        # Child checkboxes (simple bool toggle, no cascade)
+        self.cb_remodeling.stateChanged.connect(lambda _: self.on_toggle_bool("INCLUDE_NETWORK_REMODELING", self.cb_remodeling, goto=True))
+        self.cb_hetero_diff.stateChanged.connect(lambda _: self.on_toggle_bool("HETEROGENEOUS_DIFFUSION", self.cb_hetero_diff, goto=True))
+        self.cb_linc.stateChanged.connect(lambda _: self.on_toggle_bool("INCLUDE_LINC_COUPLING", self.cb_linc, goto=True))
+        self.cb_chemotaxis.stateChanged.connect(lambda _: self.on_toggle_bool("INCLUDE_CHEMOTAXIS", self.cb_chemotaxis, goto=True))
+        self.cb_durotaxis.stateChanged.connect(lambda _: self.on_toggle_bool("INCLUDE_DUROTAXIS", self.cb_durotaxis, goto=True))
+        self.cb_cell_cycle.stateChanged.connect(lambda _: self.on_toggle_bool("INCLUDE_CELL_CYCLE", self.cb_cell_cycle, goto=True))
 
         self.btn_goto_global.clicked.connect(lambda: self.goto_var("TIME_STEP"))
         self.btn_goto_boundary.clicked.connect(lambda: self.goto_var("BOUNDARY_COORDS"))
         self.btn_goto_fibre.clicked.connect(lambda: self.goto_var("INCLUDE_FIBRE_NETWORK"))
+        self.btn_goto_remodeling.clicked.connect(lambda: self.goto_var("INCLUDE_NETWORK_REMODELING"))
         self.btn_goto_diff.clicked.connect(lambda: self.goto_var("INCLUDE_DIFFUSION"))
+        self.btn_goto_hetero_diff.clicked.connect(lambda: self.goto_var("HETEROGENEOUS_DIFFUSION"))
         self.btn_goto_cells.clicked.connect(lambda: self.goto_var("INCLUDE_CELLS"))
+        self.btn_goto_linc.clicked.connect(lambda: self.goto_var("INCLUDE_LINC_COUPLING"))
+        self.btn_goto_chemotaxis.clicked.connect(lambda: self.goto_var("INCLUDE_CHEMOTAXIS"))
+        self.btn_goto_durotaxis.clicked.connect(lambda: self.goto_var("INCLUDE_DUROTAXIS"))
+        self.btn_goto_cell_cycle.clicked.connect(lambda: self.goto_var("INCLUDE_CELL_CYCLE"))
         self.btn_impl_files.clicked.connect(lambda: self.goto_subsection("Files"))
         self.btn_impl_globals.clicked.connect(lambda: self.goto_subsection("Globals"))
         self.btn_impl_messages.clicked.connect(lambda: self.goto_subsection("Messages"))
@@ -577,30 +674,109 @@ class MainWindow(QMainWindow):
             self.ed_time_step, self.ed_steps, self.ed_save_every,
             *self.ed_boundary_coords, *self.ed_boundary_disp, *self.ed_boundary_disp_par,
             self.cb_fibre, self.cb_diff, self.cb_cells,
+            self.cb_remodeling, self.cb_hetero_diff,
+            self.cb_linc, self.cb_chemotaxis, self.cb_durotaxis, self.cb_cell_cycle,
             self.btn_goto_global, self.btn_goto_boundary,
-            self.btn_goto_fibre, self.btn_goto_diff, self.btn_goto_cells,
+            self.btn_goto_fibre, self.btn_goto_remodeling,
+            self.btn_goto_diff, self.btn_goto_hetero_diff,
+            self.btn_goto_cells, self.btn_goto_linc,
+            self.btn_goto_chemotaxis, self.btn_goto_durotaxis, self.btn_goto_cell_cycle,
             self.btn_impl_files, self.btn_impl_globals, self.btn_impl_messages,
             self.btn_impl_agents, self.btn_impl_step_funcs, self.btn_impl_layers,
             self.btn_impl_logging, self.btn_impl_visualization, self.btn_impl_execution,
             self.btn_save, self.btn_run
         ]:
             w.setEnabled(enabled)
+        # After enabling, enforce parent-child enabled state
+        if enabled:
+            self._update_children_enabled()
 
     def _debounced_apply(self):
         # debounce to avoid rewriting the editor on every keystroke
         self._debounce.start(150)
 
+    def _on_parent_toggled(self, parent_var: str, parent_cb: QCheckBox):
+        """Toggle parent bool in source, then cascade-uncheck children if unchecked."""
+        if not self.path:
+            return
+        self.on_toggle_bool(parent_var, parent_cb, goto=True)
+        if not parent_cb.isChecked():
+            # Uncheck all children both visually and in code
+            for child_var in self._parent_children.get(parent_var, []):
+                child_cb = self._var_to_checkbox.get(child_var)
+                if child_cb and child_cb.isChecked():
+                    child_cb.blockSignals(True)
+                    child_cb.setChecked(False)
+                    child_cb.blockSignals(False)
+                    try:
+                        replace_var_line(self.lines, self.locs, child_var, py_bool(False))
+                    except Exception:
+                        pass
+            # Refresh editor once to reflect all child changes
+            cur = self.editor.textCursor()
+            pos = cur.position()
+            vpos = self.editor.verticalScrollBar().value()
+            hpos = self.editor.horizontalScrollBar().value()
+            text = "".join(self.lines)
+            self._suppress_editor_signal = True
+            self.editor.setPlainText(text)
+            self._suppress_editor_signal = False
+            if self.editor.hasFocus():
+                cur2 = self.editor.textCursor()
+                cur2.setPosition(min(pos, len(text)))
+                self.editor.setTextCursor(cur2)
+            else:
+                self.editor.verticalScrollBar().setValue(vpos)
+                self.editor.horizontalScrollBar().setValue(hpos)
+        self._update_children_enabled()
+
+    def _update_children_enabled(self):
+        """Enable/disable child checkboxes and their goto buttons based on parent state."""
+        for parent_var, child_vars in self._parent_children.items():
+            parent_cb = self._var_to_checkbox.get(parent_var)
+            parent_on = parent_cb.isChecked() if parent_cb else False
+            for child_var in child_vars:
+                child_cb = self._var_to_checkbox.get(child_var)
+                if child_cb:
+                    child_cb.setEnabled(parent_on)
+                # Also disable the corresponding goto button
+                btn_name = f"btn_goto_{self._var_to_btn_suffix(child_var)}"
+                btn = getattr(self, btn_name, None)
+                if btn:
+                    btn.setEnabled(parent_on)
+
+    @staticmethod
+    def _var_to_btn_suffix(var: str) -> str:
+        """Map variable name to the goto button attribute suffix."""
+        mapping = {
+            "INCLUDE_NETWORK_REMODELING": "remodeling",
+            "HETEROGENEOUS_DIFFUSION": "hetero_diff",
+            "INCLUDE_LINC_COUPLING": "linc",
+            "INCLUDE_CHEMOTAXIS": "chemotaxis",
+            "INCLUDE_DUROTAXIS": "durotaxis",
+            "INCLUDE_CELL_CYCLE": "cell_cycle",
+        }
+        return mapping.get(var, var.lower())
+
     def toggle_log_view(self):
         if not self._log_only:
-            self._splitter_v_sizes = self.splitter_v.sizes()
-            self.splitter_v.setSizes([0, 1])
+            # Save both splitter states and collapse to show only log
+            self._saved_splitter_sizes = (
+                self.splitter_h.sizes(),
+                self.splitter_right.sizes(),
+            )
+            self.splitter_h.setSizes([0, 1])       # hide panel
+            self.splitter_right.setSizes([0, 1])   # hide editor, log fills right
             self.btn_toggle_log.setText("Show editor")
             self._log_only = True
         else:
-            if self._splitter_v_sizes:
-                self.splitter_v.setSizes(self._splitter_v_sizes)
+            if self._saved_splitter_sizes:
+                h_sizes, r_sizes = self._saved_splitter_sizes
+                self.splitter_h.setSizes(h_sizes)
+                self.splitter_right.setSizes(r_sizes)
             else:
-                self.splitter_v.setSizes([1, 1])
+                self.splitter_h.setSizes([300, 900])
+                self.splitter_right.setSizes([3, 1])
             self.btn_toggle_log.setText("Log only")
             self._log_only = False
 
@@ -730,15 +906,28 @@ class MainWindow(QMainWindow):
                 return False
             return rhs.strip() == "True"
 
-        self.cb_fibre.blockSignals(True)
-        self.cb_diff.blockSignals(True)
-        self.cb_cells.blockSignals(True)
+        # Block signals on ALL bool checkboxes while populating
+        all_bool_cbs = [
+            self.cb_fibre, self.cb_remodeling,
+            self.cb_diff, self.cb_hetero_diff,
+            self.cb_cells, self.cb_linc, self.cb_chemotaxis,
+            self.cb_durotaxis, self.cb_cell_cycle,
+        ]
+        for cb in all_bool_cbs:
+            cb.blockSignals(True)
+
         self.cb_fibre.setChecked(rhs_is_true(get_rhs_text("INCLUDE_FIBRE_NETWORK")))
+        self.cb_remodeling.setChecked(rhs_is_true(get_rhs_text("INCLUDE_NETWORK_REMODELING")))
         self.cb_diff.setChecked(rhs_is_true(get_rhs_text("INCLUDE_DIFFUSION")))
+        self.cb_hetero_diff.setChecked(rhs_is_true(get_rhs_text("HETEROGENEOUS_DIFFUSION")))
         self.cb_cells.setChecked(rhs_is_true(get_rhs_text("INCLUDE_CELLS")))
-        self.cb_fibre.blockSignals(False)
-        self.cb_diff.blockSignals(False)
-        self.cb_cells.blockSignals(False)
+        self.cb_linc.setChecked(rhs_is_true(get_rhs_text("INCLUDE_LINC_COUPLING")))
+        self.cb_chemotaxis.setChecked(rhs_is_true(get_rhs_text("INCLUDE_CHEMOTAXIS")))
+        self.cb_durotaxis.setChecked(rhs_is_true(get_rhs_text("INCLUDE_DUROTAXIS")))
+        self.cb_cell_cycle.setChecked(rhs_is_true(get_rhs_text("INCLUDE_CELL_CYCLE")))
+
+        for cb in all_bool_cbs:
+            cb.blockSignals(False)
 
         self.set_ui_enabled(True)
         self._editor_dirty = False
