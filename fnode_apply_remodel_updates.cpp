@@ -6,7 +6,7 @@
  *
  * Inputs:
  *   - FNODE connectivity arrays
- *   - Spatial FNODE messages (id, x,y,z, closest_fnode_id)
+ *   - Spatial FNODE messages (id, x,y,z, closest_fnode_id, second_closest_fnode_id)
  *
  * Outputs:
  *   - Updated `linked_nodes` / `equilibrium_distance`
@@ -34,7 +34,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_apply_remodel_updates, flamegpu::MessageSpatial3D,
     equilibrium_distance[i] = FLAMEGPU->getVariable<float, MAX_CONNECTIVITY>("equilibrium_distance", i);
   }
 
-  // Build local cache of candidate newborn links
+  // Build local cache of candidate newborn links (from both closest and second_closest)
   int newborn_ids[LOCAL_CACHE_SIZE] = {};
   float newborn_dist[LOCAL_CACHE_SIZE] = {};
   int newborn_count = 0;
@@ -43,7 +43,9 @@ FLAMEGPU_AGENT_FUNCTION(fnode_apply_remodel_updates, flamegpu::MessageSpatial3D,
     const int mid = message.getVariable<int>("id");
 
     const int closest_fnode_id = message.getVariable<int>("closest_fnode_id");
-    if (closest_fnode_id == id && mid != id && newborn_count < LOCAL_CACHE_SIZE) {
+    const int second_closest_fnode_id = message.getVariable<int>("second_closest_fnode_id");
+    const int matches_this_node = (closest_fnode_id == id || second_closest_fnode_id == id) ? 1 : 0;
+    if (matches_this_node && mid != id && newborn_count < LOCAL_CACHE_SIZE) {
       float dx = message.getVariable<float>("x") - agent_x;
       float dy = message.getVariable<float>("y") - agent_y;
       float dz = message.getVariable<float>("z") - agent_z;
@@ -103,6 +105,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_apply_remodel_updates, flamegpu::MessageSpatial3D,
   }
   FLAMEGPU->setVariable<uint8_t>("connectivity_count", connectivity_count);
   FLAMEGPU->setVariable<int>("closest_fnode_id", -1);
+  FLAMEGPU->setVariable<int>("second_closest_fnode_id", -1);
 
   if (self_marked_for_removal == 1) {
     return flamegpu::DEAD;

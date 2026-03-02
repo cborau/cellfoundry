@@ -110,11 +110,21 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_remodel, flamegpu::MessageSpatial3D, flamegpu
   const float agent_z = FLAMEGPU->getVariable<float>("z");
 
   const float max_link_r2 = FNODE_BIRTH_LINK_MAX_DISTANCE * FNODE_BIRTH_LINK_MAX_DISTANCE;
+  // Track the two closest FNODEs with available connectivity
   int closest_fnode_id = -1;
-  float best_parent_x = 0.0f;
-  float best_parent_y = 0.0f;
-  float best_parent_z = 0.0f;
+  float closest_fnode_x = 0.0f;
+  float closest_fnode_y = 0.0f;
+  float closest_fnode_z = 0.0f;
   float best_r2 = max_link_r2;
+
+  int second_closest_fnode_id = -1;
+  float second_closest_fnode_x = 0.0f;
+  float second_closest_fnode_y = 0.0f;
+  float second_closest_fnode_z = 0.0f;
+  float second_r2 = max_link_r2;
+
+  // Factor to reject the second parent if too far relative to the first
+  const float SECOND_LINK_MAX_FACTOR = 3.0f;
 
   for (const auto &message : FLAMEGPU->message_in(agent_x, agent_y, agent_z)) {
     const uint8_t degree = message.getVariable<uint8_t>("connectivity_count");
@@ -129,16 +139,36 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_remodel, flamegpu::MessageSpatial3D, flamegpu
     const float dz = mz - agent_z;
     const float r2 = dx * dx + dy * dy + dz * dz;
     if (r2 < best_r2) {
+      // Demote current best to second
+      second_r2 = best_r2;
+      second_closest_fnode_id = closest_fnode_id;
+      second_closest_fnode_x = closest_fnode_x;
+      second_closest_fnode_y = closest_fnode_y;
+      second_closest_fnode_z = closest_fnode_z;
+      // Update best
       best_r2 = r2;
       closest_fnode_id = message.getVariable<int>("id");
-      best_parent_x = mx;
-      best_parent_y = my;
-      best_parent_z = mz;
+      closest_fnode_x = mx;
+      closest_fnode_y = my;
+      closest_fnode_z = mz;
+    } else if (r2 < second_r2) {
+      second_r2 = r2;
+      second_closest_fnode_id = message.getVariable<int>("id");
+      second_closest_fnode_x = mx;
+      second_closest_fnode_y = my;
+      second_closest_fnode_z = mz;
     }
   }
 
   if (closest_fnode_id < 0) {
     return flamegpu::ALIVE;
+  }
+
+  // Reject second closest if it is too far relative to the first (more than SECOND_LINK_MAX_FACTOR times the first distance)
+  if (second_closest_fnode_id >= 0 && best_r2 > 0.0f) {
+    if (second_r2 > SECOND_LINK_MAX_FACTOR * SECOND_LINK_MAX_FACTOR * best_r2) {
+      second_closest_fnode_id = -1;
+    }
   }
 
   auto MACRO_MAX_GLOBAL_FNODE_ID = FLAMEGPU->environment.getMacroProperty<int, 1>("MACRO_MAX_GLOBAL_FNODE_ID");
@@ -154,18 +184,19 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_remodel, flamegpu::MessageSpatial3D, flamegpu
   const float new_y = agent_y + dir_y * FNODE_BIRTH_RADIUS;
   const float new_z = agent_z + dir_z * FNODE_BIRTH_RADIUS;
 
-  const float pdx = new_x - best_parent_x;
-  const float pdy = new_y - best_parent_y;
-  const float pdz = new_z - best_parent_z;
-  const float parent_dist = fmaxf(1e-6f, cfnr_length3(pdx, pdy, pdz));
+  const float pdx = new_x - closest_fnode_x;
+  const float pdy = new_y - closest_fnode_y;
+  const float pdz = new_z - closest_fnode_z;
+  const float closest_fnode_dist = fmaxf(1e-6f, cfnr_length3(pdx, pdy, pdz));
 
-  printf("CELL %d at (%f, %f, %f) is creating FNODE %d at (%f, %f, %f) with parent FNODE %d at (%f, %f, %f)\n",
+  printf("CELL %d at (%f, %f, %f) is creating FNODE %d at (%f, %f, %f) with closest FNODE %d at (%f, %f, %f), second closest FNODE %d\n",
     FLAMEGPU->getVariable<int>("id"),
     agent_x, agent_y, agent_z,
     new_fnode_id,
     new_x, new_y, new_z,
     closest_fnode_id,
-    best_parent_x, best_parent_y, best_parent_z
+    closest_fnode_x, closest_fnode_y, closest_fnode_z,
+    second_closest_fnode_id
   );
 
   FLAMEGPU->agent_out.setVariable<int>("id", new_fnode_id);
@@ -204,10 +235,12 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_remodel, flamegpu::MessageSpatial3D, flamegpu
   FLAMEGPU->agent_out.setVariable<float>("f_extension", 0.0f);
   FLAMEGPU->agent_out.setVariable<float>("f_compression", 0.0f);
   FLAMEGPU->agent_out.setVariable<float>("elastic_energy", 0.0f);
-  FLAMEGPU->agent_out.setVariable<uint8_t>("connectivity_count", 1);
   FLAMEGPU->agent_out.setVariable<float>("degradation", 0.0f);
+  FLAMEGPU->agent_out.setVariable<float>("reinforcement", 0.0f);
+  FLAMEGPU->agent_out.setVariable<int>("secreted", 1);
   FLAMEGPU->agent_out.setVariable<int>("marked_for_removal", 0);
   FLAMEGPU->agent_out.setVariable<int>("closest_fnode_id", closest_fnode_id);
+  FLAMEGPU->agent_out.setVariable<int>("second_closest_fnode_id", second_closest_fnode_id);
   FLAMEGPU->agent_out.setVariable<uint8_t>("clamped_bx_pos", 0);
   FLAMEGPU->agent_out.setVariable<uint8_t>("clamped_bx_neg", 0);
   FLAMEGPU->agent_out.setVariable<uint8_t>("clamped_by_pos", 0);
@@ -215,14 +248,32 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_remodel, flamegpu::MessageSpatial3D, flamegpu
   FLAMEGPU->agent_out.setVariable<uint8_t>("clamped_bz_pos", 0);
   FLAMEGPU->agent_out.setVariable<uint8_t>("clamped_bz_neg", 0);
 
+  // Set up linked_nodes: slot 0 = closest parent, slot 1 = second closest parent (if valid)
   FLAMEGPU->agent_out.setVariable<float, MAX_CONNECTIVITY>("linked_nodes", 0, static_cast<float>(closest_fnode_id));
-  FLAMEGPU->agent_out.setVariable<float, MAX_CONNECTIVITY>("equilibrium_distance", 0, parent_dist);
-  for (int i = 1; i < MAX_CONNECTIVITY; i++) {
-    FLAMEGPU->agent_out.setVariable<float, MAX_CONNECTIVITY>("linked_nodes", i, -1.0f);
-    FLAMEGPU->agent_out.setVariable<float, MAX_CONNECTIVITY>("equilibrium_distance", i, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE);
-  }
+  FLAMEGPU->agent_out.setVariable<float, MAX_CONNECTIVITY>("equilibrium_distance", 0, closest_fnode_dist);
 
-  printf("CELL %d is requesting reciprocal link update from parent FNODE %d for new FNODE %d\n", FLAMEGPU->getVariable<int>("id"), closest_fnode_id, new_fnode_id);
+  uint8_t initial_connectivity = 1;
+  if (second_closest_fnode_id >= 0) {
+    const float sdx = new_x - second_closest_fnode_x;
+    const float sdy = new_y - second_closest_fnode_y;
+    const float sdz = new_z - second_closest_fnode_z;
+    const float second_closest_fnode_dist = fmaxf(1e-6f, cfnr_length3(sdx, sdy, sdz));
+    FLAMEGPU->agent_out.setVariable<float, MAX_CONNECTIVITY>("linked_nodes", 1, static_cast<float>(second_closest_fnode_id));
+    FLAMEGPU->agent_out.setVariable<float, MAX_CONNECTIVITY>("equilibrium_distance", 1, second_closest_fnode_dist);
+    initial_connectivity = 2;
+    for (int i = 2; i < MAX_CONNECTIVITY; i++) {
+      FLAMEGPU->agent_out.setVariable<float, MAX_CONNECTIVITY>("linked_nodes", i, -1.0f);
+      FLAMEGPU->agent_out.setVariable<float, MAX_CONNECTIVITY>("equilibrium_distance", i, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE);
+    }
+  } else {
+    for (int i = 1; i < MAX_CONNECTIVITY; i++) {
+      FLAMEGPU->agent_out.setVariable<float, MAX_CONNECTIVITY>("linked_nodes", i, -1.0f);
+      FLAMEGPU->agent_out.setVariable<float, MAX_CONNECTIVITY>("equilibrium_distance", i, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE);
+    }
+  }
+  FLAMEGPU->agent_out.setVariable<uint8_t>("connectivity_count", initial_connectivity);
+
+  printf("CELL %d is requesting reciprocal link update from closest FNODE %d (and second closest %d) for new FNODE %d\n", FLAMEGPU->getVariable<int>("id"), closest_fnode_id, second_closest_fnode_id, new_fnode_id);
   FLAMEGPU->setVariable<float>("fnode_birth_cooldown", fmaxf(0.0f, FNODE_BIRTH_REFRACTORY));
 
   return flamegpu::ALIVE;

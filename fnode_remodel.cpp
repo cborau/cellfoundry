@@ -2,15 +2,15 @@
  * fnode_remodel
  *
  * Purpose:
- *   Update FNODE degradation/deposition state from nearby CELLs and register removal requests when degradation reaches 1.
+ *   Update FNODE degradation/reinforcement state from nearby CELLs and register removal requests when net degradation reaches 1.
  *
  * Inputs:
  *   - CELL spatial messages (x, y, z, dead)
- *   - FNODE state (degradation, id)
+ *   - FNODE state (degradation, reinforcement, id)
  *   - Remodeling environment properties and removal macro buffers
  *
  * Outputs:
- *   - Updated FNODE `degradation`, `marked_for_removal`
+ *   - Updated FNODE `degradation`, `reinforcement`, `marked_for_removal`
  */
 FLAMEGPU_AGENT_FUNCTION(fnode_remodel, flamegpu::MessageSpatial3D, flamegpu::MessageNone) {
   const uint32_t INCLUDE_NETWORK_REMODELING = FLAMEGPU->environment.getProperty<uint32_t>("INCLUDE_NETWORK_REMODELING");
@@ -30,6 +30,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_remodel, flamegpu::MessageSpatial3D, flamegpu::Mes
   const float agent_z = FLAMEGPU->getVariable<float>("z");
 
   float degradation = FLAMEGPU->getVariable<float>("degradation");
+  float reinforcement = FLAMEGPU->getVariable<float>("reinforcement");
 
   int n_live_cells = 0;
   const float r2max = FNODE_CELL_DEGRADATION_RADIUS * FNODE_CELL_DEGRADATION_RADIUS;
@@ -46,17 +47,24 @@ FLAMEGPU_AGENT_FUNCTION(fnode_remodel, flamegpu::MessageSpatial3D, flamegpu::Mes
     }
   }
 
+  // Degradation 
   const float d_inc = TIME_STEP * fmaxf(0.0f, FNODE_DEGRADATION_RATE) * static_cast<float>(n_live_cells);
-  const float d_dec = TIME_STEP * fmaxf(0.0f, FNODE_DEPOSITION_RATE);
   degradation += d_inc;
-  degradation -= d_dec;
   degradation = fminf(1.0f, fmaxf(0.0f, degradation));
 
-  FLAMEGPU->setVariable<float>("degradation", degradation);
+  // Reinforcement 
+  const float r_inc = TIME_STEP * fmaxf(0.0f, FNODE_DEPOSITION_RATE) * static_cast<float>(n_live_cells);
+  reinforcement += r_inc;
+  reinforcement = fmaxf(0.0f, reinforcement); // No upper bound on reinforcement
 
-  if (degradation >= 1.0f) {
+  FLAMEGPU->setVariable<float>("degradation", degradation);
+  FLAMEGPU->setVariable<float>("reinforcement", reinforcement);
+
+  // Net degradation: if degradation minus reinforcement reaches 1, mark for removal
+  const float net_degradation = degradation - reinforcement;
+  if (net_degradation >= 1.0f) {
     FLAMEGPU->setVariable<int>("marked_for_removal", 1);
-    printf("FNODE %d at (%f, %f, %f) is marked for removal due to degradation\n", id, agent_x, agent_y, agent_z);
+    printf("FNODE %d at (%f, %f, %f) is marked for removal due to degradation (deg=%.3f, reinf=%.3f)\n", id, agent_x, agent_y, agent_z, degradation, reinforcement);
   } else {
     FLAMEGPU->setVariable<int>("marked_for_removal", 0);
   }

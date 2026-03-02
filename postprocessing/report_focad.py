@@ -1,17 +1,17 @@
-#!/usr/bin/env python3
 """
-Generate FOCAD reports from  pickle outputs.
+Generate FOCAD reports from pickle or VTK outputs.
 
 This script:
-1) Loads `output_data_*.pickle`
+1) Loads `output_data_*.pickle` or parses `focad_tXXXX.vtk` files
 2) Exports FOCAD metrics/polarity time series to CSV
 3) Builds summary CSV with final-20% statistics and front-vs-rear diagnostics
 4) Saves convenient plots for quick inspection
 
 Usage:
-    python postprocessing/focad_report.py
-    python postprocessing/focad_report.py --pickle result_files/output_data_0.pickle
-    python postprocessing/focad_report.py --tag mytag --outdir result_files/reports
+    python postprocessing/report_focad.py
+    python postprocessing/report_focad.py --pickle result_files/output_data_0.pickle
+    python postprocessing/report_focad.py --source vtk --indir ../result_files
+    python postprocessing/report_focad.py --tag mytag --outdir results
 """
 
 from __future__ import annotations
@@ -19,10 +19,12 @@ from __future__ import annotations
 import argparse
 import math
 import pickle
+import re
 from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 
@@ -38,15 +40,24 @@ class SafeUnpickler(pickle.Unpickler):
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build FOCAD reports and plots from CellFoundry pickle output")
+    parser = argparse.ArgumentParser(description="Build FOCAD reports and plots from CellFoundry pickle or VTK output")
+    parser.add_argument(
+        "--source", choices=["pickle", "vtk"], default="pickle",
+        help="Data source: 'pickle' (default) or 'vtk'",
+    )
     parser.add_argument(
         "--pickle",
-        default="result_files/output_data_0.pickle",
-        help="Path to simulation pickle file",
+        default="../result_files/output_data_0.pickle",
+        help="Path to simulation pickle file (used when --source pickle)",
+    )
+    parser.add_argument(
+        "--indir",
+        default="../result_files",
+        help="Directory containing focad_tXXXX.vtk files (used when --source vtk)",
     )
     parser.add_argument(
         "--outdir",
-        default="result_files",
+        default="results",
         help="Directory where CSV summaries and plots will be saved",
     )
     parser.add_argument(
@@ -73,6 +84,108 @@ def load_pickle(path: Path) -> dict[str, Any]:
         raise FileNotFoundError(f"Pickle file not found: {path}")
     with path.open("rb") as f:
         return SafeUnpickler(f).load()
+
+
+# ---------------------------------------------------------------------------
+# VTK reading helpers
+# ---------------------------------------------------------------------------
+
+def _read_vtk_scalar_float(lines: list[str], name: str, n: int) -> list[float]:
+    header = f"SCALARS {name}"
+    idx = next((i for i, line in enumerate(lines) if line.startswith(header)), None)
+    if idx is None:
+        return [0.0] * n
+    start = idx + 2
+    return [float(lines[i].strip().split()[0]) for i in range(start, start + n)]
+
+
+def _read_vtk_scalar_int(lines: list[str], name: str, n: int) -> list[int]:
+    header = f"SCALARS {name}"
+    idx = next((i for i, line in enumerate(lines) if line.startswith(header)), None)
+    if idx is None:
+        return [0] * n
+    start = idx + 2
+    return [int(float(lines[i].strip().split()[0])) for i in range(start, start + n)]
+
+
+def _load_focad_vtk_step(path: Path) -> dict:
+    """Parse a single focad_tXXXX.vtk and return aggregate metrics."""
+    lines = [line.strip() for line in path.read_text().splitlines()]
+    pd_idx = next((i for i, l in enumerate(lines) if l.startswith("POINT_DATA")), None)
+    if pd_idx is None:
+        return {"n_focad": 0}
+    n = int(lines[pd_idx].split()[1])
+    attached = _read_vtk_scalar_int(lines, "attached", n)
+    f_mag = _read_vtk_scalar_float(lines, "f_mag", n)
+    is_front = _read_vtk_scalar_int(lines, "is_front", n)
+    is_rear = _read_vtk_scalar_int(lines, "is_rear", n)
+    attached_front = _read_vtk_scalar_int(lines, "attached_front", n)
+    attached_rear = _read_vtk_scalar_int(lines, "attached_rear", n)
+    frontness_front = _read_vtk_scalar_float(lines, "frontness_front", n)
+    frontness_rear = _read_vtk_scalar_float(lines, "frontness_rear", n)
+    k_on_eff_front = _read_vtk_scalar_float(lines, "k_on_eff_front", n)
+    k_on_eff_rear = _read_vtk_scalar_float(lines, "k_on_eff_rear", n)
+    k_off_0_eff_front = _read_vtk_scalar_float(lines, "k_off_0_eff_front", n)
+    k_off_0_eff_rear = _read_vtk_scalar_float(lines, "k_off_0_eff_rear", n)
+    return {
+        "n_focad": n,
+        "attached": sum(attached),
+        "total_f_mag": sum(f_mag),
+        "front_count": sum(is_front),
+        "rear_count": sum(is_rear),
+        "front_attached": sum(attached_front),
+        "rear_attached": sum(attached_rear),
+        "frontness_front_sum": sum(frontness_front),
+        "frontness_rear_sum": sum(frontness_rear),
+        "k_on_eff_front_sum": sum(k_on_eff_front),
+        "k_on_eff_rear_sum": sum(k_on_eff_rear),
+        "k_off_0_eff_front_sum": sum(k_off_0_eff_front),
+        "k_off_0_eff_rear_sum": sum(k_off_0_eff_rear),
+    }
+
+
+def build_focad_from_vtk(vtk_files: list[Path]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build FOCAD metrics and polarity DataFrames from VTK files."""
+    fmet_rows = []
+    fpol_rows = []
+    for vtk in vtk_files:
+        step_match = re.search(r"t(\d+)\.vtk$", vtk.name)
+        step = int(step_match.group(1)) if step_match else -1
+        d = _load_focad_vtk_step(vtk)
+        n = d["n_focad"]
+        if n == 0:
+            continue
+        att = d["attached"]
+        ratio = att / n
+        mean_f_mag = d["total_f_mag"] / n
+        fmet_rows.append({"step": step, "attached": att, "total": n, "attached_ratio": ratio, "mean_f_mag": mean_f_mag})
+
+        fc = d["front_count"]
+        rc = d["rear_count"]
+        fa = d["front_attached"]
+        ra = d["rear_attached"]
+        far = (fa / fc) if fc > 0 else 0.0
+        rar = (ra / rc) if rc > 0 else 0.0
+        ff_mean = (d["frontness_front_sum"] / fc) if fc > 0 else 0.0
+        fr_mean = (d["frontness_rear_sum"] / rc) if rc > 0 else 0.0
+        konf_mean = (d["k_on_eff_front_sum"] / fc) if fc > 0 else 0.0
+        konr_mean = (d["k_on_eff_rear_sum"] / rc) if rc > 0 else 0.0
+        kofff_mean = (d["k_off_0_eff_front_sum"] / fc) if fc > 0 else 0.0
+        koffr_mean = (d["k_off_0_eff_rear_sum"] / rc) if rc > 0 else 0.0
+
+        fpol_rows.append({
+            "step": step,
+            "front_count": fc, "rear_count": rc,
+            "front_attached": fa, "rear_attached": ra,
+            "front_attached_ratio": far, "rear_attached_ratio": rar,
+            "frontness_front_mean": ff_mean, "frontness_rear_mean": fr_mean,
+            "k_on_eff_front_mean": konf_mean, "k_on_eff_rear_mean": konr_mean,
+            "k_off_0_eff_front_mean": kofff_mean, "k_off_0_eff_rear_mean": koffr_mean,
+        })
+
+    fmet = pd.DataFrame(fmet_rows).sort_values("step").reset_index(drop=True) if fmet_rows else pd.DataFrame()
+    fpol = pd.DataFrame(fpol_rows).sort_values("step").reset_index(drop=True) if fpol_rows else pd.DataFrame()
+    return fmet, fpol
 
 
 def compute_last20_stats(df: pd.DataFrame, prefix: str) -> dict[str, float]:
@@ -395,21 +508,32 @@ Important interpretation notes
 
 def main() -> None:
     args = parse_args()
-    pickle_path = Path(args.pickle)
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    data = load_pickle(pickle_path)
+    n_cells = None
 
-    fmet = data.get("FOCAD_METRICS_OVER_TIME", pd.DataFrame()).copy().reset_index(drop=True)
-    fpol = data.get("FOCAD_POLARITY_METRICS_OVER_TIME", pd.DataFrame()).copy().reset_index(drop=True)
+    if args.source == "vtk":
+        indir = Path(args.indir)
+        vtk_files = sorted(indir.glob("focad_t*.vtk"))
+        if not vtk_files:
+            raise FileNotFoundError(f"No focad_t*.vtk files found in {indir}")
+        print(f"[VTK] Found {len(vtk_files)} FOCAD VTK files in {indir}")
+        fmet, fpol = build_focad_from_vtk(vtk_files)
+        n_cells_override = args.n_cells
+        if n_cells_override is not None:
+            n_cells = float(n_cells_override)
+    else:
+        pickle_path = Path(args.pickle)
+        data = load_pickle(pickle_path)
+        fmet = data.get("FOCAD_METRICS_OVER_TIME", pd.DataFrame()).copy().reset_index(drop=True)
+        fpol = data.get("FOCAD_POLARITY_METRICS_OVER_TIME", pd.DataFrame()).copy().reset_index(drop=True)
+        if len(fmet) > 0:
+            fmet.insert(0, "step", range(1, len(fmet) + 1))
+        if len(fpol) > 0:
+            fpol.insert(0, "step", range(1, len(fpol) + 1))
+        n_cells = resolve_n_cells(data, args.n_cells)
 
-    if len(fmet) > 0:
-        fmet.insert(0, "step", range(1, len(fmet) + 1))
-    if len(fpol) > 0:
-        fpol.insert(0, "step", range(1, len(fpol) + 1))
-
-    n_cells = resolve_n_cells(data, args.n_cells)
     if len(fmet) > 0 and n_cells is not None and n_cells > 0 and "total" in fmet.columns:
         fmet["avg_focad_per_cell"] = fmet["total"] / n_cells
 

@@ -827,6 +827,7 @@ if INCLUDE_FIBRE_NETWORK:
     FNODE_spatial_location_message.newVariableInt("id") # as an edge can have multiple inner agents, this stores the position within the edge
     FNODE_spatial_location_message.newVariableUInt8("connectivity_count")
     FNODE_spatial_location_message.newVariableInt("closest_fnode_id")
+    FNODE_spatial_location_message.newVariableInt("second_closest_fnode_id")
     FNODE_spatial_location_message.newVariableInt("marked_for_removal")
 
     FNODE_bucket_location_message = model.newMessageBucket("fnode_bucket_location_message")
@@ -848,6 +849,7 @@ if INCLUDE_FIBRE_NETWORK:
     FNODE_bucket_location_message.newVariableFloat("k_elast")
     FNODE_bucket_location_message.newVariableFloat("d_dumping")
     FNODE_bucket_location_message.newVariableFloat("degradation")
+    FNODE_bucket_location_message.newVariableFloat("reinforcement")
     FNODE_bucket_location_message.newVariableInt("marked_for_removal")
     FNODE_bucket_location_message.newVariableArrayFloat("equilibrium_distance", MAX_CONNECTIVITY) # each segment can have a different equilibrium distance depending on the rest length assigned during network generation
     FNODE_bucket_location_message.newVariableArrayInt("linked_nodes", MAX_CONNECTIVITY) # store the index of the linked nodes, which is a proxy for the bucket id
@@ -1054,8 +1056,11 @@ if INCLUDE_FIBRE_NETWORK:
     FNODE_agent.newVariableFloat("elastic_energy")
     FNODE_agent.newVariableUInt8("connectivity_count", 0)
     FNODE_agent.newVariableFloat("degradation", 0.0)
+    FNODE_agent.newVariableFloat("reinforcement", 0.0)
+    FNODE_agent.newVariableInt("secreted", 0)
     FNODE_agent.newVariableInt("marked_for_removal", 0)
     FNODE_agent.newVariableInt("closest_fnode_id", -1)
+    FNODE_agent.newVariableInt("second_closest_fnode_id", -1)
     FNODE_agent.newVariableArrayFloat("linked_nodes", MAX_CONNECTIVITY)
     FNODE_agent.newVariableUInt8("clamped_bx_pos")
     FNODE_agent.newVariableUInt8("clamped_bx_neg")
@@ -1439,8 +1444,11 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableFloat("elastic_energy", 0.0)
                 instance.setVariableUInt8("connectivity_count", int(np.sum(linked_nodes > -1)))
                 instance.setVariableFloat("degradation", 0.0)
+                instance.setVariableFloat("reinforcement", 0.0)
+                instance.setVariableInt("secreted", 0)
                 instance.setVariableInt("marked_for_removal", 0)
                 instance.setVariableInt("closest_fnode_id", -1)
+                instance.setVariableInt("second_closest_fnode_id", -1)
                 instance.setVariableUInt8("clamped_bx_pos", 0)
                 instance.setVariableUInt8("clamped_bx_neg", 0)
                 instance.setVariableUInt8("clamped_by_pos", 0)
@@ -2116,6 +2124,11 @@ if INCLUDE_FIBRE_NETWORK:
     fnode_agent_log.logStandardDevFloat("f_bz_pos")
     fnode_agent_log.logStandardDevFloat("f_bz_neg")
 
+    fnode_agent_log.logSumFloat("degradation")
+    fnode_agent_log.logSumFloat("reinforcement")
+    fnode_agent_log.logSumFloat("elastic_energy")
+    fnode_agent_log.logSumInt("secreted")
+
 if INCLUDE_FOCAL_ADHESIONS:
     focad_agent_log = logging_config.agent("FOCAD")
     focad_agent_log.logCount()
@@ -2131,6 +2144,11 @@ if INCLUDE_FOCAL_ADHESIONS:
     focad_agent_log.logSumFloat("k_on_eff_rear")
     focad_agent_log.logSumFloat("k_off_0_eff_front")
     focad_agent_log.logSumFloat("k_off_0_eff_rear")
+
+if INCLUDE_CELLS:
+    cell_agent_log = logging_config.agent("CELL")
+    cell_agent_log.logCount()
+    cell_agent_log.logSumInt("dead")
 
 step_log = pyflamegpu.StepLoggingConfig(logging_config)
 step_log.setFrequency(1) # if 1, data will be logged every step
@@ -2286,6 +2304,7 @@ POISSON_RATIO_OVER_TIME = -1 * incL_dir1 / incL_dir2
 def manageLogs(steps, is_ensemble, idx):
     global SAVE_EVERY_N_STEPS, SAVE_PICKLE, SHOW_PLOTS, RES_PATH, MODEL_CONFIG, EXECUTION_TIME
     global BPOS_OVER_TIME, BFORCE_OVER_TIME, BFORCE_SHEAR_OVER_TIME, POISSON_RATIO_OVER_TIME, OSCILLATORY_STRAIN_OVER_TIME
+    global INCLUDE_FIBRE_NETWORK, INCLUDE_CELLS, INCLUDE_FOCAL_ADHESIONS
     ecm_agent_counts = [None] * len(steps)
     counter = 0
     BFORCE = make_dataclass("BFORCE",
@@ -2299,6 +2318,8 @@ def manageLogs(steps, is_ensemble, idx):
     BFORCE_SHEAR_OVER_TIME = []
     FOCAD_METRICS_OVER_TIME = []
     FOCAD_POLARITY_METRICS_OVER_TIME = []
+    FNODE_METRICS_OVER_TIME = []
+    CELL_METRICS_OVER_TIME = []
 
     if INCLUDE_FIBRE_NETWORK:
         for step in steps:
@@ -2338,6 +2359,33 @@ def manageLogs(steps, is_ensemble, idx):
                     BFORCE_OVER_TIME = pd.concat([BFORCE_OVER_TIME, step_bforce], ignore_index=True)
                     # BFORCE_SHEAR_OVER_TIME = BFORCE_SHEAR_OVER_TIME.append(step_bforce_shear, ignore_index=True) # deprecated
                     BFORCE_SHEAR_OVER_TIME = pd.concat([BFORCE_SHEAR_OVER_TIME, step_bforce_shear], ignore_index=True)
+
+                # Accumulate FNODE matrix remodeling metrics
+                n_fnodes = fnode_agents.getCount()
+                sum_degradation = fnode_agents.getSumFloat("degradation")
+                sum_reinforcement = fnode_agents.getSumFloat("reinforcement")
+                sum_elastic_energy = fnode_agents.getSumFloat("elastic_energy")
+                n_secreted = fnode_agents.getSumInt("secreted")
+                mean_degradation = (sum_degradation / n_fnodes) if n_fnodes > 0 else 0.0
+                mean_reinforcement = (sum_reinforcement / n_fnodes) if n_fnodes > 0 else 0.0
+                mean_elastic_energy = (sum_elastic_energy / n_fnodes) if n_fnodes > 0 else 0.0
+
+                step_fnode_met = pd.DataFrame([{
+                    "n_fnodes_total": n_fnodes,
+                    "n_fnodes_secreted_cumulative": n_secreted,
+                    "sum_degradation": sum_degradation,
+                    "sum_reinforcement": sum_reinforcement,
+                    "sum_elastic_energy": sum_elastic_energy,
+                    "mean_degradation": mean_degradation,
+                    "mean_reinforcement": mean_reinforcement,
+                    "mean_elastic_energy": mean_elastic_energy,
+                    "net_remodeling_total": sum_reinforcement - sum_degradation,
+                }])
+                if len(FNODE_METRICS_OVER_TIME) == 0:
+                    FNODE_METRICS_OVER_TIME = step_fnode_met
+                else:
+                    FNODE_METRICS_OVER_TIME = pd.concat([FNODE_METRICS_OVER_TIME, step_fnode_met], ignore_index=True)
+
                 counter += 1
 
     if INCLUDE_FOCAL_ADHESIONS:
@@ -2418,6 +2466,25 @@ def manageLogs(steps, is_ensemble, idx):
                     FOCAD_POLARITY_METRICS_OVER_TIME = step_fpol
                 else:
                     FOCAD_POLARITY_METRICS_OVER_TIME = pd.concat([FOCAD_POLARITY_METRICS_OVER_TIME, step_fpol], ignore_index=True)
+
+    if INCLUDE_CELLS:
+        for step in steps:
+            stepcount = step.getStepCount()
+            if stepcount % SAVE_EVERY_N_STEPS == 0 or stepcount == 1:
+                cell_agents = step.getAgent("CELL")
+                n_cells = cell_agents.getCount()
+                n_dead = cell_agents.getSumInt("dead")
+                n_alive = n_cells - n_dead
+                step_cell_met = pd.DataFrame([{
+                    "n_cells_total": n_cells,
+                    "n_cells_alive": n_alive,
+                    "n_cells_dead": n_dead,
+                }])
+                if len(CELL_METRICS_OVER_TIME) == 0:
+                    CELL_METRICS_OVER_TIME = step_cell_met
+                else:
+                    CELL_METRICS_OVER_TIME = pd.concat([CELL_METRICS_OVER_TIME, step_cell_met], ignore_index=True)
+
     if not is_ensemble:
         print()
         print("============================")
@@ -2450,6 +2517,16 @@ def manageLogs(steps, is_ensemble, idx):
             print("FA POLARITY METRICS OVER TIME")
             print(FOCAD_POLARITY_METRICS_OVER_TIME)
             print()
+        if INCLUDE_FIBRE_NETWORK and len(FNODE_METRICS_OVER_TIME) > 0:
+            print("============================")
+            print("FNODE MATRIX REMODELING METRICS OVER TIME")
+            print(FNODE_METRICS_OVER_TIME)
+            print()
+        if INCLUDE_CELLS and len(CELL_METRICS_OVER_TIME) > 0:
+            print("============================")
+            print("CELL POPULATION METRICS OVER TIME")
+            print(CELL_METRICS_OVER_TIME)
+            print()
     # Saving pickle
     if SAVE_PICKLE:
         file_name = f'output_data_{idx}.pickle'
@@ -2460,6 +2537,8 @@ def manageLogs(steps, is_ensemble, idx):
                          'BFORCE_SHEAR_OVER_TIME': BFORCE_SHEAR_OVER_TIME,
                          'FOCAD_METRICS_OVER_TIME': FOCAD_METRICS_OVER_TIME,
                          'FOCAD_POLARITY_METRICS_OVER_TIME': FOCAD_POLARITY_METRICS_OVER_TIME,
+                         'FNODE_METRICS_OVER_TIME': FNODE_METRICS_OVER_TIME,
+                         'CELL_METRICS_OVER_TIME': CELL_METRICS_OVER_TIME,
                          'POISSON_RATIO_OVER_TIME': POISSON_RATIO_OVER_TIME,
                          'OSCILLATORY_STRAIN_OVER_TIME': OSCILLATORY_STRAIN_OVER_TIME,
                          'MODEL_CONFIG': MODEL_CONFIG,

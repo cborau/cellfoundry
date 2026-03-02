@@ -3,19 +3,26 @@
 Plot boundary results from pickle file saved during simulation.
 
 Usage:
-    python plot_boundary_results.py [pickle_file]
-
-If no file is provided, defaults to result_files/output_data.pickle
-
-Example:
-    python plot_boundary_results.py result_files/output_data_0.pickle
-    python plot_boundary_results.py  # Uses result_files/output_data.pickle
+    python plot_boundary_results.py
+    python plot_boundary_results.py --pickle ../result_files/output_data_0.pickle
 """
 
+import argparse
 import pickle
-import sys
 import pathlib
 from helper_module import ModelParameterConfig
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Plot boundary results from pickle file")
+    parser.add_argument("--pickle", default="../result_files/output_data_0.pickle",
+                        help="Path to simulation pickle file")
+    parser.add_argument("--outdir", default="results",
+                        help="Directory for output plots")
+    # Keep backward compat: positional pickle path
+    parser.add_argument("pickle_positional", nargs="?", default=None,
+                        help=argparse.SUPPRESS)
+    return parser.parse_args()
 
 
 def load_results(pickle_file):
@@ -89,20 +96,18 @@ def print_summary(data):
 
 
 def main():
-    default_pickle = "result_files/output_data_0.pickle"
-    
-    if len(sys.argv) < 2:
-        pickle_file = default_pickle
-    else:
-        pickle_file = sys.argv[1]
-    
+    args = parse_args()
+    pickle_file = args.pickle_positional if args.pickle_positional else args.pickle
+    outdir = pathlib.Path(args.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
     try:
         data = load_results(pickle_file)
         print_summary(data)
         plot_results(data, show=True)
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        print(f"Error: {e}", file=__import__("sys").stderr)
+        __import__("sys").exit(1)
 
 
 if __name__ == '__main__':

@@ -692,6 +692,8 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
         force = list()
         elastic_energy = list()
         degradation = list()
+        reinforcement = list()
+        secreted = list()
         linked_nodes_all = list()
 
         av = agent.getPopulationData()
@@ -706,6 +708,8 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             force.append(force_ai)
             elastic_energy.append(ai.getVariableFloat("elastic_energy"))
             degradation.append(ai.getVariableFloat("degradation"))
+            reinforcement.append(ai.getVariableFloat("reinforcement"))
+            secreted.append(ai.getVariableInt("secreted"))
             linked_nodes_all.append(ai.getVariableArrayFloat("linked_nodes"))
 
         if len(ids) > 0:
@@ -721,6 +725,8 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
         force = [force[i] for i in sorted_indices]
         elastic_energy = [elastic_energy[i] for i in sorted_indices]
         degradation = [degradation[i] for i in sorted_indices]
+        reinforcement = [reinforcement[i] for i in sorted_indices]
+        secreted = [secreted[i] for i in sorted_indices]
         linked_nodes_all = [linked_nodes_all[i] for i in sorted_indices]
 
         n_fnodes = len(ids)
@@ -862,6 +868,20 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
                 file.write("{:.4f} \n".format(d_ai))
             for _ in range(8):
                 file.write("0.0 \n")
+
+            file.write("SCALARS reinforcement float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for r_ai in reinforcement:
+                file.write("{:.4f} \n".format(r_ai))
+            for _ in range(8):
+                file.write("0.0 \n")
+
+            file.write("SCALARS secreted int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for s_ai in secreted:
+                file.write("{} \n".format(s_ai))
+            for _ in range(8):
+                file.write("0 \n")
 
             file.write("VECTORS velocity float\n")
             for v_ai in velocity:

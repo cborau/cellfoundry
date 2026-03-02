@@ -1,21 +1,24 @@
 """
-Build CELL population reports from CELL VTK outputs.
+Build CELL population reports from pickle or VTK outputs.
 
 Tracks per-step:
 - total cells
 - alive/dead cells (from dead flag)
-- new cell ids (proliferation proxy)
-- lost cell ids (disappearance/death proxy)
-- newly dead by cause (from dead_by)
+- new cell ids (proliferation proxy, VTK only)
+- lost cell ids (disappearance/death proxy, VTK only)
+- newly dead by cause (from dead_by, VTK only)
 """
 
 from __future__ import annotations
 
 import argparse
+import pickle
 import re
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 
@@ -28,10 +31,25 @@ CAUSE_LABELS = {
 }
 
 
+class _DummyModelParameterConfig:
+    pass
+
+
+class _SafeUnpickler(pickle.Unpickler):
+    def find_class(self, module: str, name: str) -> Any:
+        if module == "helper_module" and name == "ModelParameterConfig":
+            return _DummyModelParameterConfig
+        return super().find_class(module, name)
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate CELL population/death reports from cells_tXXXX.vtk files")
-    parser.add_argument("--indir", default="result_files", help="Directory containing cells_tXXXX.vtk")
-    parser.add_argument("--outdir", default="result_files", help="Directory for CSV/plots")
+    parser = argparse.ArgumentParser(description="Generate CELL population/death reports from pickle or VTK files")
+    parser.add_argument("--source", choices=["pickle", "vtk"], default="pickle",
+                        help="Data source: 'pickle' (default) or 'vtk'")
+    parser.add_argument("--pickle", default="../result_files/output_data_0.pickle",
+                        help="Path to simulation pickle file (used when --source pickle)")
+    parser.add_argument("--indir", default="../result_files", help="Directory containing cells_tXXXX.vtk (used when --source vtk)")
+    parser.add_argument("--outdir", default="results", help="Directory for CSV/plots")
     parser.add_argument("--tag", default="latest", help="Tag suffix for output filenames")
     parser.add_argument("--show", action="store_true", help="Display figures interactively")
     return parser.parse_args()
@@ -66,7 +84,7 @@ def read_cells_vtk(path: Path) -> dict[int, tuple[int, int]]:
     return by_cell
 
 
-def build_timeseries(vtk_files: list[Path]) -> pd.DataFrame:
+def build_timeseries_from_vtk(vtk_files: list[Path]) -> pd.DataFrame:
     rows = []
     prev_ids: set[int] | None = None
     prev_dead_map: dict[int, int] = {}
@@ -132,6 +150,35 @@ def build_timeseries(vtk_files: list[Path]) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("step").reset_index(drop=True)
 
 
+def build_timeseries_from_pickle(pickle_path: Path) -> pd.DataFrame:
+    """Build timeseries from CELL_METRICS_OVER_TIME stored in pickle."""
+    if not pickle_path.exists():
+        raise FileNotFoundError(f"Pickle file not found: {pickle_path}")
+    with pickle_path.open("rb") as f:
+        data = _SafeUnpickler(f).load()
+
+    cell_met = data.get("CELL_METRICS_OVER_TIME")
+    if cell_met is None or (isinstance(cell_met, list) and len(cell_met) == 0):
+        raise ValueError("CELL_METRICS_OVER_TIME not found or empty in pickle. "
+                         "Re-run the simulation to generate CELL metrics, or use --source vtk.")
+    if isinstance(cell_met, list):
+        cell_met = pd.DataFrame(cell_met)
+
+    df = cell_met.copy().reset_index(drop=True)
+    df.insert(0, "step", range(1, len(df) + 1))
+
+    # Per-ID and per-cause columns are not available from pickle
+    for col in ("new_cell_ids", "lost_cell_ids", "newly_dead_ids",
+                "newly_dead_hypoxia", "newly_dead_starvation",
+                "newly_dead_mechanical", "newly_dead_cumulative_damage",
+                "dead_hypoxia_total", "dead_starvation_total",
+                "dead_mechanical_total", "dead_cumulative_damage_total"):
+        if col not in df.columns:
+            df[col] = np.nan
+
+    return df
+
+
 def save_summary(df: pd.DataFrame, outdir: Path, tag: str) -> None:
     final = df.iloc[-1]
     summary = {
@@ -162,16 +209,18 @@ def make_plots(df: pd.DataFrame, outdir: Path, tag: str, show: bool) -> None:
     fig.tight_layout()
     fig.savefig(outdir / f"cell_population_trends_{tag}.png", dpi=180)
 
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(df["step"], df["new_cell_ids"], label="new_cell_ids", linewidth=2)
-    ax.plot(df["step"], df["newly_dead_ids"], label="newly_dead_ids", linewidth=2)
-    ax.plot(df["step"], df["lost_cell_ids"], label="lost_cell_ids", linewidth=2)
-    ax.set_xlabel("Step")
-    ax.set_ylabel("Events per step")
-    ax.grid(alpha=0.25)
-    ax.legend(loc="best")
-    fig.tight_layout()
-    fig.savefig(outdir / f"cell_population_events_{tag}.png", dpi=180)
+    # Events plot only when per-ID data is available (VTK source)
+    if not df["new_cell_ids"].isna().all():
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.plot(df["step"], df["new_cell_ids"], label="new_cell_ids", linewidth=2)
+        ax.plot(df["step"], df["newly_dead_ids"], label="newly_dead_ids", linewidth=2)
+        ax.plot(df["step"], df["lost_cell_ids"], label="lost_cell_ids", linewidth=2)
+        ax.set_xlabel("Step")
+        ax.set_ylabel("Events per step")
+        ax.grid(alpha=0.25)
+        ax.legend(loc="best")
+        fig.tight_layout()
+        fig.savefig(outdir / f"cell_population_events_{tag}.png", dpi=180)
 
     if show:
         plt.show()
@@ -181,18 +230,25 @@ def make_plots(df: pd.DataFrame, outdir: Path, tag: str, show: bool) -> None:
 
 def main() -> None:
     args = parse_args()
-    indir = Path(args.indir)
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    vtk_files = sorted(indir.glob("cells_t*.vtk"))
-    if not vtk_files:
-        raise FileNotFoundError(f"No cells_t*.vtk files found in {indir}")
+    if args.source == "vtk":
+        indir = Path(args.indir)
+        vtk_files = sorted(indir.glob("cells_t*.vtk"))
+        if not vtk_files:
+            raise FileNotFoundError(f"No cells_t*.vtk files found in {indir}")
+        print(f"[VTK] Found {len(vtk_files)} cell VTK files in {indir}")
+        df = build_timeseries_from_vtk(vtk_files)
+    else:
+        pickle_path = Path(args.pickle)
+        print(f"[Pickle] Loading CELL metrics from {pickle_path}")
+        df = build_timeseries_from_pickle(pickle_path)
 
-    df = build_timeseries(vtk_files)
     df.to_csv(outdir / f"cell_population_timeseries_{args.tag}.csv", index=False)
     save_summary(df, outdir, args.tag)
     make_plots(df, outdir, args.tag, args.show)
+    print(f"Results saved to {outdir}")
 
 
 if __name__ == "__main__":

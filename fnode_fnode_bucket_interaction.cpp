@@ -90,7 +90,8 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket,
   float k_elast = 0.0; //Equivalent elastic constant of two springs in series (agent and message)
   const float FIBRE_SEGMENT_K_ELAST = FLAMEGPU->environment.getProperty<float>("FIBRE_SEGMENT_K_ELAST");
   const float agent_degradation = FLAMEGPU->getVariable<float>("degradation");
-  const float agent_k_elast = fmaxf(0.0f, FIBRE_SEGMENT_K_ELAST * (1.0f - agent_degradation));
+  const float agent_reinforcement = FLAMEGPU->getVariable<float>("reinforcement");
+  const float agent_k_elast = fmaxf(0.0f, FIBRE_SEGMENT_K_ELAST * (1.0f - agent_degradation + agent_reinforcement));
    
   // Dumping constant of the fibre 
   const float d_dumping = FLAMEGPU->getVariable<float>("d_dumping");
@@ -159,7 +160,8 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket,
       message_vy = message.getVariable<float>("vy");
       message_vz = message.getVariable<float>("vz");
       message_degradation = message.getVariable<float>("degradation");
-      message_k_elast = fmaxf(0.0f, FIBRE_SEGMENT_K_ELAST * (1.0f - message_degradation));
+      const float message_reinforcement = message.getVariable<float>("reinforcement");
+      message_k_elast = fmaxf(0.0f, FIBRE_SEGMENT_K_ELAST * (1.0f - message_degradation + message_reinforcement));
       
       dir_x = agent_x - message_x; 
       dir_y = agent_y - message_y; 

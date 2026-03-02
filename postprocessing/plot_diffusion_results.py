@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 from tools.vtk_timeseries_loader import load_vtk_series, ts_by_point_id, ts_nearest_point, plot_vars_over_time
 
-folder = "./result_files"
+folder = "../result_files"
 
 df_cells = load_vtk_series(folder, pattern="cells_t*.vtk")
 df_ecm   = load_vtk_series(folder, pattern="ecm_data_t*.vtk")
