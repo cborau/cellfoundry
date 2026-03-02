@@ -21,11 +21,7 @@ from helper_module import compute_expected_boundary_pos_from_corners, getRandomV
 
 # TODO LIST:
 # Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
-# Add matrix degradation / deposition. Easy: Modifying FNODE properties, Complex: removing / adding FNODE agents (which would require updating the connectivity matrix)
-# Include in materials and methods matrix remodeling, including network mechanics
-# Add matrix remodeling report
-# Add a new variable for FNODE reinforcement (e.g. crosslinking, or matrix deposition)
-# Add a new variable to track new FNODES born from remodeling
+# Prepare model initialization/output for automatic parameter tuning (e.g. with Optuna) by allowing to load parameters from a config file or command-line arguments, and by saving outputs in a structured way for easy analysis.
 
 start_time = time.time()
 
