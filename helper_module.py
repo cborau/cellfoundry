@@ -2796,6 +2796,8 @@ def recompute_derived_params(ns: dict) -> None:
         ns["CELL_NUCLEUS_RADIUS"] = _map1(lambda r: r / 2, cr)
         ns["CELL_FNODE_EXCLUSION_DISTANCE"] = list(cr) if _is_list(cr) else cr
         ns["CELL_CELL_ADHESION_RANGE"] = _map1(lambda r: 0.5 * r, cr)
+        _max_cr = max(cr) if _is_list(cr) else cr
+        ns["MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION"] = 3.0 * _max_cr
     if "CELL_SPEED_REF" in ns:
         cs = ns["CELL_SPEED_REF"]
         ns["BROWNIAN_MOTION_STRENGTH"] = _map1(lambda s: s / 10.0, cs)

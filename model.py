@@ -123,7 +123,7 @@ ECM_BOUNDARY_EQUILIBRIUM_DISTANCE = 0.0
 ECM_VOXEL_VOLUME = (L0_x / (ECM_AGENTS_PER_DIR[0] - 1)) * (L0_y / (ECM_AGENTS_PER_DIR[1] - 1)) * (L0_z / (ECM_AGENTS_PER_DIR[2] - 1))
 MAX_SEARCH_RADIUS_VASCULARIZATION = ECM_ECM_EQUILIBRIUM_DISTANCE  # this strongly affects the number of bins and therefore the memory allocated for simulations (more bins -> more memory -> faster (in theory))
 MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION = ECM_ECM_EQUILIBRIUM_DISTANCE # this radius is used to find ECM agents
-MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION = 2 * ECM_ECM_EQUILIBRIUM_DISTANCE # this radius is used to check if cells interact with each other
+# NOTE: MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION is defined after CELL_RADIUS (see below)
 
 OSCILLATORY_SHEAR_ASSAY = False  # if True, BOUNDARY_DISP_RATES_PARALLEL options are overrun but used to make the boundaries oscillate in their corresponding planes following a sin() function
 MAX_STRAIN = 0.25  # maximum strain applied during oscillatory shear assay (used to compute OSCILLATORY_AMPLITUDE)
@@ -153,6 +153,7 @@ if OSCILLATORY_SHEAR_ASSAY:
 # | FIBRE NETWORK PARAMETERS                                           |
 # +====================================================================+
 INCLUDE_FIBRE_NETWORK = True
+NETWORK_FILE = 'network_3d.pkl'  # path to the .pkl file with node_coords + connectivity
 
 MAX_CONNECTIVITY = 8 # must match hard-coded C++ values
 # NOTE: These are calibrated model parameters (effective segment-level mechanics), not universal material constants.
@@ -230,6 +231,11 @@ BROWNIAN_MOTION_STRENGTH = [s / 10.0 for s in CELL_SPEED_REF] # [um/s] Strength 
 CELL_CELL_REPULSION_K = [2.0 * k for k in CELL_K_ELAST]  # [nN/um] contact exclusion stiffness
 CELL_CELL_ADHESION_K = [0.2 * k for k in CELL_K_ELAST]  # [nN/um] weak cohesion in near-contact shell
 CELL_CELL_ADHESION_RANGE = [0.5 * r for r in CELL_RADIUS]  # [um] adhesive shell thickness outside contact
+# Search radius for the cell-cell spatial message.
+# Must cover the farthest distance at which two cells can interact:
+#   contact distance (r1 + r2) + adhesion shell (max of CELL_CELL_ADHESION_RANGE)
+# Using 3 * max(CELL_RADIUS) provides ~ 2*(R + 0.5*R) with a small margin.
+MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION = 3.0 * max(CELL_RADIUS)  # [um]
 CELL_CELL_DV_MAX = [0.5 * s for s in CELL_SPEED_REF]  # [um/s] cap for cell-cell interaction velocity contribution
 CELL_FNODE_REPULSION_K = [0.5 * k for k in CELL_K_ELAST]  # [nN/um] exclusion stiffness around fibre nodes
 CELL_FNODE_EXCLUSION_DISTANCE = list(CELL_RADIUS)  # [um] minimum distance from cell center to fibre nodes
@@ -464,7 +470,7 @@ for i in range(6):
 
 if INCLUDE_FIBRE_NETWORK:
     nodes, connectivity, n_fib, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, fibre_critical_error = load_fibre_network(
-        file_name='network_3d.pkl',
+        file_name=NETWORK_FILE,
         boundary_coords=BOUNDARY_COORDS,
         epsilon=EPSILON,
         fibre_segment_equilibrium_distance=FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE,
@@ -520,9 +526,6 @@ if INCLUDE_DIFFUSION:
 
 if INCLUDE_CELLS:
     _max_cell_radius = max(CELL_RADIUS) if isinstance(CELL_RADIUS, list) else CELL_RADIUS
-    if MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION < (2 * _max_cell_radius):
-        print('MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION: {0} must be higher than 2 * max(CELL_RADIUS): 2 * {1}'.format(MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION, _max_cell_radius))
-        critical_error = True
     if INCLUDE_FOCAL_ADHESIONS and not INCLUDE_FIBRE_NETWORK: 
         print('ERROR: focal adhesions cannot be included if there is no fibre network to interact with')
         critical_error = True
@@ -2379,6 +2382,7 @@ if pyflamegpu.VISUALISATION and VISUALISATION and not ENSEMBLE:
 
 EXECUTION_TIME = time.time() - start_time
 print("--- EXECUTION TIME: %s seconds ---" % EXECUTION_TIME)
+print(f"[BENCHMARK] EXECUTION_TIME={EXECUTION_TIME:.6f} STEPS={STEPS} TIME_PER_STEP={EXECUTION_TIME/max(STEPS,1):.6f}")
 
 incL_dir1 = (BPOS_OVER_TIME.iloc[:, POISSON_DIRS[0] * 2] - BPOS_OVER_TIME.iloc[:, POISSON_DIRS[0] * 2 + 1]) - (
         BPOS_OVER_TIME.iloc[0, POISSON_DIRS[0] * 2] - BPOS_OVER_TIME.iloc[0, POISSON_DIRS[0] * 2 + 1])
