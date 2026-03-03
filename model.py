@@ -207,6 +207,7 @@ HETEROGENEOUS_DIFFUSION = False  # if True, diffusion coefficient is multiplied 
 # When a parameter below is given as a *scalar*, the helper function
 # _broadcast_cell_type_params() will replicate it to N_CELL_TYPES copies
 # so that every cell type shares the same default value.
+# Use tools/resize_cell_types.py to automatically resize all per-type arrays and automatically update all c++ files using N_CELL_TYPES.
 # --------------------------------------------------------------------------
 N_CELL_TYPES = 3
 
@@ -238,15 +239,19 @@ print(f'Initial Brownian motion strength (per type): {BROWNIAN_MOTION_STRENGTH} 
 
 # Per-cell-type cell cycle timing
 debug_acc = 40000
-CYCLE_PHASE_G1_DURATION = [10.0 * 3600 / debug_acc] * N_CELL_TYPES #[s]
-CYCLE_PHASE_S_DURATION = [8.0 * 3600 / debug_acc] * N_CELL_TYPES #[s]
-CYCLE_PHASE_G2_DURATION = [4.0 * 3600 / debug_acc] * N_CELL_TYPES #[s]
-CYCLE_PHASE_M_DURATION = [2.0 * 3600 / debug_acc] * N_CELL_TYPES #[s]
-CYCLE_PHASE_G1_START = [0.0] * N_CELL_TYPES #[s]
-CYCLE_PHASE_S_START = [g1 for g1 in CYCLE_PHASE_G1_DURATION]
-CYCLE_PHASE_G2_START = [g1 + s for g1, s in zip(CYCLE_PHASE_G1_DURATION, CYCLE_PHASE_S_DURATION)]
-CYCLE_PHASE_M_START = [g1 + s + g2 for g1, s, g2 in zip(CYCLE_PHASE_G1_DURATION, CYCLE_PHASE_S_DURATION, CYCLE_PHASE_G2_DURATION)]
-CELL_CYCLE_DURATION = [g1 + s + g2 + m for g1, s, g2, m in zip(CYCLE_PHASE_G1_DURATION, CYCLE_PHASE_S_DURATION, CYCLE_PHASE_G2_DURATION, CYCLE_PHASE_M_DURATION)] # typically 24h 
+_g1 = 10.0 * 3600 / debug_acc
+_s  = 8.0 * 3600 / debug_acc
+_g2 = 4.0 * 3600 / debug_acc
+_m  = 2.0 * 3600 / debug_acc
+CYCLE_PHASE_G1_DURATION = [_g1, _g1, _g1]  # [s]
+CYCLE_PHASE_S_DURATION  = [_s, _s, _s]     # [s]
+CYCLE_PHASE_G2_DURATION = [_g2, _g2, _g2]  # [s]
+CYCLE_PHASE_M_DURATION  = [_m, _m, _m]     # [s]
+CYCLE_PHASE_G1_START = [0.0, 0.0, 0.0]  # [s]
+CYCLE_PHASE_S_START  = [CYCLE_PHASE_G1_DURATION[0], CYCLE_PHASE_G1_DURATION[1], CYCLE_PHASE_G1_DURATION[2]]
+CYCLE_PHASE_G2_START = [CYCLE_PHASE_G1_DURATION[0] + CYCLE_PHASE_S_DURATION[0], CYCLE_PHASE_G1_DURATION[1] + CYCLE_PHASE_S_DURATION[1], CYCLE_PHASE_G1_DURATION[2] + CYCLE_PHASE_S_DURATION[2]]
+CYCLE_PHASE_M_START  = [CYCLE_PHASE_G1_DURATION[0] + CYCLE_PHASE_S_DURATION[0] + CYCLE_PHASE_G2_DURATION[0], CYCLE_PHASE_G1_DURATION[1] + CYCLE_PHASE_S_DURATION[1] + CYCLE_PHASE_G2_DURATION[1], CYCLE_PHASE_G1_DURATION[2] + CYCLE_PHASE_S_DURATION[2] + CYCLE_PHASE_G2_DURATION[2]]
+CELL_CYCLE_DURATION  = [CYCLE_PHASE_G1_DURATION[0] + CYCLE_PHASE_S_DURATION[0] + CYCLE_PHASE_G2_DURATION[0] + CYCLE_PHASE_M_DURATION[0], CYCLE_PHASE_G1_DURATION[1] + CYCLE_PHASE_S_DURATION[1] + CYCLE_PHASE_G2_DURATION[1] + CYCLE_PHASE_M_DURATION[1], CYCLE_PHASE_G1_DURATION[2] + CYCLE_PHASE_S_DURATION[2] + CYCLE_PHASE_G2_DURATION[2] + CYCLE_PHASE_M_DURATION[2]]  # typically 24h
 
 # Per-cell-type cycle multipliers (Phase 1)
 DIVISION_RATE_MULTIPLIER = [1.0, 1.15, 0.85]  # [-] scales division probability per cell type
