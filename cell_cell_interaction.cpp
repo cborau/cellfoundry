@@ -67,16 +67,18 @@ FLAMEGPU_AGENT_FUNCTION(cell_cell_interaction, flamegpu::MessageSpatial3D, flame
   }
 
   const int agent_id = FLAMEGPU->getVariable<int>("id");
+  const int agent_cell_type = FLAMEGPU->getVariable<int>("cell_type");
   const float agent_x = FLAMEGPU->getVariable<float>("x");
   const float agent_y = FLAMEGPU->getVariable<float>("y");
   const float agent_z = FLAMEGPU->getVariable<float>("z");
   const float agent_r = FLAMEGPU->getVariable<float>("radius");
 
-  const float CELL_D_DUMPING = FLAMEGPU->environment.getProperty<float>("CELL_D_DUMPING");
-  const float CELL_CELL_REPULSION_K = FLAMEGPU->environment.getProperty<float>("CELL_CELL_REPULSION_K");
-  const float CELL_CELL_ADHESION_K = FLAMEGPU->environment.getProperty<float>("CELL_CELL_ADHESION_K");
-  const float CELL_CELL_ADHESION_RANGE = FLAMEGPU->environment.getProperty<float>("CELL_CELL_ADHESION_RANGE");
-  const float CELL_CELL_DV_MAX = FLAMEGPU->environment.getProperty<float>("CELL_CELL_DV_MAX");
+  const uint8_t N_CELL_TYPES = 3; // WARNING: must match main python model N_CELL_TYPES
+  const float CELL_D_DUMPING = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_D_DUMPING", agent_cell_type);
+  const float CELL_CELL_REPULSION_K = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_CELL_REPULSION_K", agent_cell_type);
+  const float CELL_CELL_ADHESION_K = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_CELL_ADHESION_K", agent_cell_type);
+  const float CELL_CELL_ADHESION_RANGE = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_CELL_ADHESION_RANGE", agent_cell_type);
+  const float CELL_CELL_DV_MAX = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_CELL_DV_MAX", agent_cell_type);
 
   float fx_sum = 0.0f;
   float fy_sum = 0.0f;

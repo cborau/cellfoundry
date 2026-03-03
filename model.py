@@ -164,22 +164,23 @@ FIBRE_NODE_BOUNDARY_INTERACTION_RADIUS = 0.05
 FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE = 0.0
 MAX_SEARCH_RADIUS_FNODES = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / 10.0 # must me smaller than FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
 FIBRE_NODE_REPULSION_K = 0.2 * FIBRE_SEGMENT_K_ELAST  # [nN/um] Short-range FNODE-FNODE exclusion stiffness (kept below segment stiffness)
-
+# WARNING: THESE VARIABLES SIZE DEPENDS ON N_CELL_TYPES (DEFINED BELOW IN THE CELL PARAMETERS SECTION)
 # FNODE remodeling (degradation/deposition + birth/death)
 INCLUDE_NETWORK_REMODELING = True
-FNODE_DEGRADATION_RATE = 5.0e-4  # [1/s] per-neighbor degradation contribution
-FNODE_DEPOSITION_RATE = 2.0e-4  # [1/s] baseline repair/deposition
-FNODE_CELL_DEGRADATION_RADIUS = 0.75 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE  # [um]
-FNODE_BIRTH_K_0 = 1000 * 2.0e-3  # [1/s] baseline probability rate for CELL-driven FNODE birth
-FNODE_BIRTH_K_MAX = 1000 * 2.0e-3  # [1/s] gated additive birth-rate gain (matches FOCAD-style formulation)
-FNODE_BIRTH_SPECIES_INDEX = 0
-FNODE_BIRTH_K_C = 5.0  # concentration half-saturation for birth gate
-FNODE_BIRTH_HILL_CONC = 2.0
-FNODE_BIRTH_K_SIGMA = 0.1  # [kPa] stress half-saturation for birth gate
-FNODE_BIRTH_HILL_SIGMA = 1.0
-FNODE_BIRTH_RADIUS = 0.5 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE  # [um] newborn offset around CELL center
-FNODE_BIRTH_LINK_MAX_DISTANCE = 2.0 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE  # [um] parent FNODE search radius
-FNODE_BIRTH_REFRACTORY = 20.0  # [s]
+FNODE_DEGRADATION_RATE = [5.0e-4, 5.0e-4, 5.0e-4]  # [1/s] per-neighbor degradation contribution (per cell-type)
+FNODE_DEPOSITION_RATE = [2.0e-4, 2.0e-4, 2.0e-4]  # [1/s] baseline repair/deposition (per cell-type)
+FNODE_CELL_DEGRADATION_RADIUS = 0.75 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE  # [um] cutoff radius (scalar)
+# CELL-driven FNODE birth — per-cell-type arrays
+FNODE_BIRTH_K_0 = [2.0, 2.0, 2.0]  # [1/s] baseline probability rate for CELL-driven FNODE birth
+FNODE_BIRTH_K_MAX = [2.0, 2.0, 2.0]  # [1/s] gated additive birth-rate gain
+FNODE_BIRTH_SPECIES_INDEX = 0  # species index (global, same for all types)
+FNODE_BIRTH_K_C = [5.0, 5.0, 5.0]  # concentration half-saturation for birth gate
+FNODE_BIRTH_HILL_CONC = [2.0, 2.0, 2.0]
+FNODE_BIRTH_K_SIGMA = [0.1, 0.1, 0.1]  # [kPa] stress half-saturation for birth gate
+FNODE_BIRTH_HILL_SIGMA = [1.0, 1.0, 1.0]
+FNODE_BIRTH_RADIUS = [0.5 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, 0.5 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, 0.5 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE]  # [um] newborn offset around CELL center
+FNODE_BIRTH_LINK_MAX_DISTANCE = [2.0 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, 2.0 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, 2.0 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE]   # [um] parent FNODE search radius
+FNODE_BIRTH_REFRACTORY = [20.0, 20.0, 20.0]  # [s]
 
 
 # +====================================================================+
@@ -199,6 +200,16 @@ HETEROGENEOUS_DIFFUSION = False  # if True, diffusion coefficient is multiplied 
 # +====================================================================+
 # | CELL PARAMETERS                                                    |
 # +====================================================================+
+# --- Per-cell-type configuration ------------------------------------------
+# N_CELL_TYPES controls the length of all per-type array variables below.
+# WARNING: must match the hard-coded N_CELL_TYPES in every .cpp agent
+# function that reads per-type environment arrays (same pattern as N_SPECIES).
+# When a parameter below is given as a *scalar*, the helper function
+# _broadcast_cell_type_params() will replicate it to N_CELL_TYPES copies
+# so that every cell type shares the same default value.
+# --------------------------------------------------------------------------
+N_CELL_TYPES = 3
+
 INCLUDE_CELLS = True
 INCLUDE_CELL_CELL_INTERACTION = False # TODO: implement cell-cell repulsion and adhesion
 INCLUDE_CELL_CYCLE = True # If True, cells go through a simplified cell cycle with G1, S, G2 and M phases, which can affect their behavior. Also includes birth/death dynamics (WARNING: USER-DEFINED in cell_cycle.cpp).
@@ -206,57 +217,78 @@ DEAD_CELLS_DISAPPEAR = False  # If True, dead CELL agents are removed; if False,
 PERIODIC_BOUNDARIES_FOR_CELLS = False
 INCLUDE_CELL_FNODE_REPULSION = True
 N_CELLS = 1
-CELL_K_ELAST = 2.0  # [nN/um]
-CELL_D_DUMPING = 0.4  # [nN·s/um]
-CELL_RADIUS = 8.412 #ECM_ECM_EQUILIBRIUM_DISTANCE / 2 # [um]
-CELL_NUCLEUS_RADIUS = CELL_RADIUS / 2 # [um]
-CELL_SPEED_REF = 0.75 # [um/s] Another option is to define it according to grid distance ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / X -> e.g. in how many steps a cell would move the distance between ECM agents. This is important to avoid missing interactions with ECM agents due to large jumps. WARNING: if cell speed is too high, consider increasing the number of ECM agents (N) or reducing the time step (TIME_STEP) to avoid missing interactions.
-BROWNIAN_MOTION_STRENGTH = CELL_SPEED_REF / 10.0 # [um/s] Strength of random movement added to cell velocity to represent Brownian motion and other non-directed motility.
-CELL_CELL_REPULSION_K = 2.0 * CELL_K_ELAST  # [nN/um] contact exclusion stiffness
-CELL_CELL_ADHESION_K = 0.2 * CELL_K_ELAST  # [nN/um] weak cohesion in near-contact shell
-CELL_CELL_ADHESION_RANGE = 0.5 * CELL_RADIUS  # [um] adhesive shell thickness outside contact
-CELL_CELL_DV_MAX = 0.5 * CELL_SPEED_REF  # [um/s] cap for cell-cell interaction velocity contribution
-CELL_FNODE_REPULSION_K = 0.5 * CELL_K_ELAST  # [nN/um] exclusion stiffness around fibre nodes
-CELL_FNODE_EXCLUSION_DISTANCE = CELL_RADIUS  # [um] minimum distance from cell center to fibre nodes
-CELL_FNODE_DV_MAX = 0.5 * CELL_SPEED_REF  # [um/s] cap for cell-fnode interaction velocity contribution
-print(f'Initial cell speed reference: {CELL_SPEED_REF} um/s')   
-print(f'Initial Brownian motion strength: {BROWNIAN_MOTION_STRENGTH} um/s')
+
+# Per-cell-type mechanical & morphological properties
+# Each is a list of length N_CELL_TYPES.  A scalar is broadcast to all types.
+CELL_K_ELAST = [2.0, 2.0, 2.0]  # [nN/um]
+CELL_D_DUMPING = [0.4, 0.4, 0.4]  # [nN·s/um]
+CELL_RADIUS = [8.412, 8.412, 8.412] # [um]
+CELL_NUCLEUS_RADIUS = [r / 2 for r in CELL_RADIUS] # [um]
+CELL_SPEED_REF = [0.75, 0.75, 0.75] # [um/s] Another option is to define it according to grid distance ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / X. WARNING: if cell speed is too high, consider increasing N or reducing TIME_STEP.
+BROWNIAN_MOTION_STRENGTH = [s / 10.0 for s in CELL_SPEED_REF] # [um/s] Strength of random movement added to cell velocity.
+CELL_CELL_REPULSION_K = [2.0 * k for k in CELL_K_ELAST]  # [nN/um] contact exclusion stiffness
+CELL_CELL_ADHESION_K = [0.2 * k for k in CELL_K_ELAST]  # [nN/um] weak cohesion in near-contact shell
+CELL_CELL_ADHESION_RANGE = [0.5 * r for r in CELL_RADIUS]  # [um] adhesive shell thickness outside contact
+CELL_CELL_DV_MAX = [0.5 * s for s in CELL_SPEED_REF]  # [um/s] cap for cell-cell interaction velocity contribution
+CELL_FNODE_REPULSION_K = [0.5 * k for k in CELL_K_ELAST]  # [nN/um] exclusion stiffness around fibre nodes
+CELL_FNODE_EXCLUSION_DISTANCE = list(CELL_RADIUS)  # [um] minimum distance from cell center to fibre nodes
+CELL_FNODE_DV_MAX = [0.5 * s for s in CELL_SPEED_REF]  # [um/s] cap for cell-fnode interaction velocity contribution
+print(f'Initial cell speed reference (per type): {CELL_SPEED_REF} um/s')   
+print(f'Initial Brownian motion strength (per type): {BROWNIAN_MOTION_STRENGTH} um/s')
+
+# Per-cell-type cell cycle timing
 debug_acc = 40000
-CYCLE_PHASE_G1_DURATION = 10.0 * 3600 / debug_acc #[s]
-CYCLE_PHASE_S_DURATION = 8.0 * 3600 / debug_acc#[s]
-CYCLE_PHASE_G2_DURATION = 4.0 * 3600 / debug_acc#[s]
-CYCLE_PHASE_M_DURATION = 2.0 * 3600 / debug_acc #[s]
-CYCLE_PHASE_G1_START = 0.0 #[s]
-CYCLE_PHASE_S_START = CYCLE_PHASE_G1_DURATION
-CYCLE_PHASE_G2_START = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION
-CYCLE_PHASE_M_START = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION + CYCLE_PHASE_G2_DURATION
-CELL_CYCLE_DURATION = CYCLE_PHASE_G1_DURATION + CYCLE_PHASE_S_DURATION + CYCLE_PHASE_G2_DURATION + CYCLE_PHASE_M_DURATION # typically 24h 
+CYCLE_PHASE_G1_DURATION = [10.0 * 3600 / debug_acc] * N_CELL_TYPES #[s]
+CYCLE_PHASE_S_DURATION = [8.0 * 3600 / debug_acc] * N_CELL_TYPES #[s]
+CYCLE_PHASE_G2_DURATION = [4.0 * 3600 / debug_acc] * N_CELL_TYPES #[s]
+CYCLE_PHASE_M_DURATION = [2.0 * 3600 / debug_acc] * N_CELL_TYPES #[s]
+CYCLE_PHASE_G1_START = [0.0] * N_CELL_TYPES #[s]
+CYCLE_PHASE_S_START = [g1 for g1 in CYCLE_PHASE_G1_DURATION]
+CYCLE_PHASE_G2_START = [g1 + s for g1, s in zip(CYCLE_PHASE_G1_DURATION, CYCLE_PHASE_S_DURATION)]
+CYCLE_PHASE_M_START = [g1 + s + g2 for g1, s, g2 in zip(CYCLE_PHASE_G1_DURATION, CYCLE_PHASE_S_DURATION, CYCLE_PHASE_G2_DURATION)]
+CELL_CYCLE_DURATION = [g1 + s + g2 + m for g1, s, g2, m in zip(CYCLE_PHASE_G1_DURATION, CYCLE_PHASE_S_DURATION, CYCLE_PHASE_G2_DURATION, CYCLE_PHASE_M_DURATION)] # typically 24h 
+
+# Per-cell-type cycle multipliers (Phase 1)
+DIVISION_RATE_MULTIPLIER = [1.0, 1.15, 0.85]  # [-] scales division probability per cell type
+DAMAGE_ACCUMULATION_MULTIPLIER = [1.0, 0.85, 1.25]  # [-] scales damage accrual per cell type
+DAMAGE_REPAIR_MULTIPLIER = [1.0, 1.10, 0.85]  # [-] scales damage repair per cell type
+DAMAGE_DEATH_THRESHOLD = [1.0, 1.0, 0.80]  # [-] damage threshold for death per cell type
+
+# Per-cell-type species multipliers (Phase 3 — Option A)
+# These multiply the base per-species rates (INIT_CELL_*_RATES) for each cell type.
+CELL_CONSUMPTION_MULTIPLIER = [1.0, 1.0, 1.0]  # [-] per-type scaling of consumption rates
+CELL_PRODUCTION_MULTIPLIER = [1.0, 1.0, 1.0]   # [-] per-type scaling of production rates
+CELL_REACTION_MULTIPLIER = [1.0, 1.0, 1.0]      # [-] per-type scaling of reaction rates
+CELL_INIT_CONCENTRATION_MULTIPLIER = [1.0, 1.0, 1.0]  # [-] per-type scaling of initial species concentrations
+
 INIT_ECM_CONCENTRATION_VALS = [20.0, 20.0]  # initial concentration of each species on the ECM agents
 INIT_CELL_CONCENTRATION_VALS = [15.0, 15.0]  # initial concentration of each species on the CELL agents
-INIT_CELL_CONC_MASS_VALS = [x * (4/3 * 3.1415926 * CELL_RADIUS**3) for x in INIT_CELL_CONCENTRATION_VALS]  # initial mass of each species on the CELL agents
+# Reference concentrations (actual per-agent mass is computed at init using per-type volume & conc multiplier).
+INIT_CELL_CONC_MASS_VALS = [x for x in INIT_CELL_CONCENTRATION_VALS]
 INIT_ECM_SAT_CONCENTRATION_VALS = [0.0, 10.0]  # initial saturation concentration of each species on the ECM agents
-INIT_CELL_CONSUMPTION_RATES = [0.001, 0.0]  # consumption rate of each species by the CELL agents 
-INIT_CELL_PRODUCTION_RATES = [0.0, 10.0]  # production rate of each species by the CELL agents 
-INIT_CELL_REACTION_RATES = [0.00018, 0.00018]  # metabolic reaction rates of each species by the CELL agents 
+INIT_CELL_CONSUMPTION_RATES = [0.001, 0.0]  # base consumption rate of each species by the CELL agents 
+INIT_CELL_PRODUCTION_RATES = [0.0, 10.0]  # base production rate of each species by the CELL agents 
+INIT_CELL_REACTION_RATES = [0.00018, 0.00018]  # base metabolic reaction rates of each species by the CELL agents 
 
-# Cell damage and death pathway controls
+# Per-cell-type damage and death pathway controls
 # Note: cell stress variables (sig_xx, sig_eig_1, etc.) are in [nN/um^2], numerically equivalent to [kPa].
-CELL_HYPOXIA_THRESHOLD = 0.03          # [concentration units of C_sp[0]] chronic hypoxia damage threshold
-CELL_NUTRIENT_THRESHOLD = 0.03         # [concentration units of C_sp[1]] chronic nutrient-deprivation threshold
-CELL_STRESS_THRESHOLD = 8.0            # [kPa = nN/um^2] chronic mechanical-overstress damage threshold
-CELL_HYPOXIA_DAMAGE_RATE = 2.0e-4      # [1/s] damage accumulation rate scaling under hypoxia (hour-scale)
-CELL_NUTRIENT_DAMAGE_RATE = 1.5e-4     # [1/s] damage accumulation rate scaling under nutrient deprivation (hour-scale)
-CELL_STRESS_DAMAGE_RATE = 1.0e-4       # [1/s] damage accumulation rate scaling under mechanical overstress (hour-scale)
-CELL_BASAL_DAMAGE_REPAIR_RATE = 5.0e-5 # [1/s] baseline damage repair rate
-CELL_ACUTE_HYPOXIA_THRESHOLD = 0.005   # [concentration units of C_sp[0]] immediate death threshold
-CELL_ACUTE_NUTRIENT_THRESHOLD = 0.005  # [concentration units of C_sp[1]] immediate death threshold
-CELL_ACUTE_STRESS_THRESHOLD = 25.0     # [kPa = nN/um^2] immediate mechanical-failure threshold
+CELL_HYPOXIA_THRESHOLD = [0.03, 0.03, 0.03]          # [concentration units of C_sp[0]] chronic hypoxia damage threshold
+CELL_NUTRIENT_THRESHOLD = [0.03, 0.03, 0.03]         # [concentration units of C_sp[1]] chronic nutrient-deprivation threshold
+CELL_STRESS_THRESHOLD = [8.0, 8.0, 8.0]              # [kPa = nN/um^2] chronic mechanical-overstress damage threshold
+CELL_HYPOXIA_DAMAGE_RATE = [2.0e-4, 2.0e-4, 2.0e-4]  # [1/s] damage accumulation rate scaling under hypoxia (hour-scale)
+CELL_NUTRIENT_DAMAGE_RATE = [1.5e-4, 1.5e-4, 1.5e-4] # [1/s] damage accumulation rate scaling under nutrient deprivation (hour-scale)
+CELL_STRESS_DAMAGE_RATE = [1.0e-4, 1.0e-4, 1.0e-4]   # [1/s] damage accumulation rate scaling under mechanical overstress (hour-scale)
+CELL_BASAL_DAMAGE_REPAIR_RATE = [5.0e-5, 5.0e-5, 5.0e-5] # [1/s] baseline damage repair rate
+CELL_ACUTE_HYPOXIA_THRESHOLD = [0.005, 0.005, 0.005]  # [concentration units of C_sp[0]] immediate death threshold
+CELL_ACUTE_NUTRIENT_THRESHOLD = [0.005, 0.005, 0.005] # [concentration units of C_sp[1]] immediate death threshold
+CELL_ACUTE_STRESS_THRESHOLD = [25.0, 25.0, 25.0]      # [kPa = nN/um^2] immediate mechanical-failure threshold
 
 # Estimate maximum CELL population for bucket bounds and id allocation.
-# Assumes worst-case synchronized proliferative expansion with cycle period CELL_CYCLE_DURATION.
+# Assumes worst-case synchronized proliferative expansion with the shortest cycle period across all cell types.
 _sim_time_s = STEPS * TIME_STEP
-if INCLUDE_CELLS and INCLUDE_CELL_CYCLE and CELL_CYCLE_DURATION > 0.0:
-    _doublings = _sim_time_s / CELL_CYCLE_DURATION
+_min_cycle_dur = min(CELL_CYCLE_DURATION) if isinstance(CELL_CYCLE_DURATION, list) else CELL_CYCLE_DURATION
+if INCLUDE_CELLS and INCLUDE_CELL_CYCLE and _min_cycle_dur > 0.0:
+    _doublings = _sim_time_s / _min_cycle_dur
     MAX_EXPECTED_N_CELLS = max(N_CELLS, int(math.ceil(N_CELLS * (2.0 ** _doublings) * 2.0))) # * 2.0 is a safety factor. 
     print(f"Estimated maximum cell population at the end of the simulation: {MAX_EXPECTED_N_CELLS} (doublings: {_doublings:.2f})")
 else:
@@ -270,80 +302,80 @@ INCLUDE_FOCAL_ADHESIONS = True
 INIT_N_FOCAD_PER_CELL = 10 # initial number of focal adhesions per cell. 
 N_ANCHOR_POINTS = 100 # number of anchor points to which focal adhesions can attach on the nucleus surface. Their positions change with nucleus deformation
 MAX_SEARCH_RADIUS_FOCAD = 3.0 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE  # TEMP(debug attach): increased to strongly favor FA-node encounters. Reasonable baseline: 1.0 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
-MAX_FOCAD_ARM_LENGTH = 4 * CELL_RADIUS  # maximum length of the focal adhesion "arm" (distance between the focal adhesion and its anchor point on the nucleus). If the arm is stretched beyond this length, the focal adhesion moves back towards the anchor point. This is a simple way to represent the limited reach of cellular protrusions and avoid unrealistic stretching of focal adhesions. WARNING: make sure this value is consistent with CELL_RADIUS and MAX_SEARCH_RADIUS_FOCAD to avoid unrealistic behavior.
+MAX_FOCAD_ARM_LENGTH = 4 * max(CELL_RADIUS)  # maximum length of the focal adhesion "arm". Uses max radius across cell types. WARNING: make sure this value is consistent with CELL_RADIUS and MAX_SEARCH_RADIUS_FOCAD to avoid unrealistic behavior.
 # WARNING: rate values below assume global timestep ~ 1.0 s
-FOCAD_REST_LENGTH_0 = CELL_RADIUS - CELL_NUCLEUS_RADIUS # [um] Initial rest/target length at creation time.
+FOCAD_REST_LENGTH_0 = min(r - r/2 for r in CELL_RADIUS) # [um] Reference rest length (shortest across types); per-agent value uses actual cell-type radii at init.
 FOCAD_MIN_REST_LENGTH = FOCAD_REST_LENGTH_0 / 10.0 # [um] Minimum rest length to prevent collapse. 
-FOCAD_K_FA = 10.0 # [nN/um] Adhesion stiffness (effective spring constant). Typical range: ~0.1–10 nN/um; 
-FOCAD_F_MAX= 0.0 # [nN] Maximum force per adhesion (cap to avoid runaway and represent myosin/structural limits).Typical range: ~5–50 nN. WARNING: 0 means "no cap" 
-FOCAD_V_C = 0.2 # [um/s] Contractile shortening speed of L(t) (actomyosin-driven).
-FOCAD_K_ON = 5.0 # [1/s] TEMP(debug attach): high binding rate to force attachments. Reasonable baseline: 0.01 [1/s]
-FOCAD_K_OFF_0 = 0.0002 # [1/s] TEMP(debug attach): low baseline detachment to retain attachments. Reasonable baseline: 0.003 [1/s]
-FOCAD_F_C = 5.0 # [nN] Force scale controlling force sensitivity in koff(F) (catch/slip style). Typical range: ~2–10 nN. Sets how quickly detachment probability changes as traction builds.
+FOCAD_K_FA = [10.0, 10.0, 10.0] # [nN/um] Adhesion stiffness (effective spring constant). Typical range: ~0.1–10 nN/um; 
+FOCAD_F_MAX= [0.0, 0.0, 0.0] # [nN] Maximum force per adhesion. 0 means "no cap" 
+FOCAD_V_C = [0.2, 0.2, 0.2] # [um/s] Contractile shortening speed of L(t) (actomyosin-driven).
+FOCAD_K_ON = [5.0, 5.0, 5.0] # [1/s] TEMP(debug attach): high binding rate. Reasonable baseline: 0.01 [1/s]
+FOCAD_K_OFF_0 = [0.0002, 0.0002, 0.0002] # [1/s] TEMP(debug attach): low baseline detachment. Reasonable baseline: 0.003 [1/s]
+FOCAD_F_C = [5.0, 5.0, 5.0] # [nN] Force scale controlling force sensitivity in koff(F).
 # Example (simple slip): koff(F)=K_OFF_0*exp(|F|/F_C) => faster turnover under high force.
 USE_CATCH_BOND = True  # If True, use a two-pathway catch+slip off-rate instead of pure slip-bond.
-CATCH_BOND_CATCH_SCALE = 4.0  # Multiplier of K_OFF_0 for catch branch (larger -> stronger stabilization window).
-CATCH_BOND_SLIP_SCALE = 0.2  # Multiplier of K_OFF_0 for slip branch (larger -> faster high-force failure).
-CATCH_BOND_F_CATCH = 2.0  # [nN] Force scale for catch branch exp(-|F|/F_catch).
-CATCH_BOND_F_SLIP = 4.0  # [nN] Force scale for slip branch exp(+|F|/F_slip).
+CATCH_BOND_CATCH_SCALE = [4.0, 4.0, 4.0]  # Multiplier of K_OFF_0 for catch branch.
+CATCH_BOND_SLIP_SCALE = [0.2, 0.2, 0.2]  # Multiplier of K_OFF_0 for slip branch.
+CATCH_BOND_F_CATCH = [2.0, 2.0, 2.0]  # [nN] Force scale for catch branch.
+CATCH_BOND_F_SLIP = [4.0, 4.0, 4.0]  # [nN] Force scale for slip branch.
 # Suggested starting point when USE_CATCH_BOND=True (to avoid over-stabilization):
 #   FOCAD_K_ON ~ 0.02-0.1 [1/s], FOCAD_K_OFF_0 ~ 0.001-0.01 [1/s], FOCAD_K_REINF <= 0.001 [1/s].
-FOCAD_K_REINF = 0.001 # [1/s] Reinforcement rate for adhesion strengthening. Timescale ~1/K_REINF = 1000 s (~17 min). E.g. something like k_fa <- k_fa + K_REINF * g(|F|) * DT, adhesions gradually stiffen over tens of minutes when they carry load.
-FOCAD_F_REINF = 1.0 # [nN] Force scale for reinforcement saturation: g(F)=F/(F+F_REINF).
-FOCAD_K_FA_MAX = 50.0 # [nN/um] Upper bound for reinforced adhesion stiffness.
-FOCAD_K_FA_DECAY = 0.0 # [1/s] Optional decay towards baseline FOCAD_K_FA when unloaded/detached. 0 disables decay.
-FOCAD_POLARITY_KON_FRONT_GAIN = 2.0  # [-] Frontness gain for attachment probability (k_on).
-FOCAD_POLARITY_KOFF_FRONT_REDUCTION = 0.5  # [-] Fractional reduction of k_off_0 at the front.
-FOCAD_POLARITY_KOFF_REAR_GAIN = 1.0  # [-] Fractional increase of k_off_0 at the rear.
-FOCAD_F_MATURE = 1.0  # [nN] force threshold to transition nascent->mature
-FOCAD_T_NASCENT_MAX = 120.0  # [s] max nascent lifetime before disassembly if unresolved
-FOCAD_T_DETACHED_GRACE = 30.0  # [s] detached grace before disassembly
-FOCAD_T_DISASSEMBLY = 20.0  # [s] time spent detached in disassembling state before deletion
+FOCAD_K_REINF = [0.001, 0.001, 0.001] # [1/s] Reinforcement rate for adhesion strengthening.
+FOCAD_F_REINF = [1.0, 1.0, 1.0] # [nN] Force scale for reinforcement saturation: g(F)=F/(F+F_REINF).
+FOCAD_K_FA_MAX = [50.0, 50.0, 50.0] # [nN/um] Upper bound for reinforced adhesion stiffness.
+FOCAD_K_FA_DECAY = [0.0, 0.0, 0.0] # [1/s] Optional decay towards baseline. 0 disables.
+FOCAD_POLARITY_KON_FRONT_GAIN = [2.0, 2.0, 2.0]  # [-] Frontness gain for k_on.
+FOCAD_POLARITY_KOFF_FRONT_REDUCTION = [0.5, 0.5, 0.5]  # [-] Fractional reduction of k_off_0 at front.
+FOCAD_POLARITY_KOFF_REAR_GAIN = [1.0, 1.0, 1.0]  # [-] Fractional increase of k_off_0 at rear.
+FOCAD_F_MATURE = [1.0, 1.0, 1.0]  # [nN] force threshold to transition nascent->mature
+FOCAD_T_NASCENT_MAX = [120.0, 120.0, 120.0]  # [s] max nascent lifetime before disassembly
+FOCAD_T_DETACHED_GRACE = [30.0, 30.0, 30.0]  # [s] detached grace before disassembly
+FOCAD_T_DISASSEMBLY = [20.0, 20.0, 20.0]  # [s] disassembling state before deletion
 ENABLE_FOCAD_BIRTH = True
-FOCAD_BIRTH_SPECIES_INDEX = 0  # species index in CELL C_sp controlling biochemical gate
-FOCAD_BIRTH_N_MIN = 2  # minimum target adhesions per cell
-FOCAD_BIRTH_N_MAX = 3 * INIT_N_FOCAD_PER_CELL  # hard cap / maximum target adhesions per cell
-FOCAD_BIRTH_K_0 = 0.001  # [1/s] baseline birth rate
-FOCAD_BIRTH_K_MAX = 0.03  # [1/s] max stress/biochemical-driven birth gain
-FOCAD_BIRTH_K_SIGMA = 0.1  # [kPa] stress half-saturation for birth gate
-FOCAD_BIRTH_HILL_SIGMA = 1.0  # Hill exponent for stress gate
-FOCAD_BIRTH_K_C = 5.0  # concentration half-saturation for birth gate
-FOCAD_BIRTH_HILL_CONC = 2.0  # Hill exponent for concentration gate
-FOCAD_BIRTH_REFRACTORY = 20.0  # [s] minimum time between consecutive births per cell
+FOCAD_BIRTH_SPECIES_INDEX = 0  # species index in CELL C_sp controlling biochemical gate (global)
+FOCAD_BIRTH_N_MIN = [2.0, 2.0, 2.0]  # minimum target adhesions per cell (float for array registration; cast to int in C++)
+FOCAD_BIRTH_N_MAX = [float(3 * INIT_N_FOCAD_PER_CELL)] * N_CELL_TYPES  # hard cap / maximum target adhesions per cell
+FOCAD_BIRTH_K_0 = [0.001, 0.001, 0.001]  # [1/s] baseline birth rate
+FOCAD_BIRTH_K_MAX = [0.03, 0.03, 0.03]  # [1/s] max stress/biochemical-driven birth gain
+FOCAD_BIRTH_K_SIGMA = [0.1, 0.1, 0.1]  # [kPa] stress half-saturation for birth gate
+FOCAD_BIRTH_HILL_SIGMA = [1.0, 1.0, 1.0]  # Hill exponent for stress gate
+FOCAD_BIRTH_K_C = [5.0, 5.0, 5.0]  # concentration half-saturation for birth gate
+FOCAD_BIRTH_HILL_CONC = [2.0, 2.0, 2.0]  # Hill exponent for concentration gate
+FOCAD_BIRTH_REFRACTORY = [20.0, 20.0, 20.0]  # [s] minimum time between consecutive births per cell
 # +====================================================================+
 # | LINC coupling between cell nucleus and FOCAD                       |
 # +====================================================================+
 INCLUDE_LINC_COUPLING = False
-LINC_K_ELAST = 10.0 # [nN/um] Effective LINC stiffness in series with FOCAD stiffness.
-LINC_D_DUMPING = 0.0 # [nN·s/um] Optional damping along FOCAD-LINC axis.
-LINC_REST_LENGTH = 0.0 # [um] Rest length of virtual LINC segment.
+LINC_K_ELAST = [10.0, 10.0, 10.0] # [nN/um] Effective LINC stiffness in series with FOCAD stiffness.
+LINC_D_DUMPING = [0.0, 0.0, 0.0] # [nN·s/um] Optional damping along FOCAD-LINC axis.
+LINC_REST_LENGTH = [0.0, 0.0, 0.0] # [um] Rest length of virtual LINC segment.
 
 # +====================================================================+
 # | NUCLEAR MECHANICS  (ONLY USED IF FOCAL ADHESIONS ARE INCLUDED)     |
 # +====================================================================+
 # Elasticity (small-strain linear)
-NUCLEUS_E = 2.0               # [nN/µm² = kPa] Young’s modulus of the nucleus (effective stiffness). Typical: 0.5–5.0 Pa depending on cell type/lamina.
-NUCLEUS_NU = 0.48             # [-] Poisson ratio. Nearly incompressible nucleus. Typical: 0.45–0.49. WARNING: must be < 0.5.
+NUCLEUS_E = [2.0, 2.0, 2.0]               # [nN/µm² = kPa] Young’s modulus of the nucleus.
+NUCLEUS_NU = [0.48, 0.48, 0.48]             # [-] Poisson ratio. Nearly incompressible nucleus. WARNING: must be < 0.5.
 # Viscoelastic relaxation
-NUCLEUS_TAU = 0.2            # [s] Relaxation time controlling how fast strain follows the instantaneous elastic strain. Typical: 10–100 s.
-NUCLEUS_EPS_CLAMP = 0.30      # [-] Clamp for each strain component to preserve small-strain assumptions and avoid numerical blow-up. Typical: 0.1–0.3.
+NUCLEUS_TAU = [0.2, 0.2, 0.2]            # [s] Relaxation time.
+NUCLEUS_EPS_CLAMP = [0.30, 0.30, 0.30]      # [-] Clamp for each strain component.
 # +====================================================================+
 # | CHEMOTAXIS                                                         |
 # +====================================================================+
 INCLUDE_CHEMOTAXIS = True
 CHEMOTAXIS_SENSITIVITY = [1.0, 0.0] # [-1.0 to +1.0] Chemotactic sensitivity for each species. Positive: attraction, Negative: repulsion towards higher concentrations.
 CHEMOTAXIS_ONLY_DIR = True # if True, chemotaxis only affects cell orientation, not speed. If False, chemotaxis affects both orientation and speed (e.g. by making cells move faster when they are oriented towards higher concentration gradient)
-CHEMOTAXIS_CHI = 10.0 # [um^2/s] Chemotactic coefficient (χ) used to compute chemotactic velocity as v_chem = χ * ∇C. Typical range: 0.1–10 µm²/s depending on cell type and chemoattractant. Only used if CHEMOTAXIS_ONLY_DIR is False.
+CHEMOTAXIS_CHI = [10.0, 10.0, 10.0] # [um^2/s] Chemotactic coefficient (χ). Typical range: 0.1–10 µm²/s.
 # +====================================================================+
 # | CELL MIGRATION RELATED PARAMETERS                                  |
 # +====================================================================+
 INCLUDE_DUROTAXIS = True   # if True, cells prefer to move towards stiffer regions, which is implemented by making them prefer to move in the direction of maximum stress/strain. 
 DUROTAXIS_ONLY_DIR = True  # if True, stress/strain direction changes movement vector (keeps speed), False: changes speed too
-FOCAD_MOBILITY_MU  = 1e-4   # Mobility scaling for stress contribution (start small)
+FOCAD_MOBILITY_MU  = [1e-4, 1e-4, 1e-4]   # Mobility scaling for stress contribution
 INCLUDE_ORIENTATION_ALIGN = True  # True: enable gradual alignment to principal direction
-ORIENTATION_ALIGN_RATE  = 1.0  # Alignment rate [1/time] -> ~ ORIENTATION_ALIGN_RATE/TIME_STEP steps to achive full aligment
+ORIENTATION_ALIGN_RATE  = [1.0, 1.0, 1.0]  # Alignment rate [1/time]
 ORIENTATION_ALIGN_USE_STRESS = True  # True: align to stress eigvec1, False: align to strain eigvec1
-DUROTAXIS_BLEND_BETA = 0.5   # 0: traction only, 1: principal direction only
+DUROTAXIS_BLEND_BETA = [0.5, 0.5, 0.5]   # 0: traction only, 1: principal direction only
 DUROTAXIS_USE_STRESS = True   # True: use stress eigenpair, False: use strain eigenpair
 
 
@@ -482,18 +514,19 @@ if INCLUDE_DIFFUSION:
         HETEROGENEOUS_DIFFUSION = False
 
 if INCLUDE_CELLS:
-    if MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION < (2 * CELL_RADIUS):
-        print('MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION: {0} must be higher than 2 * CELL_RADIUS: 2 * {1}'.format(MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION, CELL_RADIUS))
+    _max_cell_radius = max(CELL_RADIUS) if isinstance(CELL_RADIUS, list) else CELL_RADIUS
+    if MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION < (2 * _max_cell_radius):
+        print('MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION: {0} must be higher than 2 * max(CELL_RADIUS): 2 * {1}'.format(MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION, _max_cell_radius))
         critical_error = True
     if INCLUDE_FOCAL_ADHESIONS and not INCLUDE_FIBRE_NETWORK: 
         print('ERROR: focal adhesions cannot be included if there is no fibre network to interact with')
         critical_error = True
-    if INCLUDE_FOCAL_ADHESIONS and MAX_FOCAD_ARM_LENGTH < CELL_RADIUS:
-        print('ERROR: MAX_FOCAD_ARM_LENGTH: {0} must be bigger than CELL_RADIUS: {1}, as focal adhesions are initiated at the cell surface and should be able to grow away'.format(MAX_FOCAD_ARM_LENGTH, CELL_RADIUS))
-    if INCLUDE_FOCAL_ADHESIONS and FOCAD_BIRTH_N_MAX < INIT_N_FOCAD_PER_CELL:
+    if INCLUDE_FOCAL_ADHESIONS and MAX_FOCAD_ARM_LENGTH < _max_cell_radius:
+        print('ERROR: MAX_FOCAD_ARM_LENGTH: {0} must be bigger than max(CELL_RADIUS): {1}, as focal adhesions are initiated at the cell surface and should be able to grow away'.format(MAX_FOCAD_ARM_LENGTH, _max_cell_radius))
+    if INCLUDE_FOCAL_ADHESIONS and any(nmax < INIT_N_FOCAD_PER_CELL for nmax in FOCAD_BIRTH_N_MAX):
         print('ERROR: FOCAD_BIRTH_N_MAX: {0} must be >= INIT_N_FOCAD_PER_CELL: {1}'.format(FOCAD_BIRTH_N_MAX, INIT_N_FOCAD_PER_CELL))
         critical_error = True
-    if INCLUDE_FOCAL_ADHESIONS and FOCAD_BIRTH_N_MAX < FOCAD_BIRTH_N_MIN:
+    if INCLUDE_FOCAL_ADHESIONS and any(nmax < nmin for nmax, nmin in zip(FOCAD_BIRTH_N_MAX, FOCAD_BIRTH_N_MIN)):
         print('ERROR: FOCAD_BIRTH_N_MAX: {0} must be >= FOCAD_BIRTH_N_MIN: {1}'.format(FOCAD_BIRTH_N_MAX, FOCAD_BIRTH_N_MIN))
         critical_error = True
 elif INCLUDE_FOCAL_ADHESIONS:
@@ -512,20 +545,22 @@ if INCLUDE_FIBRE_NETWORK and not _OPTUNA_QUIET:
     )
 
 if INCLUDE_CELLS and INCLUDE_FOCAL_ADHESIONS and ENABLE_FOCAD_BIRTH and not _OPTUNA_QUIET:
-    print_focad_birth_calibration_summary(
-        dt=TIME_STEP,
-        init_n_focad_per_cell=INIT_N_FOCAD_PER_CELL,
-        n_min=FOCAD_BIRTH_N_MIN,
-        n_max=FOCAD_BIRTH_N_MAX,
-        k0=FOCAD_BIRTH_K_0,
-        kmax=FOCAD_BIRTH_K_MAX,
-        refractory_s=FOCAD_BIRTH_REFRACTORY,
-        k_sigma=FOCAD_BIRTH_K_SIGMA,
-        hill_sigma=FOCAD_BIRTH_HILL_SIGMA,
-        k_c=FOCAD_BIRTH_K_C,
-        hill_conc=FOCAD_BIRTH_HILL_CONC,
-        species_index=FOCAD_BIRTH_SPECIES_INDEX,
-    )
+    for _ct_i in range(N_CELL_TYPES):
+        print(f"\n  [cell type {_ct_i}]")
+        print_focad_birth_calibration_summary(
+            dt=TIME_STEP,
+            init_n_focad_per_cell=INIT_N_FOCAD_PER_CELL,
+            n_min=FOCAD_BIRTH_N_MIN[_ct_i],
+            n_max=FOCAD_BIRTH_N_MAX[_ct_i],
+            k0=FOCAD_BIRTH_K_0[_ct_i],
+            kmax=FOCAD_BIRTH_K_MAX[_ct_i],
+            refractory_s=FOCAD_BIRTH_REFRACTORY[_ct_i],
+            k_sigma=FOCAD_BIRTH_K_SIGMA[_ct_i],
+            hill_sigma=FOCAD_BIRTH_HILL_SIGMA[_ct_i],
+            k_c=FOCAD_BIRTH_K_C[_ct_i],
+            hill_conc=FOCAD_BIRTH_HILL_CONC[_ct_i],
+            species_index=FOCAD_BIRTH_SPECIES_INDEX,
+        )
 
 
 if critical_error:
@@ -675,60 +710,71 @@ env.newPropertyFloat("FIBRE_SEGMENT_K_ELAST",FIBRE_SEGMENT_K_ELAST)
 env.newPropertyFloat("FIBRE_SEGMENT_D_DUMPING",FIBRE_SEGMENT_D_DUMPING)
 env.newPropertyFloat("FIBRE_NODE_REPULSION_K", FIBRE_NODE_REPULSION_K)
 env.newPropertyUInt("INCLUDE_NETWORK_REMODELING", INCLUDE_NETWORK_REMODELING)
-env.newPropertyFloat("FNODE_DEGRADATION_RATE", FNODE_DEGRADATION_RATE)
-env.newPropertyFloat("FNODE_DEPOSITION_RATE", FNODE_DEPOSITION_RATE)
+env.newPropertyArrayFloat("FNODE_DEGRADATION_RATE", FNODE_DEGRADATION_RATE)
+env.newPropertyArrayFloat("FNODE_DEPOSITION_RATE", FNODE_DEPOSITION_RATE)
 env.newPropertyFloat("FNODE_CELL_DEGRADATION_RADIUS", FNODE_CELL_DEGRADATION_RADIUS)
-env.newPropertyFloat("FNODE_BIRTH_K_0", FNODE_BIRTH_K_0)
-env.newPropertyFloat("FNODE_BIRTH_K_MAX", FNODE_BIRTH_K_MAX)
+env.newPropertyArrayFloat("FNODE_BIRTH_K_0", FNODE_BIRTH_K_0)
+env.newPropertyArrayFloat("FNODE_BIRTH_K_MAX", FNODE_BIRTH_K_MAX)
 env.newPropertyUInt("FNODE_BIRTH_SPECIES_INDEX", FNODE_BIRTH_SPECIES_INDEX)
-env.newPropertyFloat("FNODE_BIRTH_K_C", FNODE_BIRTH_K_C)
-env.newPropertyFloat("FNODE_BIRTH_HILL_CONC", FNODE_BIRTH_HILL_CONC)
-env.newPropertyFloat("FNODE_BIRTH_K_SIGMA", FNODE_BIRTH_K_SIGMA)
-env.newPropertyFloat("FNODE_BIRTH_HILL_SIGMA", FNODE_BIRTH_HILL_SIGMA)
-env.newPropertyFloat("FNODE_BIRTH_RADIUS", FNODE_BIRTH_RADIUS)
-env.newPropertyFloat("FNODE_BIRTH_LINK_MAX_DISTANCE", FNODE_BIRTH_LINK_MAX_DISTANCE)
-env.newPropertyFloat("FNODE_BIRTH_REFRACTORY", FNODE_BIRTH_REFRACTORY)
+env.newPropertyArrayFloat("FNODE_BIRTH_K_C", FNODE_BIRTH_K_C)
+env.newPropertyArrayFloat("FNODE_BIRTH_HILL_CONC", FNODE_BIRTH_HILL_CONC)
+env.newPropertyArrayFloat("FNODE_BIRTH_K_SIGMA", FNODE_BIRTH_K_SIGMA)
+env.newPropertyArrayFloat("FNODE_BIRTH_HILL_SIGMA", FNODE_BIRTH_HILL_SIGMA)
+env.newPropertyArrayFloat("FNODE_BIRTH_RADIUS", FNODE_BIRTH_RADIUS)
+env.newPropertyArrayFloat("FNODE_BIRTH_LINK_MAX_DISTANCE", FNODE_BIRTH_LINK_MAX_DISTANCE)
+env.newPropertyArrayFloat("FNODE_BIRTH_REFRACTORY", FNODE_BIRTH_REFRACTORY)
 
-# Cell properties TODO: MOVE SOME OF THESE PROPERTIES TO THE CELL AGENT 
+# Cell properties — per-cell-type arrays (length N_CELL_TYPES)
+env.newPropertyUInt("N_CELL_TYPES", N_CELL_TYPES)
 env.newPropertyUInt("INCLUDE_CELL_CELL_INTERACTION", INCLUDE_CELL_CELL_INTERACTION)
 env.newPropertyUInt("INCLUDE_CELL_FNODE_REPULSION", INCLUDE_CELL_FNODE_REPULSION)
 env.newPropertyUInt("DEAD_CELLS_DISAPPEAR", DEAD_CELLS_DISAPPEAR)
 env.newPropertyUInt("PERIODIC_BOUNDARIES_FOR_CELLS", PERIODIC_BOUNDARIES_FOR_CELLS)
 env.newPropertyUInt("N_CELLS", N_CELLS)
-env.newPropertyFloat("CELL_K_ELAST", CELL_K_ELAST)
-env.newPropertyFloat("CELL_D_DUMPING", CELL_D_DUMPING)
-env.newPropertyFloat("CELL_RADIUS", CELL_RADIUS)
-env.newPropertyFloat("CELL_NUCLEUS_RADIUS", CELL_NUCLEUS_RADIUS)
-env.newPropertyFloat("CELL_SPEED_REF", CELL_SPEED_REF)
-env.newPropertyFloat("BROWNIAN_MOTION_STRENGTH", BROWNIAN_MOTION_STRENGTH)
+env.newPropertyArrayFloat("CELL_K_ELAST", CELL_K_ELAST)
+env.newPropertyArrayFloat("CELL_D_DUMPING", CELL_D_DUMPING)
+env.newPropertyArrayFloat("CELL_RADIUS", CELL_RADIUS)
+env.newPropertyArrayFloat("CELL_NUCLEUS_RADIUS", CELL_NUCLEUS_RADIUS)
+env.newPropertyArrayFloat("CELL_SPEED_REF", CELL_SPEED_REF)
+env.newPropertyArrayFloat("BROWNIAN_MOTION_STRENGTH", BROWNIAN_MOTION_STRENGTH)
 env.newPropertyFloat("MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION", MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION)
 env.newPropertyFloat("MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION", MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION)
-env.newPropertyFloat("CELL_CELL_REPULSION_K", CELL_CELL_REPULSION_K)
-env.newPropertyFloat("CELL_CELL_ADHESION_K", CELL_CELL_ADHESION_K)
-env.newPropertyFloat("CELL_CELL_ADHESION_RANGE", CELL_CELL_ADHESION_RANGE)
-env.newPropertyFloat("CELL_CELL_DV_MAX", CELL_CELL_DV_MAX)
-env.newPropertyFloat("CELL_FNODE_REPULSION_K", CELL_FNODE_REPULSION_K)
-env.newPropertyFloat("CELL_FNODE_EXCLUSION_DISTANCE", CELL_FNODE_EXCLUSION_DISTANCE)
-env.newPropertyFloat("CELL_FNODE_DV_MAX", CELL_FNODE_DV_MAX)
-env.newPropertyFloat("CELL_CYCLE_DURATION", CELL_CYCLE_DURATION)
-env.newPropertyFloat("CYCLE_PHASE_G1_DURATION", CYCLE_PHASE_G1_DURATION)
-env.newPropertyFloat("CYCLE_PHASE_S_DURATION", CYCLE_PHASE_S_DURATION)
-env.newPropertyFloat("CYCLE_PHASE_G2_DURATION", CYCLE_PHASE_G2_DURATION)
-env.newPropertyFloat("CYCLE_PHASE_M_DURATION", CYCLE_PHASE_M_DURATION)
-env.newPropertyFloat("CYCLE_PHASE_G1_START", CYCLE_PHASE_G1_START)
-env.newPropertyFloat("CYCLE_PHASE_S_START", CYCLE_PHASE_S_START)
-env.newPropertyFloat("CYCLE_PHASE_G2_START", CYCLE_PHASE_G2_START)
-env.newPropertyFloat("CYCLE_PHASE_M_START", CYCLE_PHASE_M_START)
-env.newPropertyFloat("CELL_HYPOXIA_THRESHOLD", CELL_HYPOXIA_THRESHOLD)
-env.newPropertyFloat("CELL_NUTRIENT_THRESHOLD", CELL_NUTRIENT_THRESHOLD)
-env.newPropertyFloat("CELL_STRESS_THRESHOLD", CELL_STRESS_THRESHOLD)
-env.newPropertyFloat("CELL_HYPOXIA_DAMAGE_RATE", CELL_HYPOXIA_DAMAGE_RATE)
-env.newPropertyFloat("CELL_NUTRIENT_DAMAGE_RATE", CELL_NUTRIENT_DAMAGE_RATE)
-env.newPropertyFloat("CELL_STRESS_DAMAGE_RATE", CELL_STRESS_DAMAGE_RATE)
-env.newPropertyFloat("CELL_BASAL_DAMAGE_REPAIR_RATE", CELL_BASAL_DAMAGE_REPAIR_RATE)
-env.newPropertyFloat("CELL_ACUTE_HYPOXIA_THRESHOLD", CELL_ACUTE_HYPOXIA_THRESHOLD)
-env.newPropertyFloat("CELL_ACUTE_NUTRIENT_THRESHOLD", CELL_ACUTE_NUTRIENT_THRESHOLD)
-env.newPropertyFloat("CELL_ACUTE_STRESS_THRESHOLD", CELL_ACUTE_STRESS_THRESHOLD)
+env.newPropertyArrayFloat("CELL_CELL_REPULSION_K", CELL_CELL_REPULSION_K)
+env.newPropertyArrayFloat("CELL_CELL_ADHESION_K", CELL_CELL_ADHESION_K)
+env.newPropertyArrayFloat("CELL_CELL_ADHESION_RANGE", CELL_CELL_ADHESION_RANGE)
+env.newPropertyArrayFloat("CELL_CELL_DV_MAX", CELL_CELL_DV_MAX)
+env.newPropertyArrayFloat("CELL_FNODE_REPULSION_K", CELL_FNODE_REPULSION_K)
+env.newPropertyArrayFloat("CELL_FNODE_EXCLUSION_DISTANCE", CELL_FNODE_EXCLUSION_DISTANCE)
+env.newPropertyArrayFloat("CELL_FNODE_DV_MAX", CELL_FNODE_DV_MAX)
+env.newPropertyArrayFloat("CELL_CYCLE_DURATION", CELL_CYCLE_DURATION)
+env.newPropertyArrayFloat("CYCLE_PHASE_G1_DURATION", CYCLE_PHASE_G1_DURATION)
+env.newPropertyArrayFloat("CYCLE_PHASE_S_DURATION", CYCLE_PHASE_S_DURATION)
+env.newPropertyArrayFloat("CYCLE_PHASE_G2_DURATION", CYCLE_PHASE_G2_DURATION)
+env.newPropertyArrayFloat("CYCLE_PHASE_M_DURATION", CYCLE_PHASE_M_DURATION)
+env.newPropertyArrayFloat("CYCLE_PHASE_G1_START", CYCLE_PHASE_G1_START)
+env.newPropertyArrayFloat("CYCLE_PHASE_S_START", CYCLE_PHASE_S_START)
+env.newPropertyArrayFloat("CYCLE_PHASE_G2_START", CYCLE_PHASE_G2_START)
+env.newPropertyArrayFloat("CYCLE_PHASE_M_START", CYCLE_PHASE_M_START)
+# Phase 1 — per-cell-type multipliers
+env.newPropertyArrayFloat("DIVISION_RATE_MULTIPLIER", DIVISION_RATE_MULTIPLIER)
+env.newPropertyArrayFloat("DAMAGE_ACCUMULATION_MULTIPLIER", DAMAGE_ACCUMULATION_MULTIPLIER)
+env.newPropertyArrayFloat("DAMAGE_REPAIR_MULTIPLIER", DAMAGE_REPAIR_MULTIPLIER)
+env.newPropertyArrayFloat("DAMAGE_DEATH_THRESHOLD", DAMAGE_DEATH_THRESHOLD)
+# Phase 3 — per-cell-type species multipliers
+env.newPropertyArrayFloat("CELL_CONSUMPTION_MULTIPLIER", CELL_CONSUMPTION_MULTIPLIER)
+env.newPropertyArrayFloat("CELL_PRODUCTION_MULTIPLIER", CELL_PRODUCTION_MULTIPLIER)
+env.newPropertyArrayFloat("CELL_REACTION_MULTIPLIER", CELL_REACTION_MULTIPLIER)
+# Per-cell-type damage/death thresholds
+env.newPropertyArrayFloat("CELL_HYPOXIA_THRESHOLD", CELL_HYPOXIA_THRESHOLD)
+env.newPropertyArrayFloat("CELL_NUTRIENT_THRESHOLD", CELL_NUTRIENT_THRESHOLD)
+env.newPropertyArrayFloat("CELL_STRESS_THRESHOLD", CELL_STRESS_THRESHOLD)
+env.newPropertyArrayFloat("CELL_HYPOXIA_DAMAGE_RATE", CELL_HYPOXIA_DAMAGE_RATE)
+env.newPropertyArrayFloat("CELL_NUTRIENT_DAMAGE_RATE", CELL_NUTRIENT_DAMAGE_RATE)
+env.newPropertyArrayFloat("CELL_STRESS_DAMAGE_RATE", CELL_STRESS_DAMAGE_RATE)
+env.newPropertyArrayFloat("CELL_BASAL_DAMAGE_REPAIR_RATE", CELL_BASAL_DAMAGE_REPAIR_RATE)
+env.newPropertyArrayFloat("CELL_ACUTE_HYPOXIA_THRESHOLD", CELL_ACUTE_HYPOXIA_THRESHOLD)
+env.newPropertyArrayFloat("CELL_ACUTE_NUTRIENT_THRESHOLD", CELL_ACUTE_NUTRIENT_THRESHOLD)
+env.newPropertyArrayFloat("CELL_ACUTE_STRESS_THRESHOLD", CELL_ACUTE_STRESS_THRESHOLD)
 
 # Focal adhesion properties
 env.newPropertyUInt("INCLUDE_FOCAL_ADHESIONS", INCLUDE_FOCAL_ADHESIONS)
@@ -738,63 +784,63 @@ env.newPropertyFloat("MAX_SEARCH_RADIUS_FOCAD", MAX_SEARCH_RADIUS_FOCAD)
 env.newPropertyFloat("MAX_FOCAD_ARM_LENGTH", MAX_FOCAD_ARM_LENGTH)
 env.newPropertyFloat("FOCAD_REST_LENGTH_0", FOCAD_REST_LENGTH_0)
 env.newPropertyFloat("FOCAD_MIN_REST_LENGTH", FOCAD_MIN_REST_LENGTH)
-env.newPropertyFloat("FOCAD_K_FA", FOCAD_K_FA)
-env.newPropertyFloat("FOCAD_F_MAX", FOCAD_F_MAX)
-env.newPropertyFloat("FOCAD_V_C", FOCAD_V_C)
-env.newPropertyFloat("FOCAD_K_ON", FOCAD_K_ON)
-env.newPropertyFloat("FOCAD_K_OFF_0", FOCAD_K_OFF_0)
-env.newPropertyFloat("FOCAD_F_C", FOCAD_F_C)
+env.newPropertyArrayFloat("FOCAD_K_FA", FOCAD_K_FA)
+env.newPropertyArrayFloat("FOCAD_F_MAX", FOCAD_F_MAX)
+env.newPropertyArrayFloat("FOCAD_V_C", FOCAD_V_C)
+env.newPropertyArrayFloat("FOCAD_K_ON", FOCAD_K_ON)
+env.newPropertyArrayFloat("FOCAD_K_OFF_0", FOCAD_K_OFF_0)
+env.newPropertyArrayFloat("FOCAD_F_C", FOCAD_F_C)
 env.newPropertyUInt("USE_CATCH_BOND", USE_CATCH_BOND)
-env.newPropertyFloat("CATCH_BOND_CATCH_SCALE", CATCH_BOND_CATCH_SCALE)
-env.newPropertyFloat("CATCH_BOND_SLIP_SCALE", CATCH_BOND_SLIP_SCALE)
-env.newPropertyFloat("CATCH_BOND_F_CATCH", CATCH_BOND_F_CATCH)
-env.newPropertyFloat("CATCH_BOND_F_SLIP", CATCH_BOND_F_SLIP)
-env.newPropertyFloat("FOCAD_K_REINF", FOCAD_K_REINF)
-env.newPropertyFloat("FOCAD_F_REINF", FOCAD_F_REINF)
-env.newPropertyFloat("FOCAD_K_FA_MAX", FOCAD_K_FA_MAX)
-env.newPropertyFloat("FOCAD_K_FA_DECAY", FOCAD_K_FA_DECAY)
-env.newPropertyFloat("FOCAD_POLARITY_KON_FRONT_GAIN", FOCAD_POLARITY_KON_FRONT_GAIN)
-env.newPropertyFloat("FOCAD_POLARITY_KOFF_FRONT_REDUCTION", FOCAD_POLARITY_KOFF_FRONT_REDUCTION)
-env.newPropertyFloat("FOCAD_POLARITY_KOFF_REAR_GAIN", FOCAD_POLARITY_KOFF_REAR_GAIN)
-env.newPropertyFloat("FOCAD_F_MATURE", FOCAD_F_MATURE)
-env.newPropertyFloat("FOCAD_T_NASCENT_MAX", FOCAD_T_NASCENT_MAX)
-env.newPropertyFloat("FOCAD_T_DETACHED_GRACE", FOCAD_T_DETACHED_GRACE)
-env.newPropertyFloat("FOCAD_T_DISASSEMBLY", FOCAD_T_DISASSEMBLY)
+env.newPropertyArrayFloat("CATCH_BOND_CATCH_SCALE", CATCH_BOND_CATCH_SCALE)
+env.newPropertyArrayFloat("CATCH_BOND_SLIP_SCALE", CATCH_BOND_SLIP_SCALE)
+env.newPropertyArrayFloat("CATCH_BOND_F_CATCH", CATCH_BOND_F_CATCH)
+env.newPropertyArrayFloat("CATCH_BOND_F_SLIP", CATCH_BOND_F_SLIP)
+env.newPropertyArrayFloat("FOCAD_K_REINF", FOCAD_K_REINF)
+env.newPropertyArrayFloat("FOCAD_F_REINF", FOCAD_F_REINF)
+env.newPropertyArrayFloat("FOCAD_K_FA_MAX", FOCAD_K_FA_MAX)
+env.newPropertyArrayFloat("FOCAD_K_FA_DECAY", FOCAD_K_FA_DECAY)
+env.newPropertyArrayFloat("FOCAD_POLARITY_KON_FRONT_GAIN", FOCAD_POLARITY_KON_FRONT_GAIN)
+env.newPropertyArrayFloat("FOCAD_POLARITY_KOFF_FRONT_REDUCTION", FOCAD_POLARITY_KOFF_FRONT_REDUCTION)
+env.newPropertyArrayFloat("FOCAD_POLARITY_KOFF_REAR_GAIN", FOCAD_POLARITY_KOFF_REAR_GAIN)
+env.newPropertyArrayFloat("FOCAD_F_MATURE", FOCAD_F_MATURE)
+env.newPropertyArrayFloat("FOCAD_T_NASCENT_MAX", FOCAD_T_NASCENT_MAX)
+env.newPropertyArrayFloat("FOCAD_T_DETACHED_GRACE", FOCAD_T_DETACHED_GRACE)
+env.newPropertyArrayFloat("FOCAD_T_DISASSEMBLY", FOCAD_T_DISASSEMBLY)
 env.newPropertyUInt("ENABLE_FOCAD_BIRTH", ENABLE_FOCAD_BIRTH)
 env.newPropertyUInt("FOCAD_BIRTH_SPECIES_INDEX", FOCAD_BIRTH_SPECIES_INDEX)
-env.newPropertyUInt("FOCAD_BIRTH_N_MIN", FOCAD_BIRTH_N_MIN)
-env.newPropertyUInt("FOCAD_BIRTH_N_MAX", FOCAD_BIRTH_N_MAX)
-env.newPropertyFloat("FOCAD_BIRTH_K_0", FOCAD_BIRTH_K_0)
-env.newPropertyFloat("FOCAD_BIRTH_K_MAX", FOCAD_BIRTH_K_MAX)
-env.newPropertyFloat("FOCAD_BIRTH_K_SIGMA", FOCAD_BIRTH_K_SIGMA)
-env.newPropertyFloat("FOCAD_BIRTH_HILL_SIGMA", FOCAD_BIRTH_HILL_SIGMA)
-env.newPropertyFloat("FOCAD_BIRTH_K_C", FOCAD_BIRTH_K_C)
-env.newPropertyFloat("FOCAD_BIRTH_HILL_CONC", FOCAD_BIRTH_HILL_CONC)
-env.newPropertyFloat("FOCAD_BIRTH_REFRACTORY", FOCAD_BIRTH_REFRACTORY)
+env.newPropertyArrayFloat("FOCAD_BIRTH_N_MIN", FOCAD_BIRTH_N_MIN)
+env.newPropertyArrayFloat("FOCAD_BIRTH_N_MAX", FOCAD_BIRTH_N_MAX)
+env.newPropertyArrayFloat("FOCAD_BIRTH_K_0", FOCAD_BIRTH_K_0)
+env.newPropertyArrayFloat("FOCAD_BIRTH_K_MAX", FOCAD_BIRTH_K_MAX)
+env.newPropertyArrayFloat("FOCAD_BIRTH_K_SIGMA", FOCAD_BIRTH_K_SIGMA)
+env.newPropertyArrayFloat("FOCAD_BIRTH_HILL_SIGMA", FOCAD_BIRTH_HILL_SIGMA)
+env.newPropertyArrayFloat("FOCAD_BIRTH_K_C", FOCAD_BIRTH_K_C)
+env.newPropertyArrayFloat("FOCAD_BIRTH_HILL_CONC", FOCAD_BIRTH_HILL_CONC)
+env.newPropertyArrayFloat("FOCAD_BIRTH_REFRACTORY", FOCAD_BIRTH_REFRACTORY)
 env.newPropertyUInt("INCLUDE_LINC_COUPLING", INCLUDE_LINC_COUPLING)
-env.newPropertyFloat("LINC_K_ELAST", LINC_K_ELAST)
-env.newPropertyFloat("LINC_D_DUMPING", LINC_D_DUMPING)
-env.newPropertyFloat("LINC_REST_LENGTH", LINC_REST_LENGTH)
+env.newPropertyArrayFloat("LINC_K_ELAST", LINC_K_ELAST)
+env.newPropertyArrayFloat("LINC_D_DUMPING", LINC_D_DUMPING)
+env.newPropertyArrayFloat("LINC_REST_LENGTH", LINC_REST_LENGTH)
 
 # Nucleus mechanical properties
-env.newPropertyFloat("NUCLEUS_E", NUCLEUS_E)
-env.newPropertyFloat("NUCLEUS_NU", NUCLEUS_NU)
-env.newPropertyFloat("NUCLEUS_TAU", NUCLEUS_TAU)
-env.newPropertyFloat("NUCLEUS_EPS_CLAMP", NUCLEUS_EPS_CLAMP)
+env.newPropertyArrayFloat("NUCLEUS_E", NUCLEUS_E)
+env.newPropertyArrayFloat("NUCLEUS_NU", NUCLEUS_NU)
+env.newPropertyArrayFloat("NUCLEUS_TAU", NUCLEUS_TAU)
+env.newPropertyArrayFloat("NUCLEUS_EPS_CLAMP", NUCLEUS_EPS_CLAMP)
 
 # Chemotaxis properties
 env.newPropertyUInt("INCLUDE_CHEMOTAXIS", INCLUDE_CHEMOTAXIS)
-env.newPropertyFloat("CHEMOTAXIS_CHI", CHEMOTAXIS_CHI)
+env.newPropertyArrayFloat("CHEMOTAXIS_CHI", CHEMOTAXIS_CHI)
 env.newPropertyUInt("CHEMOTAXIS_ONLY_DIR", CHEMOTAXIS_ONLY_DIR)
 
 # Cell migration (durotaxis/orientation alignment) properties
 env.newPropertyUInt("INCLUDE_DUROTAXIS", INCLUDE_DUROTAXIS)
 env.newPropertyUInt("DUROTAXIS_ONLY_DIR", DUROTAXIS_ONLY_DIR)
-env.newPropertyFloat("FOCAD_MOBILITY_MU", FOCAD_MOBILITY_MU)
+env.newPropertyArrayFloat("FOCAD_MOBILITY_MU", FOCAD_MOBILITY_MU)
 env.newPropertyUInt("INCLUDE_ORIENTATION_ALIGN", INCLUDE_ORIENTATION_ALIGN)
-env.newPropertyFloat("ORIENTATION_ALIGN_RATE", ORIENTATION_ALIGN_RATE)
+env.newPropertyArrayFloat("ORIENTATION_ALIGN_RATE", ORIENTATION_ALIGN_RATE)
 env.newPropertyUInt("ORIENTATION_ALIGN_USE_STRESS", ORIENTATION_ALIGN_USE_STRESS)
-env.newPropertyFloat("DUROTAXIS_BLEND_BETA", DUROTAXIS_BLEND_BETA)
+env.newPropertyArrayFloat("DUROTAXIS_BLEND_BETA", DUROTAXIS_BLEND_BETA)
 env.newPropertyUInt("DUROTAXIS_USE_STRESS", DUROTAXIS_USE_STRESS)
 
 
@@ -841,10 +887,12 @@ if INCLUDE_FIBRE_NETWORK:
     fnode_spatial_radius = MAX_SEARCH_RADIUS_FNODES
     if (MAX_SEARCH_RADIUS_FNODES < ECM_ECM_EQUILIBRIUM_DISTANCE) and INCLUDE_DIFFUSION and HETEROGENEOUS_DIFFUSION:
         fnode_spatial_radius = ECM_ECM_EQUILIBRIUM_DISTANCE
-    if INCLUDE_CELLS and INCLUDE_CELL_FNODE_REPULSION and (fnode_spatial_radius < CELL_FNODE_EXCLUSION_DISTANCE):
-        fnode_spatial_radius = CELL_FNODE_EXCLUSION_DISTANCE
-    if INCLUDE_CELLS and INCLUDE_NETWORK_REMODELING and (fnode_spatial_radius < (FNODE_BIRTH_LINK_MAX_DISTANCE + FNODE_BIRTH_RADIUS)):
-        fnode_spatial_radius = FNODE_BIRTH_LINK_MAX_DISTANCE + FNODE_BIRTH_RADIUS
+    _max_excl = max(CELL_FNODE_EXCLUSION_DISTANCE) if isinstance(CELL_FNODE_EXCLUSION_DISTANCE, list) else CELL_FNODE_EXCLUSION_DISTANCE
+    if INCLUDE_CELLS and INCLUDE_CELL_FNODE_REPULSION and (fnode_spatial_radius < _max_excl):
+        fnode_spatial_radius = _max_excl
+    _max_birth_reach = max(a + b for a, b in zip(FNODE_BIRTH_LINK_MAX_DISTANCE, FNODE_BIRTH_RADIUS))
+    if INCLUDE_CELLS and INCLUDE_NETWORK_REMODELING and (fnode_spatial_radius < _max_birth_reach):
+        fnode_spatial_radius = _max_birth_reach
     FNODE_spatial_location_message.setRadius(fnode_spatial_radius)
     FNODE_spatial_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS,MIN_EXPECTED_BOUNDARY_POS)
     FNODE_spatial_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS,MAX_EXPECTED_BOUNDARY_POS)
@@ -932,6 +980,7 @@ if INCLUDE_CELLS:
     CELL_spatial_location_message.newVariableInt("completed_cycles")
     CELL_spatial_location_message.newVariableInt("dead")
     CELL_spatial_location_message.newVariableInt("dead_by")
+    CELL_spatial_location_message.newVariableInt("cell_type")
         
     # Set the range and bounds.
     if INCLUDE_FOCAL_ADHESIONS:
@@ -1171,9 +1220,9 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableArrayFloat("k_reaction", N_SPECIES) 
     CELL_agent.newVariableArrayFloat("C_sp", N_SPECIES) 
     CELL_agent.newVariableArrayFloat("M_sp", N_SPECIES) 
-    CELL_agent.newVariableFloat("speed_ref", CELL_SPEED_REF)   
-    CELL_agent.newVariableFloat("radius", CELL_RADIUS)
-    CELL_agent.newVariableFloat("nucleus_radius", CELL_NUCLEUS_RADIUS)
+    CELL_agent.newVariableFloat("speed_ref")   # per-type; set during init
+    CELL_agent.newVariableFloat("radius")        # per-type; set during init
+    CELL_agent.newVariableFloat("nucleus_radius") # per-type; set during init
     CELL_agent.newVariableFloat("cc_dvx", 0.0)  # [um/s] velocity contribution from cell_cell_interaction in x
     CELL_agent.newVariableFloat("cc_dvy", 0.0)  # [um/s] velocity contribution from cell_cell_interaction in y
     CELL_agent.newVariableFloat("cc_dvz", 0.0)  # [um/s] velocity contribution from cell_cell_interaction in z
@@ -1265,6 +1314,7 @@ if INCLUDE_FOCAL_ADHESIONS:
     FOCAD_agent = model.newAgent("FOCAD")
     FOCAD_agent.newVariableInt("id", 0)
     FOCAD_agent.newVariableInt("cell_id")
+    FOCAD_agent.newVariableInt("cell_type", 0)  # cell type of the parent cell (for per-type property lookups)
     FOCAD_agent.newVariableInt("fnode_id")    
     FOCAD_agent.newVariableFloat("x", 0.0)
     FOCAD_agent.newVariableFloat("y", 0.0)
@@ -1501,11 +1551,10 @@ class initAgentPopulations(pyflamegpu.HostFunction):
             if N_CELLS == 1: # DEBUGGING. FIX CELL POSITION TO 0,0,0
                 cell_pos = np.array([[0.0, 0.0, 0.0]], dtype=float) # for testing with 1 cell. 
             cell_orientations = getRandomVectors3D(N_CELLS)
-            k_elast = FLAMEGPU.environment.getPropertyFloat("CELL_K_ELAST")
-            d_dumping = FLAMEGPU.environment.getPropertyFloat("CELL_D_DUMPING")
             cell_id_list = []
             for i in range(N_CELLS):
                 count += 1
+                cell_type_i = i % N_CELL_TYPES  # assign cell types round-robin; customize as needed
                 cell_id_list.append(current_id + count) # store the cell ids in a list to be used for focal adhesion initialization if INCLUDE_FOCAL_ADHESIONS is True
                 instance = FLAMEGPU.agent("CELL").newAgent()
                 instance.setVariableInt("id", current_id + count)
@@ -1519,38 +1568,42 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableFloat("ory", cell_orientations[i, 1])
                 instance.setVariableFloat("orz", cell_orientations[i, 2])
                 instance.setVariableFloat("alignment", 0.0)
-                instance.setVariableFloat("k_elast", k_elast)
-                instance.setVariableFloat("d_dumping", d_dumping)
-                instance.setVariableArrayFloat("C_sp", INIT_CELL_CONCENTRATION_VALS)
-                instance.setVariableArrayFloat("M_sp", INIT_CELL_CONC_MASS_VALS)                
-                instance.setVariableArrayFloat("k_consumption", INIT_CELL_CONSUMPTION_RATES)
-                instance.setVariableArrayFloat("k_production", INIT_CELL_PRODUCTION_RATES)
-                instance.setVariableArrayFloat("k_reaction", INIT_CELL_REACTION_RATES)
-                instance.setVariableFloat("radius", CELL_RADIUS)
-                instance.setVariableFloat("nucleus_radius", CELL_NUCLEUS_RADIUS)
+                instance.setVariableFloat("k_elast", CELL_K_ELAST[cell_type_i])
+                instance.setVariableFloat("d_dumping", CELL_D_DUMPING[cell_type_i])
+                _cell_vol_i = (4.0/3.0) * 3.1415926 * CELL_RADIUS[cell_type_i]**3
+                _conc_mult_i = CELL_INIT_CONCENTRATION_MULTIPLIER[cell_type_i]
+                _C_sp_i = [c * _conc_mult_i for c in INIT_CELL_CONCENTRATION_VALS]
+                _M_sp_i = [c * _cell_vol_i for c in _C_sp_i]
+                instance.setVariableArrayFloat("C_sp", _C_sp_i)
+                instance.setVariableArrayFloat("M_sp", _M_sp_i)                
+                instance.setVariableArrayFloat("k_consumption", [r * CELL_CONSUMPTION_MULTIPLIER[cell_type_i] for r in INIT_CELL_CONSUMPTION_RATES])
+                instance.setVariableArrayFloat("k_production", [r * CELL_PRODUCTION_MULTIPLIER[cell_type_i] for r in INIT_CELL_PRODUCTION_RATES])
+                instance.setVariableArrayFloat("k_reaction", [r * CELL_REACTION_MULTIPLIER[cell_type_i] for r in INIT_CELL_REACTION_RATES])
+                instance.setVariableFloat("radius", CELL_RADIUS[cell_type_i])
+                instance.setVariableFloat("nucleus_radius", CELL_NUCLEUS_RADIUS[cell_type_i])
                 instance.setVariableFloat("cc_dvx", 0.0)
                 instance.setVariableFloat("cc_dvy", 0.0)
                 instance.setVariableFloat("cc_dvz", 0.0)
                 instance.setVariableFloat("cf_dvx", 0.0)
                 instance.setVariableFloat("cf_dvy", 0.0)
                 instance.setVariableFloat("cf_dvz", 0.0)
-                instance.setVariableFloat("speed_ref", CELL_SPEED_REF)
-                instance.setVariableInt("cell_type", 0) # default cell type 0. Can be used to represent different phenotypes, e.g. for different cell lines or for cancer vs stromal cells. The specific meaning of the values assigned to this variable is up to the user and is not defined by the model.
+                instance.setVariableFloat("speed_ref", CELL_SPEED_REF[cell_type_i])
+                instance.setVariableInt("cell_type", cell_type_i)
                 cycle_phase = random.randint(1, 4) # [1:G1] [2:S] [3:G2] [4:M]
                 instance.setVariableInt("cycle_phase", cycle_phase)
                 cycle_clock = 0.0
                 if cycle_phase == 1:
-                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G1_START") 
-                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G1_DURATION")                
+                    cycle_clock = CYCLE_PHASE_G1_START[cell_type_i] \
+                    + np.random.uniform(0.0, 1.0) * CYCLE_PHASE_G1_DURATION[cell_type_i]                
                 elif cycle_phase == 2:
-                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_S_START")
-                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_S_DURATION")                    
+                    cycle_clock = CYCLE_PHASE_S_START[cell_type_i] \
+                    + np.random.uniform(0.0, 1.0) * CYCLE_PHASE_S_DURATION[cell_type_i]                    
                 elif cycle_phase == 3:
-                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G2_START")
-                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_G2_DURATION")                    
+                    cycle_clock = CYCLE_PHASE_G2_START[cell_type_i] \
+                    + np.random.uniform(0.0, 1.0) * CYCLE_PHASE_G2_DURATION[cell_type_i]                    
                 elif cycle_phase == 4:
-                    cycle_clock = FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_M_START")
-                    + np.random.uniform(0.0, 1.0) * FLAMEGPU.environment.getPropertyFloat("CYCLE_PHASE_M_DURATION")                    
+                    cycle_clock = CYCLE_PHASE_M_START[cell_type_i] \
+                    + np.random.uniform(0.0, 1.0) * CYCLE_PHASE_M_DURATION[cell_type_i]                    
                 instance.setVariableFloat("clock", cycle_clock)
                 instance.setVariableInt("completed_cycles",0)
                 instance.setVariableInt("max_global_cell_id", current_id + N_CELLS - 1)
@@ -1564,7 +1617,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableFloat("fnode_birth_cooldown", 0.0)
                 instance.setVariableFloat("focad_birth_cooldown", 0.0)
                 
-                anchor_pos = getRandomCoordsAroundPoint(N_ANCHOR_POINTS, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_NUCLEUS_RADIUS, on_surface=True)
+                anchor_pos = getRandomCoordsAroundPoint(N_ANCHOR_POINTS, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_NUCLEUS_RADIUS[cell_type_i], on_surface=True)
                 instance.setVariableArrayFloat("x_i", anchor_pos[:, 0].tolist())
                 instance.setVariableArrayFloat("y_i", anchor_pos[:, 1].tolist())
                 instance.setVariableArrayFloat("z_i", anchor_pos[:, 2].tolist())
@@ -1622,13 +1675,15 @@ class initAgentPopulations(pyflamegpu.HostFunction):
             print("  |-> current_id:", current_id)
             count = -1
             for i in range(N_CELLS):
-                focad_pos = getRandomCoordsAroundPoint(INIT_N_FOCAD_PER_CELL, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_RADIUS, on_surface=True)
+                cell_type_i = i % N_CELL_TYPES
+                focad_pos = getRandomCoordsAroundPoint(INIT_N_FOCAD_PER_CELL, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_RADIUS[cell_type_i], on_surface=True)
                 for j in range(INIT_N_FOCAD_PER_CELL):
                     count += 1
                     instance = FLAMEGPU.agent("FOCAD").newAgent()
                     instance.setVariableInt("id", current_id + count)
                     instance.setVariableInt("fnode_id", -1) # initialized as not attached to any fibre node
                     instance.setVariableInt("cell_id", cell_id_list[i])
+                    instance.setVariableInt("cell_type", cell_type_i)  # inherit cell type from parent cell
                     instance.setVariableFloat("x", focad_pos[j, 0])
                     instance.setVariableFloat("y", focad_pos[j, 1])
                     instance.setVariableFloat("z", focad_pos[j, 2])                    
@@ -1640,7 +1695,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableFloat("fz", 0.0)
                     instance.setVariableInt("anchor_id", -1) # initialized as not attached to any anchor point
                     focad_dir = focad_pos[j, :] - cell_pos[i, :]
-                    anchor_pos = cell_pos[i, :] + (focad_dir / np.linalg.norm(focad_dir)) * CELL_NUCLEUS_RADIUS
+                    anchor_pos = cell_pos[i, :] + (focad_dir / np.linalg.norm(focad_dir)) * CELL_NUCLEUS_RADIUS[cell_type_i]
                     instance.setVariableFloat("x_i", anchor_pos[0])
                     instance.setVariableFloat("y_i", anchor_pos[1])
                     instance.setVariableFloat("z_i", anchor_pos[2])
@@ -1650,20 +1705,21 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableFloat("orx", cell_orientations[i, 0])
                     instance.setVariableFloat("ory", cell_orientations[i, 1])
                     instance.setVariableFloat("orz", cell_orientations[i, 2])
-                    instance.setVariableFloat("rest_length_0", FOCAD_REST_LENGTH_0)
-                    instance.setVariableFloat("rest_length", FOCAD_REST_LENGTH_0) # initialized at rest length, can be updated during the simulation if needed
-                    instance.setVariableFloat("k_fa", FOCAD_K_FA)
-                    instance.setVariableFloat("f_max", FOCAD_F_MAX) # WARNING: 0 means "no cap" 
+                    _focad_rl0_i = CELL_RADIUS[cell_type_i] - CELL_NUCLEUS_RADIUS[cell_type_i]
+                    instance.setVariableFloat("rest_length_0", _focad_rl0_i)
+                    instance.setVariableFloat("rest_length", _focad_rl0_i)  # initialized at rest length for this cell type
+                    instance.setVariableFloat("k_fa", FOCAD_K_FA[cell_type_i])
+                    instance.setVariableFloat("f_max", FOCAD_F_MAX[cell_type_i]) # WARNING: 0 means "no cap" 
                     instance.setVariableInt("attached", 0) # initialized as not attached
                     instance.setVariableUInt8("active", 1) # initialized as active (can form new attachments)
-                    instance.setVariableFloat("v_c", FOCAD_V_C)
+                    instance.setVariableFloat("v_c", FOCAD_V_C[cell_type_i])
                     instance.setVariableUInt8("fa_state", 1) # [1: nascent] [2: mature] [3: disassembling]
                     instance.setVariableFloat("age", 0.0)
                     instance.setVariableFloat("detached_age", 0.0)
-                    instance.setVariableFloat("k_on", FOCAD_K_ON)
-                    instance.setVariableFloat("k_off_0", FOCAD_K_OFF_0)
-                    instance.setVariableFloat("f_c", FOCAD_F_C)
-                    instance.setVariableFloat("k_reinf", FOCAD_K_REINF)
+                    instance.setVariableFloat("k_on", FOCAD_K_ON[cell_type_i])
+                    instance.setVariableFloat("k_off_0", FOCAD_K_OFF_0[cell_type_i])
+                    instance.setVariableFloat("f_c", FOCAD_F_C[cell_type_i])
+                    instance.setVariableFloat("k_reinf", FOCAD_K_REINF[cell_type_i])
                     instance.setVariableFloat("f_mag", 0.0)
                     instance.setVariableInt("is_front", 0)
                     instance.setVariableInt("is_rear", 0)

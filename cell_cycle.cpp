@@ -123,57 +123,38 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
   }
   
   const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
-  const float CELL_RADIUS = FLAMEGPU->environment.getProperty<float>("CELL_RADIUS");
-  const float CELL_NUCLEUS_RADIUS = FLAMEGPU->environment.getProperty<float>("CELL_NUCLEUS_RADIUS");
-  const float CELL_CYCLE_DURATION = FLAMEGPU->environment.getProperty<float>("CELL_CYCLE_DURATION");
-  const float CYCLE_PHASE_G1_START = FLAMEGPU->environment.getProperty<float>("CYCLE_PHASE_G1_START");
-  const float CYCLE_PHASE_S_START = FLAMEGPU->environment.getProperty<float>("CYCLE_PHASE_S_START");
-  const float CYCLE_PHASE_G2_START = FLAMEGPU->environment.getProperty<float>("CYCLE_PHASE_G2_START");
-  const float CYCLE_PHASE_M_START = FLAMEGPU->environment.getProperty<float>("CYCLE_PHASE_M_START");
-  const float CYCLE_PHASE_G1_DURATION = FLAMEGPU->environment.getProperty<float>("CYCLE_PHASE_G1_DURATION");
-  const float CYCLE_PHASE_M_DURATION = FLAMEGPU->environment.getProperty<float>("CYCLE_PHASE_M_DURATION");
-  const float hypoxia_threshold = FLAMEGPU->environment.getProperty<float>("CELL_HYPOXIA_THRESHOLD");
-  const float nutrient_threshold = FLAMEGPU->environment.getProperty<float>("CELL_NUTRIENT_THRESHOLD");
-  const float stress_threshold = FLAMEGPU->environment.getProperty<float>("CELL_STRESS_THRESHOLD");
-  const float hypoxia_damage_rate = FLAMEGPU->environment.getProperty<float>("CELL_HYPOXIA_DAMAGE_RATE");
-  const float nutrient_damage_rate = FLAMEGPU->environment.getProperty<float>("CELL_NUTRIENT_DAMAGE_RATE");
-  const float stress_damage_rate = FLAMEGPU->environment.getProperty<float>("CELL_STRESS_DAMAGE_RATE");
-  const float basal_damage_repair_rate = FLAMEGPU->environment.getProperty<float>("CELL_BASAL_DAMAGE_REPAIR_RATE");
-  const float acute_hypoxia_threshold = FLAMEGPU->environment.getProperty<float>("CELL_ACUTE_HYPOXIA_THRESHOLD");
-  const float acute_nutrient_threshold = FLAMEGPU->environment.getProperty<float>("CELL_ACUTE_NUTRIENT_THRESHOLD");
-  const float acute_stress_threshold = FLAMEGPU->environment.getProperty<float>("CELL_ACUTE_STRESS_THRESHOLD");
+
+  const uint8_t N_CELL_TYPES = 3; // WARNING: must match main python model N_CELL_TYPES
+  const float CELL_RADIUS = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_RADIUS", agent_cell_type);
+  const float CELL_NUCLEUS_RADIUS = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_NUCLEUS_RADIUS", agent_cell_type);
+  const float CELL_CYCLE_DURATION = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_CYCLE_DURATION", agent_cell_type);
+  const float CYCLE_PHASE_G1_START = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CYCLE_PHASE_G1_START", agent_cell_type);
+  const float CYCLE_PHASE_S_START = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CYCLE_PHASE_S_START", agent_cell_type);
+  const float CYCLE_PHASE_G2_START = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CYCLE_PHASE_G2_START", agent_cell_type);
+  const float CYCLE_PHASE_M_START = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CYCLE_PHASE_M_START", agent_cell_type);
+  const float CYCLE_PHASE_G1_DURATION = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CYCLE_PHASE_G1_DURATION", agent_cell_type);
+  const float CYCLE_PHASE_M_DURATION = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CYCLE_PHASE_M_DURATION", agent_cell_type);
+  const float hypoxia_threshold = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_HYPOXIA_THRESHOLD", agent_cell_type);
+  const float nutrient_threshold = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_NUTRIENT_THRESHOLD", agent_cell_type);
+  const float stress_threshold = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_STRESS_THRESHOLD", agent_cell_type);
+  const float hypoxia_damage_rate = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_HYPOXIA_DAMAGE_RATE", agent_cell_type);
+  const float nutrient_damage_rate = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_NUTRIENT_DAMAGE_RATE", agent_cell_type);
+  const float stress_damage_rate = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_STRESS_DAMAGE_RATE", agent_cell_type);
+  const float basal_damage_repair_rate = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_BASAL_DAMAGE_REPAIR_RATE", agent_cell_type);
+  const float acute_hypoxia_threshold = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_ACUTE_HYPOXIA_THRESHOLD", agent_cell_type);
+  const float acute_nutrient_threshold = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_ACUTE_NUTRIENT_THRESHOLD", agent_cell_type);
+  const float acute_stress_threshold = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_ACUTE_STRESS_THRESHOLD", agent_cell_type);
 
   // Proxies used for death pathways (can be remapped by user model semantics)
   const float oxygen_proxy = agent_C_sp[0];
   const float nutrient_proxy = agent_C_sp[1];
   const float tensile_stress_proxy = fmaxf(0.0f, agent_sig_l1);
 
-  float division_rate_multiplier = 1.0f;
-  float damage_accumulation_multiplier = 1.0f;
-  float damage_repair_multiplier = 1.0f;
-  float damage_death_threshold = 1.0f;
-
-  // User-defined behaviour for cell_type = 0. Add more types and logic as needed.
-  if (agent_cell_type == 0) {
-    division_rate_multiplier = 1.00f;
-    damage_accumulation_multiplier = 1.00f;
-    damage_repair_multiplier = 1.00f;
-    damage_death_threshold = 1.00f;
-  }
-  // User-defined behaviour for cell_type = 1. Add more types and logic as needed.
-  else if (agent_cell_type == 1) {
-    division_rate_multiplier = 1.15f;
-    damage_accumulation_multiplier = 0.85f;
-    damage_repair_multiplier = 1.10f;
-    damage_death_threshold = 1.0f;
-  }
-  // User-defined behaviour for cell_type = 2. Add more types and logic as needed.
-  else if (agent_cell_type == 2) {
-    division_rate_multiplier = 0.85f;
-    damage_accumulation_multiplier = 1.25f;
-    damage_repair_multiplier = 0.85f;
-    damage_death_threshold = 0.80f;
-  }
+  // Per-cell-type multipliers read from environment arrays
+  const float division_rate_multiplier = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("DIVISION_RATE_MULTIPLIER", agent_cell_type);
+  const float damage_accumulation_multiplier = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("DAMAGE_ACCUMULATION_MULTIPLIER", agent_cell_type);
+  const float damage_repair_multiplier = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("DAMAGE_REPAIR_MULTIPLIER", agent_cell_type);
+  const float damage_death_threshold = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("DAMAGE_DEATH_THRESHOLD", agent_cell_type);
 
   // Biologically grounded death pathways via cumulative damage
 

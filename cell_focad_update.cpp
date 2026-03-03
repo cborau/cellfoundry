@@ -203,6 +203,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_focad_update, flamegpu::MessageBucket, flamegpu::Me
   // Read CELL agent state
   // -------------------------
   const int agent_id = FLAMEGPU->getVariable<int>("id");
+  const int agent_cell_type = FLAMEGPU->getVariable<int>("cell_type");
 
   const float agent_x = FLAMEGPU->getVariable<float>("x");
   const float agent_y = FLAMEGPU->getVariable<float>("y");
@@ -227,33 +228,34 @@ FLAMEGPU_AGENT_FUNCTION(cell_focad_update, flamegpu::MessageBucket, flamegpu::Me
   // Material and numerical parameters (environment)
   // -------------------------
   // Note: With nN and um, modulus and stress are in nN/um^2, numerically equal to kPa.
-  const float NUCLEUS_E         = FLAMEGPU->environment.getProperty<float>("NUCLEUS_E");         // [kPa] = [nN/um^2]
-  const float NUCLEUS_NU        = FLAMEGPU->environment.getProperty<float>("NUCLEUS_NU");        // [-]
-  const float NUCLEUS_TAU       = FLAMEGPU->environment.getProperty<float>("NUCLEUS_TAU");       // [s]
-  const float NUCLEUS_EPS_CLAMP = FLAMEGPU->environment.getProperty<float>("NUCLEUS_EPS_CLAMP"); // [-]
+  const uint8_t N_CELL_TYPES = 3; // WARNING: must match model.py
+  const float NUCLEUS_E         = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("NUCLEUS_E", agent_cell_type);         // [kPa] = [nN/um^2]
+  const float NUCLEUS_NU        = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("NUCLEUS_NU", agent_cell_type);        // [-]
+  const float NUCLEUS_TAU       = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("NUCLEUS_TAU", agent_cell_type);       // [s]
+  const float NUCLEUS_EPS_CLAMP = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("NUCLEUS_EPS_CLAMP", agent_cell_type); // [-]
   const float TIME_STEP         = FLAMEGPU->environment.getProperty<float>("TIME_STEP");         // [s]
   const int INCLUDE_ORIENTATION_ALIGN = FLAMEGPU->environment.getProperty<int>("INCLUDE_ORIENTATION_ALIGN");
-  const float ORIENTATION_ALIGN_RATE = FLAMEGPU->environment.getProperty<float>("ORIENTATION_ALIGN_RATE");
+  const float ORIENTATION_ALIGN_RATE = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("ORIENTATION_ALIGN_RATE", agent_cell_type);
   const int ORIENTATION_ALIGN_USE_STRESS = FLAMEGPU->environment.getProperty<int>("ORIENTATION_ALIGN_USE_STRESS");
   const uint32_t ENABLE_FOCAD_BIRTH = FLAMEGPU->environment.getProperty<uint32_t>("ENABLE_FOCAD_BIRTH");
   const uint32_t FOCAD_BIRTH_SPECIES_INDEX = FLAMEGPU->environment.getProperty<uint32_t>("FOCAD_BIRTH_SPECIES_INDEX");
-  const uint32_t FOCAD_BIRTH_N_MIN = FLAMEGPU->environment.getProperty<uint32_t>("FOCAD_BIRTH_N_MIN");
-  const uint32_t FOCAD_BIRTH_N_MAX = FLAMEGPU->environment.getProperty<uint32_t>("FOCAD_BIRTH_N_MAX");
-  const float FOCAD_BIRTH_K_0 = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_K_0");
-  const float FOCAD_BIRTH_K_MAX = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_K_MAX");
-  const float FOCAD_BIRTH_K_SIGMA = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_K_SIGMA");
-  const float FOCAD_BIRTH_HILL_SIGMA = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_HILL_SIGMA");
-  const float FOCAD_BIRTH_K_C = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_K_C");
-  const float FOCAD_BIRTH_HILL_CONC = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_HILL_CONC");
-  const float FOCAD_BIRTH_REFRACTORY = FLAMEGPU->environment.getProperty<float>("FOCAD_BIRTH_REFRACTORY");
+  const uint32_t FOCAD_BIRTH_N_MIN = static_cast<uint32_t>(FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_BIRTH_N_MIN", agent_cell_type));
+  const uint32_t FOCAD_BIRTH_N_MAX = static_cast<uint32_t>(FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_BIRTH_N_MAX", agent_cell_type));
+  const float FOCAD_BIRTH_K_0 = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_BIRTH_K_0", agent_cell_type);
+  const float FOCAD_BIRTH_K_MAX = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_BIRTH_K_MAX", agent_cell_type);
+  const float FOCAD_BIRTH_K_SIGMA = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_BIRTH_K_SIGMA", agent_cell_type);
+  const float FOCAD_BIRTH_HILL_SIGMA = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_BIRTH_HILL_SIGMA", agent_cell_type);
+  const float FOCAD_BIRTH_K_C = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_BIRTH_K_C", agent_cell_type);
+  const float FOCAD_BIRTH_HILL_CONC = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_BIRTH_HILL_CONC", agent_cell_type);
+  const float FOCAD_BIRTH_REFRACTORY = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_BIRTH_REFRACTORY", agent_cell_type);
   const float FOCAD_REST_LENGTH_0 = FLAMEGPU->environment.getProperty<float>("FOCAD_REST_LENGTH_0");
-  const float FOCAD_K_FA = FLAMEGPU->environment.getProperty<float>("FOCAD_K_FA");
-  const float FOCAD_F_MAX = FLAMEGPU->environment.getProperty<float>("FOCAD_F_MAX");
-  const float FOCAD_V_C = FLAMEGPU->environment.getProperty<float>("FOCAD_V_C");
-  const float FOCAD_K_ON = FLAMEGPU->environment.getProperty<float>("FOCAD_K_ON");
-  const float FOCAD_K_OFF_0 = FLAMEGPU->environment.getProperty<float>("FOCAD_K_OFF_0");
-  const float FOCAD_F_C = FLAMEGPU->environment.getProperty<float>("FOCAD_F_C");
-  const float FOCAD_K_REINF = FLAMEGPU->environment.getProperty<float>("FOCAD_K_REINF");
+  const float FOCAD_K_FA = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_K_FA", agent_cell_type);
+  const float FOCAD_F_MAX = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_F_MAX", agent_cell_type);
+  const float FOCAD_V_C = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_V_C", agent_cell_type);
+  const float FOCAD_K_ON = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_K_ON", agent_cell_type);
+  const float FOCAD_K_OFF_0 = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_K_OFF_0", agent_cell_type);
+  const float FOCAD_F_C = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_F_C", agent_cell_type);
+  const float FOCAD_K_REINF = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_K_REINF", agent_cell_type);
 
   const uint8_t N_ANCHOR_POINTS = 100; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
   const uint8_t N_SPECIES = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
@@ -608,6 +610,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_focad_update, flamegpu::MessageBucket, flamegpu::Me
         const int new_focad_id = FLAMEGPU->agent_out.getID();
         FLAMEGPU->agent_out.setVariable<int>("id", new_focad_id);
         FLAMEGPU->agent_out.setVariable<int>("cell_id", agent_id);
+        FLAMEGPU->agent_out.setVariable<int>("cell_type", agent_cell_type);
         FLAMEGPU->agent_out.setVariable<int>("fnode_id", -1);
         FLAMEGPU->agent_out.setVariable<float>("x", lead_x);
         FLAMEGPU->agent_out.setVariable<float>("y", lead_y);

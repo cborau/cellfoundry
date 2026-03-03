@@ -16,6 +16,7 @@
 FLAMEGPU_AGENT_FUNCTION(focad_move, flamegpu::MessageBucket, flamegpu::MessageNone) {
   //Get agent variables (agent calling the function)
   int agent_id = FLAMEGPU->getVariable<int>("id");
+  int agent_cell_type = FLAMEGPU->getVariable<int>("cell_type");
   float agent_x = FLAMEGPU->getVariable<float>("x");
   float agent_y = FLAMEGPU->getVariable<float>("y");
   float agent_z = FLAMEGPU->getVariable<float>("z");
@@ -33,7 +34,8 @@ FLAMEGPU_AGENT_FUNCTION(focad_move, flamegpu::MessageBucket, flamegpu::MessageNo
   const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
   const float MAX_SEARCH_RADIUS_FOCAD = FLAMEGPU->environment.getProperty<float>("MAX_SEARCH_RADIUS_FOCAD");
   const float MAX_FOCAD_ARM_LENGTH = FLAMEGPU->environment.getProperty<float>("MAX_FOCAD_ARM_LENGTH");
-  const float CELL_NUCLEUS_RADIUS = FLAMEGPU->environment.getProperty<float>("CELL_NUCLEUS_RADIUS");
+  const uint8_t N_CELL_TYPES = 3; // WARNING: must match the value in the main python script.
+  const float CELL_NUCLEUS_RADIUS = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_NUCLEUS_RADIUS", agent_cell_type);
 
   if (agent_active == 0 || agent_attached == 0) {
     // move randomly away from the anchor point if not attached, or if active but not attached (this can happen when a focal adhesion detaches but is still active for a few steps)

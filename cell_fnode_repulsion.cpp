@@ -39,11 +39,13 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_repulsion, flamegpu::MessageSpatial3D, flameg
   const float agent_y = FLAMEGPU->getVariable<float>("y");
   const float agent_z = FLAMEGPU->getVariable<float>("z");
   const float agent_radius = FLAMEGPU->getVariable<float>("radius");
+  const int agent_cell_type = FLAMEGPU->getVariable<int>("cell_type");
 
-  const float CELL_D_DUMPING = FLAMEGPU->environment.getProperty<float>("CELL_D_DUMPING");
-  const float CELL_FNODE_REPULSION_K = FLAMEGPU->environment.getProperty<float>("CELL_FNODE_REPULSION_K");
-  const float CELL_FNODE_EXCLUSION_DISTANCE = FLAMEGPU->environment.getProperty<float>("CELL_FNODE_EXCLUSION_DISTANCE");
-  const float CELL_FNODE_DV_MAX = FLAMEGPU->environment.getProperty<float>("CELL_FNODE_DV_MAX");
+  const uint8_t N_CELL_TYPES = 3; // WARNING: must match main python model N_CELL_TYPES
+  const float CELL_D_DUMPING = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_D_DUMPING", agent_cell_type);
+  const float CELL_FNODE_REPULSION_K = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_FNODE_REPULSION_K", agent_cell_type);
+  const float CELL_FNODE_EXCLUSION_DISTANCE = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_FNODE_EXCLUSION_DISTANCE", agent_cell_type);
+  const float CELL_FNODE_DV_MAX = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_FNODE_DV_MAX", agent_cell_type);
 
   const float exclusion = fmaxf(1e-6f, fmaxf(CELL_FNODE_EXCLUSION_DISTANCE, agent_radius));
 

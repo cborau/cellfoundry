@@ -40,6 +40,7 @@ class ReferenceValues:
     model_path: str
     n: int
     n_species: int
+    n_cell_types: int
     max_connectivity: int
     n_anchor_points: int
     boundary_coords: List[Number]
@@ -146,6 +147,7 @@ def load_reference_values(model_path: str) -> ReferenceValues:
 
     N = need_int("N")
     N_SPECIES = need_int("N_SPECIES")
+    N_CELL_TYPES = need_int("N_CELL_TYPES")
     MAX_CONNECTIVITY = need_int("MAX_CONNECTIVITY")
     N_ANCHOR_POINTS = need_int("N_ANCHOR_POINTS")
     BOUNDARY_COORDS = need_boundary()
@@ -187,6 +189,7 @@ def load_reference_values(model_path: str) -> ReferenceValues:
         model_path=model_path,
         n=N,
         n_species=N_SPECIES,
+        n_cell_types=N_CELL_TYPES,
         max_connectivity=MAX_CONNECTIVITY,
         n_anchor_points=N_ANCHOR_POINTS,
         boundary_coords=BOUNDARY_COORDS,
@@ -372,6 +375,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     print(f"N = {ref.n}")
     print(f"N_SPECIES = {ref.n_species}")
+    print(f"N_CELL_TYPES = {ref.n_cell_types}")
     print(f"MAX_CONNECTIVITY = {ref.max_connectivity}")
     print(f"N_ANCHOR_POINTS = {ref.n_anchor_points}")
     print(f"ECM_AGENTS_PER_DIR = {ref.ecm_agents_per_dir}")
@@ -384,6 +388,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     exts = {e.strip().lower() for e in args.exts.split(",") if e.strip()}
     expected = {
         "N_SPECIES": ref.n_species,
+        "N_CELL_TYPES": ref.n_cell_types,
         "ECM_POPULATION_SIZE": ref.ecm_population_size,
         "MAX_CONNECTIVITY": ref.max_connectivity,
         "N_ANCHOR_POINTS": ref.n_anchor_points,

@@ -51,6 +51,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_spatial_location_data, flamegpu::MessageNone, flame
 
   FLAMEGPU->message_out.setVariable<int>("dead", FLAMEGPU->getVariable<int>("dead"));
   FLAMEGPU->message_out.setVariable<int>("dead_by", FLAMEGPU->getVariable<int>("dead_by"));
+  FLAMEGPU->message_out.setVariable<int>("cell_type", FLAMEGPU->getVariable<int>("cell_type"));
 
 
   return flamegpu::ALIVE;

@@ -2739,8 +2739,29 @@ def recompute_derived_params(ns: dict) -> None:
     intentionally left out because changing the grid seed (N) or
     BOUNDARY_COORDS has far-reaching consequences that should be set
     explicitly.
+
+    Handles both scalar and list (per-cell-type) parameters transparently.
     """
     import math
+
+    # Helper: element-wise list operations
+    def _is_list(v):
+        return isinstance(v, (list, tuple))
+
+    def _map1(fn, a):
+        """Apply fn element-wise; works for both scalar and list."""
+        return [fn(x) for x in a] if _is_list(a) else fn(a)
+
+    def _map2(fn, a, b):
+        """Apply fn(a_i, b_i) element-wise; works for both scalar and list."""
+        if _is_list(a) and _is_list(b):
+            return [fn(ai, bi) for ai, bi in zip(a, b)]
+        elif _is_list(a):
+            return [fn(ai, b) for ai in a]
+        elif _is_list(b):
+            return [fn(a, bi) for bi in b]
+        else:
+            return fn(a, b)
 
     # --- Boundary stiffness / damping arrays ---
     if "RELATIVE_BOUNDARY_STIFFNESS" in ns and "BOUNDARY_STIFFNESS_VALUE" in ns:
@@ -2764,55 +2785,82 @@ def recompute_derived_params(ns: dict) -> None:
     if "FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE" in ns:
         eq = ns["FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE"]
         ns["FNODE_CELL_DEGRADATION_RADIUS"] = 0.75 * eq
-        ns["FNODE_BIRTH_RADIUS"] = 0.5 * eq
-        ns["FNODE_BIRTH_LINK_MAX_DISTANCE"] = 2.0 * eq
+        _nct = ns["N_CELL_TYPES"]
+        ns["FNODE_BIRTH_RADIUS"] = [0.5 * eq] * _nct
+        ns["FNODE_BIRTH_LINK_MAX_DISTANCE"] = [2.0 * eq] * _nct
         ns["MAX_SEARCH_RADIUS_FNODES"] = eq / 10.0
 
-    # --- Cell derived ---
+    # --- Cell derived (per-type lists or scalars) ---
     if "CELL_RADIUS" in ns:
-        ns["CELL_NUCLEUS_RADIUS"] = ns["CELL_RADIUS"] / 2
-        ns["CELL_FNODE_EXCLUSION_DISTANCE"] = ns["CELL_RADIUS"]
-        ns["CELL_CELL_ADHESION_RANGE"] = 0.5 * ns["CELL_RADIUS"]
+        cr = ns["CELL_RADIUS"]
+        ns["CELL_NUCLEUS_RADIUS"] = _map1(lambda r: r / 2, cr)
+        ns["CELL_FNODE_EXCLUSION_DISTANCE"] = list(cr) if _is_list(cr) else cr
+        ns["CELL_CELL_ADHESION_RANGE"] = _map1(lambda r: 0.5 * r, cr)
     if "CELL_SPEED_REF" in ns:
-        ns["BROWNIAN_MOTION_STRENGTH"] = ns["CELL_SPEED_REF"] / 10.0
-        ns["CELL_CELL_DV_MAX"] = 0.5 * ns["CELL_SPEED_REF"]
-        ns["CELL_FNODE_DV_MAX"] = 0.5 * ns["CELL_SPEED_REF"]
+        cs = ns["CELL_SPEED_REF"]
+        ns["BROWNIAN_MOTION_STRENGTH"] = _map1(lambda s: s / 10.0, cs)
+        ns["CELL_CELL_DV_MAX"] = _map1(lambda s: 0.5 * s, cs)
+        ns["CELL_FNODE_DV_MAX"] = _map1(lambda s: 0.5 * s, cs)
     if "CELL_K_ELAST" in ns:
-        ns["CELL_CELL_REPULSION_K"] = 2.0 * ns["CELL_K_ELAST"]
-        ns["CELL_CELL_ADHESION_K"] = 0.2 * ns["CELL_K_ELAST"]
-        ns["CELL_FNODE_REPULSION_K"] = 0.5 * ns["CELL_K_ELAST"]
+        ck = ns["CELL_K_ELAST"]
+        ns["CELL_CELL_REPULSION_K"] = _map1(lambda k: 2.0 * k, ck)
+        ns["CELL_CELL_ADHESION_K"] = _map1(lambda k: 0.2 * k, ck)
+        ns["CELL_FNODE_REPULSION_K"] = _map1(lambda k: 0.5 * k, ck)
 
-    # --- Cycle phase starts ---
+    # --- Cycle phase starts (per-type lists or scalars) ---
     g1 = ns.get("CYCLE_PHASE_G1_DURATION")
     s = ns.get("CYCLE_PHASE_S_DURATION")
     g2 = ns.get("CYCLE_PHASE_G2_DURATION")
     m = ns.get("CYCLE_PHASE_M_DURATION")
     if all(v is not None for v in (g1, s, g2, m)):
-        ns["CYCLE_PHASE_G1_START"] = 0.0
-        ns["CYCLE_PHASE_S_START"] = g1
-        ns["CYCLE_PHASE_G2_START"] = g1 + s
-        ns["CYCLE_PHASE_M_START"] = g1 + s + g2
-        ns["CELL_CYCLE_DURATION"] = g1 + s + g2 + m
+        if _is_list(g1):
+            ns["CYCLE_PHASE_G1_START"] = [0.0] * len(g1)
+            ns["CYCLE_PHASE_S_START"] = list(g1)
+            ns["CYCLE_PHASE_G2_START"] = [a + b for a, b in zip(g1, s)]
+            ns["CYCLE_PHASE_M_START"] = [a + b + c for a, b, c in zip(g1, s, g2)]
+            ns["CELL_CYCLE_DURATION"] = [a + b + c + d for a, b, c, d in zip(g1, s, g2, m)]
+        else:
+            ns["CYCLE_PHASE_G1_START"] = 0.0
+            ns["CYCLE_PHASE_S_START"] = g1
+            ns["CYCLE_PHASE_G2_START"] = g1 + s
+            ns["CYCLE_PHASE_M_START"] = g1 + s + g2
+            ns["CELL_CYCLE_DURATION"] = g1 + s + g2 + m
 
-    # --- Cell concentration mass ---
-    if "INIT_CELL_CONCENTRATION_VALS" in ns and "CELL_RADIUS" in ns:
-        r = ns["CELL_RADIUS"]
-        ns["INIT_CELL_CONC_MASS_VALS"] = [c * (4/3 * 3.1415926 * r**3) for c in ns["INIT_CELL_CONCENTRATION_VALS"]]
+    # --- Cell concentration mass (reference copy; actual per-agent mass uses per-type volume at init) ---
+    if "INIT_CELL_CONCENTRATION_VALS" in ns:
+        ns["INIT_CELL_CONC_MASS_VALS"] = list(ns["INIT_CELL_CONCENTRATION_VALS"])
 
-    # --- FOCAD derived ---
-    if "CELL_RADIUS" in ns and "CELL_NUCLEUS_RADIUS" in ns:
-        ns["FOCAD_REST_LENGTH_0"] = ns["CELL_RADIUS"] - ns["CELL_NUCLEUS_RADIUS"]
+    # --- FOCAD derived (scalar env property; per-agent values use actual cell-type radii at init) ---
+    if "CELL_RADIUS" in ns:
+        cr = ns["CELL_RADIUS"]
+        if _is_list(cr):
+            # Reference rest length = shortest across types (conservative for min-rest-length floor)
+            rl_vals = [r - r / 2 for r in cr]
+            ns["FOCAD_REST_LENGTH_0"] = min(rl_vals)
+        else:
+            ns["FOCAD_REST_LENGTH_0"] = cr - cr / 2
         ns["FOCAD_MIN_REST_LENGTH"] = ns["FOCAD_REST_LENGTH_0"] / 10.0
     if "INIT_N_FOCAD_PER_CELL" in ns:
-        ns["FOCAD_BIRTH_N_MAX"] = 3 * ns["INIT_N_FOCAD_PER_CELL"]
+        _nct = ns["N_CELL_TYPES"]
+        ns["FOCAD_BIRTH_N_MAX"] = [float(3 * ns["INIT_N_FOCAD_PER_CELL"])] * _nct
+
+    # --- MAX_FOCAD_ARM_LENGTH uses max CELL_RADIUS ---
+    if "CELL_RADIUS" in ns:
+        cr = ns["CELL_RADIUS"]
+        _max_cr = max(cr) if _is_list(cr) else cr
+        ns["MAX_FOCAD_ARM_LENGTH"] = 3 * _max_cr
 
     # --- Max expected N cells ---
     steps = ns.get("STEPS", 0)
     dt = ns.get("TIME_STEP", 0.1)
     n_cells = ns.get("N_CELLS", 0)
     cycle_dur = ns.get("CELL_CYCLE_DURATION", 0)
-    if ns.get("INCLUDE_CELLS") and ns.get("INCLUDE_CELL_CYCLE") and cycle_dur > 0:
-        doublings = (steps * dt) / cycle_dur
+    if _is_list(cycle_dur):
+        _min_cycle = min(cycle_dur) if cycle_dur else 0
+    else:
+        _min_cycle = cycle_dur
+    if ns.get("INCLUDE_CELLS") and ns.get("INCLUDE_CELL_CYCLE") and _min_cycle > 0:
+        doublings = (steps * dt) / _min_cycle
         ns["MAX_EXPECTED_N_CELLS"] = max(n_cells, int(math.ceil(n_cells * (2.0 ** doublings) * 2.0)))
     else:
         ns["MAX_EXPECTED_N_CELLS"] = n_cells + 1
@@ -2827,12 +2875,39 @@ def apply_param_overrides(ns: dict, overrides: dict) -> None:
         Typically ``globals()`` from model.py.
     overrides : dict
         ``{PARAM_NAME: value}`` pairs to override.
+
+        *   Scalar override:  ``{"CELL_D_DUMPING": 0.5}``
+        *   Full list override: ``{"CELL_RADIUS": [8.0, 9.0, 7.5]}``
+        *   Element override:   ``{"CELL_RADIUS[1]": 9.0}``
     """
+    import re
+    _idx_re = re.compile(r'^(\w+)\[(\d+)\]$')
+
     for key, val in overrides.items():
         if key.startswith("_"):
             continue
-        if key in ns:
-            ns[key] = val
+        m = _idx_re.match(key)
+        if m:
+            # Element-wise override: "PARAM[i]" -> ns["PARAM"][i] = val
+            base_name = m.group(1)
+            idx = int(m.group(2))
+            if base_name in ns and isinstance(ns[base_name], (list, tuple)):
+                lst = list(ns[base_name])
+                if 0 <= idx < len(lst):
+                    lst[idx] = type(lst[idx])(val)
+                    ns[base_name] = lst
+                else:
+                    print(f"WARNING: index {idx} out of range for '{base_name}' (len={len(lst)}), ignoring")
+            else:
+                print(f"WARNING: override key '{key}' — base param '{base_name}' not found or not a list, ignoring")
+        elif key in ns:
+            existing = ns[key]
+            # Scalar-to-list broadcasting: if the model param is a list but the
+            # override is a scalar, broadcast to match the list length.
+            if isinstance(existing, (list, tuple)) and not isinstance(val, (list, tuple)):
+                ns[key] = [type(existing[0])(val)] * len(existing)
+            else:
+                ns[key] = val
         else:
             print(f"WARNING: override key '{key}' not found in model parameters, ignoring")
     recompute_derived_params(ns)

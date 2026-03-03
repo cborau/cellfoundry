@@ -98,6 +98,24 @@ parameters:
   #   high: 30.0
   #   log: true
 
+  # --- Per-cell-type array parameter examples --------------------------------
+  # Use type: array_float with an 'elements' map to tune individual entries
+  # of array parameters.  Only listed indices are optimized; others keep
+  # their model.py default.
+  #
+  # CELL_RADIUS:
+  #   type: array_float
+  #   elements:
+  #     0: {low: 6.0, high: 12.0}
+  #     1: {low: 6.0, high: 12.0}
+  #     2: {low: 6.0, high: 12.0}
+  #
+  # DIVISION_RATE_MULTIPLIER:
+  #   type: array_float
+  #   elements:
+  #     0: {low: 0.5, high: 2.0}
+  #     1: {low: 0.5, high: 2.0}
+
   # Uncomment to tune focal-adhesion stiffness
   # FOCAD_K_FA:
   #   type: float

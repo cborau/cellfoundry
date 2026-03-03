@@ -226,6 +226,23 @@ def make_objective(config: dict, model_script: str, base_result_dir: str):
                 )
             elif ptype == "categorical":
                 val = trial.suggest_categorical(param_name, param_cfg["choices"])
+            elif ptype == "array_float":
+                # Per-element tuning: each specified element index gets its own
+                # trial.suggest_float with a "PARAM[i]" override key.  Unspecified
+                # indices keep their model.py default.
+                elements = param_cfg.get("elements", {})
+                arr_log = param_cfg.get("log", False)
+                for idx_str, elem_cfg in elements.items():
+                    idx = int(idx_str)
+                    elem_name = f"{param_name}[{idx}]"
+                    elem_val = trial.suggest_float(
+                        elem_name,
+                        elem_cfg["low"],
+                        elem_cfg["high"],
+                        log=elem_cfg.get("log", arr_log),
+                    )
+                    overrides[elem_name] = elem_val
+                continue  # element-wise overrides already added; skip the scalar assignment below
             else:
                 raise ValueError(f"Unknown parameter type '{ptype}' for {param_name}")
             overrides[param_name] = val

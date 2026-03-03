@@ -53,6 +53,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   }
   //Get agent variables (agent calling the function)
   int agent_id = FLAMEGPU->getVariable<int>("id");
+  int agent_cell_type = FLAMEGPU->getVariable<int>("cell_type");
   float agent_x = FLAMEGPU->getVariable<float>("x");
   float agent_y = FLAMEGPU->getVariable<float>("y");
   float agent_z = FLAMEGPU->getVariable<float>("z");
@@ -147,18 +148,19 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   const float COORD_BOUNDARY_Z_POS = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES",4);
   const float COORD_BOUNDARY_Z_NEG = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES",5);
 
+  const uint8_t N_CELL_TYPES = 3; // WARNING: must match main python model N_CELL_TYPES
   // Chemotaxis controls
   const int INCLUDE_CHEMOTAXIS = FLAMEGPU->environment.getProperty<int>("INCLUDE_CHEMOTAXIS");
   const int CHEMOTAXIS_ONLY_DIR = FLAMEGPU->environment.getProperty<int>("CHEMOTAXIS_ONLY_DIR"); // 1: change direction only
-  const float CHEMOTAXIS_CHI = FLAMEGPU->environment.getProperty<float>("CHEMOTAXIS_CHI");
+  const float CHEMOTAXIS_CHI = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CHEMOTAXIS_CHI", agent_cell_type);
 
   // Durotaxis controls
   const int INCLUDE_DUROTAXIS = FLAMEGPU->environment.getProperty<int>("INCLUDE_DUROTAXIS");
   const int DUROTAXIS_ONLY_DIR = FLAMEGPU->environment.getProperty<int>("DUROTAXIS_ONLY_DIR"); // 1: change direction only
-  const float FOCAD_MOBILITY_MU = FLAMEGPU->environment.getProperty<float>("FOCAD_MOBILITY_MU");
+  const float FOCAD_MOBILITY_MU = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_MOBILITY_MU", agent_cell_type);
 
   // Recommended additional controls for the blended model
-  const float DUROTAXIS_BLEND_BETA = FLAMEGPU->environment.getProperty<float>("DUROTAXIS_BLEND_BETA"); // 0..1
+  const float DUROTAXIS_BLEND_BETA = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("DUROTAXIS_BLEND_BETA", agent_cell_type); // 0..1
   const int DUROTAXIS_USE_STRESS = FLAMEGPU->environment.getProperty<int>("DUROTAXIS_USE_STRESS");     // 1: stress, 0: strain
 
   // ---------------------------------------------------------------------------
@@ -169,8 +171,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   float dv_x     = 0.0f, dv_y     = 0.0f, dv_z     = 0.0f;     // speed-changing accumulators
 
   // Brownian motion (base component)
-  const float agent_speed_ref = FLAMEGPU->getVariable<float>("speed_ref");
-  const float BROWNIAN_MOTION_STRENGTH = FLAMEGPU->environment.getProperty<float>("BROWNIAN_MOTION_STRENGTH");
+  const float agent_speed_ref = FLAMEGPU->getVariable<float>("speed_ref");  
+  const float BROWNIAN_MOTION_STRENGTH = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("BROWNIAN_MOTION_STRENGTH", agent_cell_type);
   v_base_x += agent_speed_ref * BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));
   v_base_y += agent_speed_ref * BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));
   v_base_z += agent_speed_ref * BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));

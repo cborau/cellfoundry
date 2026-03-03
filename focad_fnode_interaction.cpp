@@ -68,28 +68,30 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   // -------------------------
   // Read environment
   // -------------------------
+  const uint8_t N_CELL_TYPES = 3; // WARNING: must match model.py
+  const int agent_cell_type = FLAMEGPU->getVariable<int>("cell_type");
   const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
   const float MAX_SEARCH_RADIUS_FOCAD = FLAMEGPU->environment.getProperty<float>("MAX_SEARCH_RADIUS_FOCAD");
-  const float FOCAD_POLARITY_KON_FRONT_GAIN = FLAMEGPU->environment.getProperty<float>("FOCAD_POLARITY_KON_FRONT_GAIN");
-  const float FOCAD_POLARITY_KOFF_FRONT_REDUCTION = FLAMEGPU->environment.getProperty<float>("FOCAD_POLARITY_KOFF_FRONT_REDUCTION");
-  const float FOCAD_POLARITY_KOFF_REAR_GAIN = FLAMEGPU->environment.getProperty<float>("FOCAD_POLARITY_KOFF_REAR_GAIN");
-  const float FOCAD_K_FA_0 = FLAMEGPU->environment.getProperty<float>("FOCAD_K_FA");
-  const float FOCAD_F_REINF = FLAMEGPU->environment.getProperty<float>("FOCAD_F_REINF");
-  const float FOCAD_K_FA_MAX = FLAMEGPU->environment.getProperty<float>("FOCAD_K_FA_MAX");
-  const float FOCAD_K_FA_DECAY = FLAMEGPU->environment.getProperty<float>("FOCAD_K_FA_DECAY");
-  const float FOCAD_F_MATURE = FLAMEGPU->environment.getProperty<float>("FOCAD_F_MATURE");
-  const float FOCAD_T_NASCENT_MAX = FLAMEGPU->environment.getProperty<float>("FOCAD_T_NASCENT_MAX");
-  const float FOCAD_T_DETACHED_GRACE = FLAMEGPU->environment.getProperty<float>("FOCAD_T_DETACHED_GRACE");
-  const float FOCAD_T_DISASSEMBLY = FLAMEGPU->environment.getProperty<float>("FOCAD_T_DISASSEMBLY");
+  const float FOCAD_POLARITY_KON_FRONT_GAIN = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_POLARITY_KON_FRONT_GAIN", agent_cell_type);
+  const float FOCAD_POLARITY_KOFF_FRONT_REDUCTION = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_POLARITY_KOFF_FRONT_REDUCTION", agent_cell_type);
+  const float FOCAD_POLARITY_KOFF_REAR_GAIN = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_POLARITY_KOFF_REAR_GAIN", agent_cell_type);
+  const float FOCAD_K_FA_0 = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_K_FA", agent_cell_type);
+  const float FOCAD_F_REINF = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_F_REINF", agent_cell_type);
+  const float FOCAD_K_FA_MAX = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_K_FA_MAX", agent_cell_type);
+  const float FOCAD_K_FA_DECAY = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_K_FA_DECAY", agent_cell_type);
+  const float FOCAD_F_MATURE = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_F_MATURE", agent_cell_type);
+  const float FOCAD_T_NASCENT_MAX = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_T_NASCENT_MAX", agent_cell_type);
+  const float FOCAD_T_DETACHED_GRACE = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_T_DETACHED_GRACE", agent_cell_type);
+  const float FOCAD_T_DISASSEMBLY = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_T_DISASSEMBLY", agent_cell_type);
   const uint32_t USE_CATCH_BOND = FLAMEGPU->environment.getProperty<uint32_t>("USE_CATCH_BOND");
-  const float CATCH_BOND_CATCH_SCALE = FLAMEGPU->environment.getProperty<float>("CATCH_BOND_CATCH_SCALE");
-  const float CATCH_BOND_SLIP_SCALE = FLAMEGPU->environment.getProperty<float>("CATCH_BOND_SLIP_SCALE");
-  const float CATCH_BOND_F_CATCH = FLAMEGPU->environment.getProperty<float>("CATCH_BOND_F_CATCH");
-  const float CATCH_BOND_F_SLIP = FLAMEGPU->environment.getProperty<float>("CATCH_BOND_F_SLIP");
+  const float CATCH_BOND_CATCH_SCALE = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CATCH_BOND_CATCH_SCALE", agent_cell_type);
+  const float CATCH_BOND_SLIP_SCALE = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CATCH_BOND_SLIP_SCALE", agent_cell_type);
+  const float CATCH_BOND_F_CATCH = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CATCH_BOND_F_CATCH", agent_cell_type);
+  const float CATCH_BOND_F_SLIP = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CATCH_BOND_F_SLIP", agent_cell_type);
   const uint32_t INCLUDE_LINC_COUPLING = FLAMEGPU->environment.getProperty<uint32_t>("INCLUDE_LINC_COUPLING");
-  const float LINC_K_ELAST = FLAMEGPU->environment.getProperty<float>("LINC_K_ELAST");
-  const float LINC_D_DUMPING = FLAMEGPU->environment.getProperty<float>("LINC_D_DUMPING");
-  const float LINC_REST_LENGTH = FLAMEGPU->environment.getProperty<float>("LINC_REST_LENGTH");
+  const float LINC_K_ELAST = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("LINC_K_ELAST", agent_cell_type);
+  const float LINC_D_DUMPING = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("LINC_D_DUMPING", agent_cell_type);
+  const float LINC_REST_LENGTH = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("LINC_REST_LENGTH", agent_cell_type);
 
   // Prevent L->0 forever
   const float FOCAD_MIN_REST_LENGTH = FLAMEGPU->environment.getProperty<float>("FOCAD_MIN_REST_LENGTH");

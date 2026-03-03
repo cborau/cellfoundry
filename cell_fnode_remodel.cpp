@@ -53,27 +53,29 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_remodel, flamegpu::MessageSpatial3D, flamegpu
     return flamegpu::ALIVE;
   }
 
+  const uint8_t N_CELL_TYPES = 3;           // must match model.py
   const uint8_t MAX_CONNECTIVITY = 8;      // must match model.py
   const uint8_t N_SPECIES = 2;             // must match model.py
 
+  const int agent_cell_type = FLAMEGPU->getVariable<int>("cell_type");
   const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
-  const float FNODE_BIRTH_K_0 = FLAMEGPU->environment.getProperty<float>("FNODE_BIRTH_K_0");
-  const float FNODE_BIRTH_K_MAX = FLAMEGPU->environment.getProperty<float>("FNODE_BIRTH_K_MAX");
+  const float FNODE_BIRTH_K_0 = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FNODE_BIRTH_K_0", agent_cell_type);
+  const float FNODE_BIRTH_K_MAX = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FNODE_BIRTH_K_MAX", agent_cell_type);
   const uint32_t FNODE_BIRTH_SPECIES_INDEX = FLAMEGPU->environment.getProperty<uint32_t>("FNODE_BIRTH_SPECIES_INDEX");
-  const float FNODE_BIRTH_K_C = FLAMEGPU->environment.getProperty<float>("FNODE_BIRTH_K_C");
-  const float FNODE_BIRTH_HILL_CONC = FLAMEGPU->environment.getProperty<float>("FNODE_BIRTH_HILL_CONC");
-  const float FNODE_BIRTH_K_SIGMA = FLAMEGPU->environment.getProperty<float>("FNODE_BIRTH_K_SIGMA");
-  const float FNODE_BIRTH_HILL_SIGMA = FLAMEGPU->environment.getProperty<float>("FNODE_BIRTH_HILL_SIGMA");
-  const float FNODE_BIRTH_RADIUS = FLAMEGPU->environment.getProperty<float>("FNODE_BIRTH_RADIUS");
-  const float FNODE_BIRTH_LINK_MAX_DISTANCE = FLAMEGPU->environment.getProperty<float>("FNODE_BIRTH_LINK_MAX_DISTANCE");
-  const float FNODE_BIRTH_REFRACTORY = FLAMEGPU->environment.getProperty<float>("FNODE_BIRTH_REFRACTORY");
+  const float FNODE_BIRTH_K_C = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FNODE_BIRTH_K_C", agent_cell_type);
+  const float FNODE_BIRTH_HILL_CONC = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FNODE_BIRTH_HILL_CONC", agent_cell_type);
+  const float FNODE_BIRTH_K_SIGMA = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FNODE_BIRTH_K_SIGMA", agent_cell_type);
+  const float FNODE_BIRTH_HILL_SIGMA = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FNODE_BIRTH_HILL_SIGMA", agent_cell_type);
+  const float FNODE_BIRTH_RADIUS = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FNODE_BIRTH_RADIUS", agent_cell_type);
+  const float FNODE_BIRTH_LINK_MAX_DISTANCE = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FNODE_BIRTH_LINK_MAX_DISTANCE", agent_cell_type);
+  const float FNODE_BIRTH_REFRACTORY = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FNODE_BIRTH_REFRACTORY", agent_cell_type);
   const float FIBRE_SEGMENT_K_ELAST = FLAMEGPU->environment.getProperty<float>("FIBRE_SEGMENT_K_ELAST");
   const float FIBRE_SEGMENT_D_DUMPING = FLAMEGPU->environment.getProperty<float>("FIBRE_SEGMENT_D_DUMPING");
   const float FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE = FLAMEGPU->environment.getProperty<float>("FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE");
 
   float cooldown = FLAMEGPU->getVariable<float>("fnode_birth_cooldown");
   cooldown = fmaxf(0.0f, cooldown - TIME_STEP);
-  printf("CELL %d at (%f, %f, %f) has fnode_birth_cooldown = %f\n", FLAMEGPU->getVariable<int>("id"), FLAMEGPU->getVariable<float>("x"), FLAMEGPU->getVariable<float>("y"), FLAMEGPU->getVariable<float>("z"), cooldown);
+  //printf("CELL %d at (%f, %f, %f) has fnode_birth_cooldown = %f\n", FLAMEGPU->getVariable<int>("id"), FLAMEGPU->getVariable<float>("x"), FLAMEGPU->getVariable<float>("y"), FLAMEGPU->getVariable<float>("z"), cooldown);
   FLAMEGPU->setVariable<float>("fnode_birth_cooldown", cooldown);
   if (cooldown > 0.0f) {
     return flamegpu::ALIVE;
@@ -189,15 +191,15 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_remodel, flamegpu::MessageSpatial3D, flamegpu
   const float pdz = new_z - closest_fnode_z;
   const float closest_fnode_dist = fmaxf(1e-6f, cfnr_length3(pdx, pdy, pdz));
 
-  printf("CELL %d at (%f, %f, %f) is creating FNODE %d at (%f, %f, %f) with closest FNODE %d at (%f, %f, %f), second closest FNODE %d\n",
-    FLAMEGPU->getVariable<int>("id"),
-    agent_x, agent_y, agent_z,
-    new_fnode_id,
-    new_x, new_y, new_z,
-    closest_fnode_id,
-    closest_fnode_x, closest_fnode_y, closest_fnode_z,
-    second_closest_fnode_id
-  );
+  // printf("CELL %d at (%f, %f, %f) is creating FNODE %d at (%f, %f, %f) with closest FNODE %d at (%f, %f, %f), second closest FNODE %d\n",
+  //   FLAMEGPU->getVariable<int>("id"),
+  //   agent_x, agent_y, agent_z,
+  //   new_fnode_id,
+  //   new_x, new_y, new_z,
+  //   closest_fnode_id,
+  //   closest_fnode_x, closest_fnode_y, closest_fnode_z,
+  //   second_closest_fnode_id
+  // );
 
   FLAMEGPU->agent_out.setVariable<int>("id", new_fnode_id);
   FLAMEGPU->agent_out.setVariable<float>("x", new_x);
@@ -273,7 +275,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_remodel, flamegpu::MessageSpatial3D, flamegpu
   }
   FLAMEGPU->agent_out.setVariable<uint8_t>("connectivity_count", initial_connectivity);
 
-  printf("CELL %d is requesting reciprocal link update from closest FNODE %d (and second closest %d) for new FNODE %d\n", FLAMEGPU->getVariable<int>("id"), closest_fnode_id, second_closest_fnode_id, new_fnode_id);
+  //printf("CELL %d is requesting reciprocal link update from closest FNODE %d (and second closest %d) for new FNODE %d\n", FLAMEGPU->getVariable<int>("id"), closest_fnode_id, second_closest_fnode_id, new_fnode_id);
   FLAMEGPU->setVariable<float>("fnode_birth_cooldown", fmaxf(0.0f, FNODE_BIRTH_REFRACTORY));
 
   return flamegpu::ALIVE;
