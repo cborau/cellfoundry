@@ -385,7 +385,7 @@ DUROTAXIS_USE_STRESS = True   # True: use stress eigenpair, False: use strain ei
 
 
 # +====================================================================+
-# | PARAMETER OVERRIDES (for optimization / batch runs)                 |
+# | PARAMETER OVERRIDES (for optimization / batch runs)                |
 # +====================================================================+
 # Load overrides from --overrides <file.json> CLI argument (if any).
 # e.g. python model.py --overrides ./optimizer/optuna_results/best_params.json

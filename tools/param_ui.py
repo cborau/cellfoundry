@@ -5,6 +5,15 @@ import shlex
 from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, Callable, List
 
+# Ensure Qt can find its platform plugins 
+if "QT_QPA_PLATFORM_PLUGIN_PATH" not in os.environ:
+    import importlib.util as _ilu
+    _spec = _ilu.find_spec("PySide6")
+    if _spec and _spec.origin:
+        _plugins = os.path.join(os.path.dirname(_spec.origin), "plugins", "platforms")
+        if os.path.isdir(_plugins):
+            os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = _plugins
+
 from PySide6.QtCore import Qt, QTimer, QProcess, QEvent, QRegularExpression
 from PySide6.QtGui import QColor, QFont, QTextCursor, QSyntaxHighlighter, QTextCharFormat, QIcon, QPalette
 from PySide6.QtWidgets import (
@@ -75,6 +84,10 @@ class PythonHighlighter(QSyntaxHighlighter):
         self.re_operator = re.compile(r"(//|<<|>>|==|!=|<=|>=|\+|\-|\*|/|%|=|<|>|&|\||\^|~)")
         self.re_bracket = re.compile(r"[\(\)\[\]\{\}]")
 
+        self.f_warning = fmt("#FFFFFF", bold=True)
+        self.f_warning.setBackground(QColor("#CC2900"))
+        self.re_warning = re.compile(r"\bWARNING\b")
+
     def highlightBlock(self, text: str):
         is_sub_border = re.match(r"^\s*# \+\+[=\-]+\+\+\s*$", text) is not None
         is_sub_title = re.match(r"^\s*# \+\+\s*.+$", text) is not None
@@ -110,6 +123,9 @@ class PythonHighlighter(QSyntaxHighlighter):
         if m:
             start, end = m.start(), m.end()
             set_fmt(start, end - start, self.f_comment)
+            # Highlight WARNING inside the comment
+            for wm in self.re_warning.finditer(text, start, end):
+                set_fmt(wm.start(), wm.end() - wm.start(), self.f_warning)
             code_part = text[:start]
         else:
             code_part = text
