@@ -69,6 +69,7 @@ COPY_EXCLUDE_DIRS = {
     "assets",
     "optimizer",
     "postprocessing",
+    "tools",
     "_benchmark_workdir",
     "_benchmark_backups",
     "optuna_results",

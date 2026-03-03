@@ -93,7 +93,7 @@ def _load(csv_path: Path) -> pd.DataFrame:
     return df
 
 
-def _savefig(fig: plt.Figure, outdir: Path, name: str, dpi: int = 200) -> None:
+def _savefig(fig: plt.Figure, outdir: Path, name: str, dpi: int = 300) -> None:
     outdir.mkdir(parents=True, exist_ok=True)
     path = outdir / f"{name}.png"
     fig.savefig(path, dpi=dpi, bbox_inches="tight")
@@ -407,7 +407,90 @@ def plot_total_time_bars(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
 
 
 # ---------------------------------------------------------------------------
-# 8. Multi-panel summary (combined figure)
+# 8. Pairwise filled-contour plots (combined figure)
+# ---------------------------------------------------------------------------
+
+def plot_surface_panel(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
+    """Single figure with one filled-contour (contourf) subplot per pair of
+    agent-count columns.  Colour = mean time/step."""
+    cols = [c for c in AGENT_COLS if c in df.columns and df[c].nunique() > 1]
+    if len(cols) < 2:
+        print("  Skipping contourf panel (need ≥2 varied agent columns).")
+        return None
+
+    pairs = [(cols[i], cols[j])
+             for i in range(len(cols)) for j in range(i + 1, len(cols))]
+    n = len(pairs)
+    ncols_grid = min(n, 3)
+    nrows_grid = (n + ncols_grid - 1) // ncols_grid
+
+    fig, axes = plt.subplots(
+        nrows_grid, ncols_grid,
+        figsize=(5.8 * ncols_grid, 4.6 * nrows_grid),
+        squeeze=False,
+    )
+    axes_flat = axes.ravel()
+
+    for k, (col_y, col_x) in enumerate(pairs):
+        ax = axes_flat[k]
+
+        pivot = df.groupby([col_y, col_x])["time_per_step_s"].mean().reset_index()
+        table = pivot.pivot(index=col_y, columns=col_x, values="time_per_step_s")
+        table = table.sort_index(ascending=True)
+        table = table[sorted(table.columns)]
+
+        X_vals = np.array(table.columns, dtype=float)
+        Y_vals = np.array(table.index, dtype=float)
+        X_mesh, Y_mesh = np.meshgrid(X_vals, Y_vals)
+        Z = table.values.astype(float)
+
+        # Use log-spaced levels when the range exceeds one order of magnitude
+        zmin = np.nanmin(Z[Z > 0]) if np.any(Z > 0) else 1e-3
+        zmax = np.nanmax(Z) if np.any(~np.isnan(Z)) else 1.0
+        use_log = (zmax / max(zmin, 1e-12)) > 10
+        if use_log:
+            levels = np.logspace(np.log10(zmin), np.log10(zmax), 12)
+            norm = LogNorm(vmin=zmin, vmax=zmax)
+        else:
+            levels = 12
+            norm = None
+
+        cf = ax.contourf(
+            X_mesh, Y_mesh, Z,
+            levels=levels, cmap="viridis", norm=norm,
+        )
+        # Overlay contour lines with inline value labels
+        cs = ax.contour(
+            X_mesh, Y_mesh, Z,
+            levels=cf.levels, colors="k", linewidths=0.5, alpha=0.55,
+        )
+        ax.clabel(cs, inline=True, fontsize=12, fmt="%.2g")
+
+        ax.set_xlabel(_label(col_x), fontsize=15)
+        ax.set_ylabel(_label(col_y), fontsize=15)
+        ax.set_title(
+            f"{_label(col_y)}  vs  {_label(col_x)}",
+            fontsize=15, pad=6,
+        )
+        ax.tick_params(labelsize=15)
+        ax.ticklabel_format(style="scientific", scilimits=(0, 3),
+                            axis="both", useMathText=True)
+
+    # Hide unused axes
+    for j in range(len(pairs), len(axes_flat)):
+        axes_flat[j].set_visible(False)
+
+    fig.suptitle(
+        "Cellfoundry – Pairwise Cost Contours (mean time/step)",
+        fontsize=13, y=1.01,
+    )
+    fig.tight_layout()
+    _savefig(fig, outdir, "contourf_panel")
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# 9. Multi-panel summary (combined figure)
 # ---------------------------------------------------------------------------
 
 def plot_summary_panel(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
@@ -494,8 +577,8 @@ Examples:
         "--show", action="store_true",
         help="Display figures interactively after saving.")
     parser.add_argument(
-        "--dpi", type=int, default=200,
-        help="Resolution for saved PNGs. Default: 200")
+        "--dpi", type=int, default=300,
+        help="Resolution for saved PNGs. Default: 300")
     args = parser.parse_args()
 
     csv_path = Path(args.csv) if args.csv else DEFAULT_CSV
@@ -546,7 +629,12 @@ Examples:
     if fig:
         all_figs.append(fig)
 
-    # 8 – Multi-panel summary
+    # 8 – Pairwise surface panel
+    fig = plot_surface_panel(df, outdir)
+    if fig:
+        all_figs.append(fig)
+
+    # 9 – Multi-panel summary
     fig = plot_summary_panel(df, outdir)
     if fig:
         all_figs.append(fig)

@@ -40,7 +40,7 @@ DEBUG_PRINTING = False
 PAUSE_EVERY_STEP = False  # If True, the visualization stops every step until P is pressed
 SAVE_PICKLE = True  # If True, dumps model configuration into a pickle file for post-processing
 SHOW_PLOTS = False  # Show plots at the end of the simulation
-SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
+SAVE_DATA_TO_FILE = False  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
 SAVE_EVERY_N_STEPS = 1 # Affects both the .vtk files and the Dataframes storing boundary data
 
 CURR_PATH = pathlib.Path(__file__).resolve().parent
