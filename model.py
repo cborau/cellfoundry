@@ -2371,15 +2371,34 @@ if pyflamegpu.VISUALISATION and VISUALISATION and not ENSEMBLE:
 """
 print(f"[DIAG] About to simulate: ENSEMBLE={ENSEMBLE}, STEPS={STEPS}")
 _sim_start_time = time.time()
-INIT_TIME = _sim_start_time - start_time
-print(f"--- INITIALIZATION TIME: {INIT_TIME:.6f} seconds ---")
+PYTHON_SETUP_TIME = _sim_start_time - start_time
+print(f"--- PYTHON SETUP TIME: {PYTHON_SETUP_TIME:.6f} seconds ---")
 if ENSEMBLE:
     # Execute the ensemble using the specified RunPlans
     errs = ensemble.simulate(ensemble_runs)
+    _sim_end_time = time.time()
+    # Ensemble: fall back to wall-clock timing (per-run internal timers
+    # are not directly accessible from CUDAEnsemble).
+    RTC_TIME = 0.0
+    INIT_FUNCTIONS_TIME = 0.0
+    EXIT_FUNCTIONS_TIME = 0.0
+    SIMULATION_TIME = _sim_end_time - _sim_start_time
+    INIT_TIME = PYTHON_SETUP_TIME
 else:
     simulation.simulate()
-_sim_end_time = time.time()
-SIMULATION_TIME = _sim_end_time - _sim_start_time
+    _sim_end_time = time.time()
+    # Use CUDASimulation's internal high-resolution timers for an accurate
+    # breakdown (see CUDASimulation.h for the C++ API).
+    RTC_TIME = simulation.getElapsedTimeRTCInitialisation()
+    INIT_FUNCTIONS_TIME = simulation.getElapsedTimeInitFunctions()
+    EXIT_FUNCTIONS_TIME = simulation.getElapsedTimeExitFunctions()
+    _step_times = simulation.getElapsedTimeSteps()
+    SIMULATION_TIME = sum(_step_times) if _step_times else 0.0
+    INIT_TIME = PYTHON_SETUP_TIME + RTC_TIME + INIT_FUNCTIONS_TIME
+    print(f"--- Internal timers: RTC={RTC_TIME:.4f}s, "
+          f"InitFunctions={INIT_FUNCTIONS_TIME:.4f}s, "
+          f"Stepping={SIMULATION_TIME:.4f}s ({len(_step_times)} steps), "
+          f"ExitFunctions={EXIT_FUNCTIONS_TIME:.4f}s ---")
 print("[DIAG] simulation.simulate() completed")
 
 
@@ -2387,7 +2406,7 @@ if pyflamegpu.VISUALISATION and VISUALISATION and not ENSEMBLE:
     vis.join() # join the visualisation thread and stops the visualisation closing after the simulation finishes
 
 EXECUTION_TIME = time.time() - start_time
-print(f"[BENCHMARK] EXECUTION_TIME={EXECUTION_TIME:.6f} STEPS={STEPS} TIME_PER_STEP={SIMULATION_TIME/max(STEPS,1):.6f} INIT_TIME={INIT_TIME:.6f} SIMULATION_TIME={SIMULATION_TIME:.6f}")
+print(f"[BENCHMARK] EXECUTION_TIME={EXECUTION_TIME:.6f} STEPS={STEPS} TIME_PER_STEP={SIMULATION_TIME/max(STEPS,1):.6f} INIT_TIME={INIT_TIME:.6f} SIMULATION_TIME={SIMULATION_TIME:.6f} RTC_TIME={RTC_TIME:.6f} INIT_FUNCTIONS_TIME={INIT_FUNCTIONS_TIME:.6f} EXIT_FUNCTIONS_TIME={EXIT_FUNCTIONS_TIME:.6f}")
 
 incL_dir1 = (BPOS_OVER_TIME.iloc[:, POISSON_DIRS[0] * 2] - BPOS_OVER_TIME.iloc[:, POISSON_DIRS[0] * 2 + 1]) - (
         BPOS_OVER_TIME.iloc[0, POISSON_DIRS[0] * 2] - BPOS_OVER_TIME.iloc[0, POISSON_DIRS[0] * 2 + 1])

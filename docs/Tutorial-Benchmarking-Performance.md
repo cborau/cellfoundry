@@ -277,20 +277,28 @@ by `--output`).
 | `CELL_RADIUS` | float | Cell radius (µm) used for this run. |
 | `MAX_SEARCH_RADIUS` | float | `3 × CELL_RADIUS` — cell–cell interaction search radius. |
 | `steps` | int | Number of simulation steps requested. |
-| `init_time_s` | float | CPU-side initialization time (seconds) — agent creation, variable setup, RTC compilation. |
-| `simulation_time_s` | float | GPU simulation loop time (seconds) — the actual step execution. |
-| `total_time_s` | float | Total wall-clock execution time (seconds), `init_time_s + simulation_time_s + overhead`. |
+| `init_time_s` | float | Total initialization time (seconds) = Python setup + RTC compilation + FLAMEGPU init functions (agent creation on GPU). |
+| `simulation_time_s` | float | Pure stepping time (seconds) — sum of per-step durations from `CUDASimulation.getElapsedTimeSteps()`. |
+| `rtc_time_s` | float | RTC (runtime-compiled CUDA) kernel compilation time from `CUDASimulation.getElapsedTimeRTCInitialisation()`. |
+| `init_functions_time_s` | float | FLAMEGPU init-function execution time (agent population creation on GPU) from `CUDASimulation.getElapsedTimeInitFunctions()`. |
+| `exit_functions_time_s` | float | FLAMEGPU exit-function execution time from `CUDASimulation.getElapsedTimeExitFunctions()`. |
+| `total_time_s` | float | Total wall-clock execution time (seconds). |
 | `time_per_step_s` | float | `simulation_time_s / steps` — pure per-step cost excluding initialization. |
 | `status` | str | Run outcome (see [Status Codes](#interpreting-status-codes)). |
 | `timestamp` | str | When the benchmark batch was started. |
 
+> **Note:** `init_time_s` includes three components: (1) Python-level setup
+> (model definition, layer configuration, etc.), (2) RTC kernel compilation,
+> and (3) FLAMEGPU init functions that create agent populations on the GPU.
+> The granular columns `rtc_time_s` and `init_functions_time_s` let you
+> see where initialization cost is concentrated.
+
 ### Example CSV
 
 ```csv
-run,N,ECM_POPULATION_SIZE,N_CELLS,INIT_N_FOCAD_PER_CELL,FOCAD_count_init,N_FNODES,CELL_RADIUS,MAX_SEARCH_RADIUS,steps,init_time_s,simulation_time_s,total_time_s,time_per_step_s,status,timestamp
-1,21,9261,100,5,500,1234,8.412,25.236,10,5.123456,12.345678,17.469134,1.234568,OK,2026-03-03 14:30:00
-2,21,9261,100,5,500,2468,8.412,25.236,10,5.234567,13.456789,18.691356,1.345679,OK,2026-03-03 14:30:00
-3,21,9261,100,5,500,4936,8.412,25.236,10,5.345678,14.567890,19.913568,1.456789,OK,2026-03-03 14:30:00
+run,N,ECM_POPULATION_SIZE,N_CELLS,INIT_N_FOCAD_PER_CELL,FOCAD_count_init,N_FNODES,CELL_RADIUS,MAX_SEARCH_RADIUS,steps,init_time_s,simulation_time_s,rtc_time_s,init_functions_time_s,exit_functions_time_s,total_time_s,time_per_step_s,status,timestamp
+1,21,9261,100,5,500,1234,8.412,25.236,10,5.123456,12.345678,2.100000,1.800000,0.010000,17.469134,1.234568,OK,2026-03-03 14:30:00
+2,21,9261,100,5,500,2468,8.412,25.236,10,5.234567,13.456789,2.200000,1.900000,0.012000,18.691356,1.345679,OK,2026-03-03 14:30:00
 ```
 
 ---
@@ -657,12 +665,26 @@ Files with suffix `.db` are also excluded.
 `model.py` emits a structured line at the end of each run:
 
 ```
-[BENCHMARK] EXECUTION_TIME=17.469134 STEPS=10 TIME_PER_STEP=1.234568 INIT_TIME=5.123456 SIMULATION_TIME=12.345678
+[BENCHMARK] EXECUTION_TIME=17.469134 STEPS=10 TIME_PER_STEP=1.234568 INIT_TIME=5.123456 SIMULATION_TIME=12.345678 RTC_TIME=2.100000 INIT_FUNCTIONS_TIME=1.800000 EXIT_FUNCTIONS_TIME=0.010000
 ```
 
-The benchmark script parses this with a regex. All five fields
+The benchmark script parses this with a regex. The first five fields
 (`EXECUTION_TIME`, `STEPS`, `TIME_PER_STEP`, `INIT_TIME`,
-`SIMULATION_TIME`) are required.
+`SIMULATION_TIME`) are required. The three additional fields
+(`RTC_TIME`, `INIT_FUNCTIONS_TIME`, `EXIT_FUNCTIONS_TIME`)
+are optional and come from `CUDASimulation`'s internal high-resolution
+timers.
+
+Timing definitions:
+
+| Field | Source | What it measures |
+|-------|--------|------------------|
+| `EXECUTION_TIME` | `time.time()` wall-clock | Total Python process time |
+| `INIT_TIME` | Python setup + RTC + init functions | Everything before the first simulation step |
+| `SIMULATION_TIME` | `sum(CUDASimulation.getElapsedTimeSteps())` | Pure stepping time (excludes init/exit) |
+| `RTC_TIME` | `CUDASimulation.getElapsedTimeRTCInitialisation()` | CUDA kernel compilation |
+| `INIT_FUNCTIONS_TIME` | `CUDASimulation.getElapsedTimeInitFunctions()` | Agent population creation on GPU |
+| `EXIT_FUNCTIONS_TIME` | `CUDASimulation.getElapsedTimeExitFunctions()` | Exit function execution |
 
 ---
 

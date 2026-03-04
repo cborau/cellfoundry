@@ -96,6 +96,9 @@ RE_ECM_POP_CPP = re.compile(
 RE_BENCHMARK = re.compile(
     r"\[BENCHMARK\]\s+EXECUTION_TIME=([\d.]+)\s+STEPS=(\d+)\s+TIME_PER_STEP=([\d.]+)"
     r"\s+INIT_TIME=([\d.]+)\s+SIMULATION_TIME=([\d.]+)"
+    r"(?:\s+RTC_TIME=([\d.]+))?"
+    r"(?:\s+INIT_FUNCTIONS_TIME=([\d.]+))?"
+    r"(?:\s+EXIT_FUNCTIONS_TIME=([\d.]+))?"
 )
 
 
@@ -322,14 +325,25 @@ def _run_single(
         time_per_step = float(m.group(3))
         init_time = float(m.group(4))
         sim_time = float(m.group(5))
+        rtc_time = float(m.group(6)) if m.group(6) else None
+        init_func_time = float(m.group(7)) if m.group(7) else None
+        exit_func_time = float(m.group(8)) if m.group(8) else None
+        detail_parts = []
+        if rtc_time is not None:
+            detail_parts.append(f"rtc={rtc_time:.2f}s")
+        if init_func_time is not None:
+            detail_parts.append(f"init_funcs={init_func_time:.2f}s")
+        detail_str = f" ({', '.join(detail_parts)})" if detail_parts else ""
         print(f"  OK: {total_time:.2f}s total, "
-              f"init={init_time:.2f}s, sim={sim_time:.2f}s, "
+              f"init={init_time:.2f}s{detail_str}, sim={sim_time:.2f}s, "
               f"{time_per_step:.4f}s/step ({actual_steps} steps)")
         return _make_result(
             n, ecm_pop, n_cells, init_focad, n_fnodes,
             cell_radius, search_radius, steps,
             total_time_s=total_time, time_per_step_s=time_per_step,
             init_time_s=init_time, simulation_time_s=sim_time,
+            rtc_time_s=rtc_time, init_functions_time_s=init_func_time,
+            exit_functions_time_s=exit_func_time,
             status="OK",
         )
 
@@ -358,6 +372,8 @@ def _make_result(
     cell_radius, search_radius, steps,
     total_time_s=None, time_per_step_s=None,
     init_time_s=None, simulation_time_s=None,
+    rtc_time_s=None, init_functions_time_s=None,
+    exit_functions_time_s=None,
     status="",
 ) -> dict:
     return {
@@ -372,6 +388,9 @@ def _make_result(
         "steps": steps,
         "init_time_s": init_time_s,
         "simulation_time_s": simulation_time_s,
+        "rtc_time_s": rtc_time_s,
+        "init_functions_time_s": init_functions_time_s,
+        "exit_functions_time_s": exit_functions_time_s,
         "total_time_s": total_time_s,
         "time_per_step_s": time_per_step_s,
         "status": status,
@@ -386,6 +405,7 @@ FIELDNAMES = [
     "run", "N", "ECM_POPULATION_SIZE", "N_CELLS", "INIT_N_FOCAD_PER_CELL",
     "FOCAD_count_init", "N_FNODES", "CELL_RADIUS", "MAX_SEARCH_RADIUS",
     "steps", "init_time_s", "simulation_time_s",
+    "rtc_time_s", "init_functions_time_s", "exit_functions_time_s",
     "total_time_s", "time_per_step_s", "status", "timestamp",
 ]
 

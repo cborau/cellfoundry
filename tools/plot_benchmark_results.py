@@ -94,7 +94,8 @@ def _load(csv_path: Path) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
     df = df[df["status"].str.startswith("OK", na=False)].copy()
     for col in ("time_per_step_s", "total_time_s", "init_time_s",
-                 "simulation_time_s", "CELL_RADIUS", "MAX_SEARCH_RADIUS"):
+                 "simulation_time_s", "rtc_time_s", "init_functions_time_s",
+                 "exit_functions_time_s", "CELL_RADIUS", "MAX_SEARCH_RADIUS"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     df.dropna(subset=["time_per_step_s"], inplace=True)
@@ -649,11 +650,29 @@ def plot_init_vs_sim_time(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
     ax = axes[1]
     sorted_df = df.sort_values("total_time_s", ascending=True).reset_index(drop=True)
     idx = range(len(sorted_df))
-    ax.barh(list(idx), sorted_df["init_time_s"].values,
-            color="C0", label="Initialization")
-    ax.barh(list(idx), sorted_df["simulation_time_s"].values,
-            left=sorted_df["init_time_s"].values,
-            color="C1", label="Simulation")
+
+    # Use granular breakdown if available; otherwise fall back to init/sim split
+    has_rtc = "rtc_time_s" in sorted_df.columns and sorted_df["rtc_time_s"].notna().any()
+    has_ifunc = "init_functions_time_s" in sorted_df.columns and sorted_df["init_functions_time_s"].notna().any()
+
+    if has_rtc and has_ifunc:
+        # Granular: python setup | RTC | init functions | stepping
+        rtc = sorted_df["rtc_time_s"].fillna(0).values
+        ifunc = sorted_df["init_functions_time_s"].fillna(0).values
+        py_setup = (sorted_df["init_time_s"].values - rtc - ifunc).clip(min=0)
+        stepping = sorted_df["simulation_time_s"].values
+
+        ax.barh(list(idx), py_setup, color="C4", label="Python setup")
+        ax.barh(list(idx), rtc, left=py_setup, color="C0", label="RTC compilation")
+        ax.barh(list(idx), ifunc, left=py_setup + rtc, color="C2", label="Init functions")
+        ax.barh(list(idx), stepping, left=py_setup + rtc + ifunc,
+                color="C1", label="Stepping")
+    else:
+        ax.barh(list(idx), sorted_df["init_time_s"].values,
+                color="C0", label="Initialization")
+        ax.barh(list(idx), sorted_df["simulation_time_s"].values,
+                left=sorted_df["init_time_s"].values,
+                color="C1", label="Simulation")
     # Build concise labels
     labels = []
     for _, r in sorted_df.iterrows():
