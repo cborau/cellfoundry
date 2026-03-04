@@ -25,7 +25,8 @@ from helper_module import compute_expected_boundary_pos_from_corners, getRandomV
 
 # TODO LIST:
 # Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
-# Prepare model initialization/output for automatic parameter tuning (e.g. with Optuna) by allowing to load parameters from a config file or command-line arguments, and by saving outputs in a structured way for easy analysis.
+# Prepare networks of different sizes and densities to test performance.
+# Test organoid calibration
 
 start_time = time.time()
 
@@ -71,7 +72,7 @@ ECM_D_DUMPING = 0.04  # [nN·s/um]
 ECM_ETA = 2.0  # [nN·s/µm] Effective drag for overdamped FNODE motion (calibration parameter)
 
 #BOUNDARY_COORDS = [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]  # +X,-X,+Y,-Y,+Z,-Z
-BOUNDARY_COORDS = [100.0, -100.0, 100.0, -100.0, 100.0, -100.0]# microdevice dimensions in um
+BOUNDARY_COORDS = [500.0, -500.0, 500.0, -500.0, 500.0, -500.0]# microdevice dimensions in um
 #BOUNDARY_COORDS = [coord / 1000.0 for coord in BOUNDARY_COORDS] # in mm
 BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
 BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[um/s]
@@ -214,7 +215,7 @@ N_CELL_TYPES = 3
 
 INCLUDE_CELLS = True
 INCLUDE_CELL_CELL_INTERACTION = False # TODO: implement cell-cell repulsion and adhesion
-INCLUDE_CELL_CYCLE = True # If True, cells go through a simplified cell cycle with G1, S, G2 and M phases, which can affect their behavior. Also includes birth/death dynamics (WARNING: USER-DEFINED in cell_cycle.cpp).
+INCLUDE_CELL_CYCLE = False # If True, cells go through a simplified cell cycle with G1, S, G2 and M phases, which can affect their behavior. Also includes birth/death dynamics (WARNING: USER-DEFINED in cell_cycle.cpp).
 DEAD_CELLS_DISAPPEAR = False  # If True, dead CELL agents are removed; if False, they remain inert with dead=1.
 PERIODIC_BOUNDARIES_FOR_CELLS = False
 INCLUDE_CELL_FNODE_REPULSION = True
@@ -2369,11 +2370,16 @@ if pyflamegpu.VISUALISATION and VISUALISATION and not ENSEMBLE:
   Execution
 """
 print(f"[DIAG] About to simulate: ENSEMBLE={ENSEMBLE}, STEPS={STEPS}")
+_sim_start_time = time.time()
+INIT_TIME = _sim_start_time - start_time
+print(f"--- INITIALIZATION TIME: {INIT_TIME:.6f} seconds ---")
 if ENSEMBLE:
     # Execute the ensemble using the specified RunPlans
     errs = ensemble.simulate(ensemble_runs)
 else:
     simulation.simulate()
+_sim_end_time = time.time()
+SIMULATION_TIME = _sim_end_time - _sim_start_time
 print("[DIAG] simulation.simulate() completed")
 
 
@@ -2381,8 +2387,7 @@ if pyflamegpu.VISUALISATION and VISUALISATION and not ENSEMBLE:
     vis.join() # join the visualisation thread and stops the visualisation closing after the simulation finishes
 
 EXECUTION_TIME = time.time() - start_time
-print("--- EXECUTION TIME: %s seconds ---" % EXECUTION_TIME)
-print(f"[BENCHMARK] EXECUTION_TIME={EXECUTION_TIME:.6f} STEPS={STEPS} TIME_PER_STEP={EXECUTION_TIME/max(STEPS,1):.6f}")
+print(f"[BENCHMARK] EXECUTION_TIME={EXECUTION_TIME:.6f} STEPS={STEPS} TIME_PER_STEP={SIMULATION_TIME/max(STEPS,1):.6f} INIT_TIME={INIT_TIME:.6f} SIMULATION_TIME={SIMULATION_TIME:.6f}")
 
 incL_dir1 = (BPOS_OVER_TIME.iloc[:, POISSON_DIRS[0] * 2] - BPOS_OVER_TIME.iloc[:, POISSON_DIRS[0] * 2 + 1]) - (
         BPOS_OVER_TIME.iloc[0, POISSON_DIRS[0] * 2] - BPOS_OVER_TIME.iloc[0, POISSON_DIRS[0] * 2 + 1])

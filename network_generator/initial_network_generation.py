@@ -1,4 +1,5 @@
 import numpy as np
+import time as _time
 
 def initial_network_generation(rho, lx, ly, lz, l_fiber, n_neighbors_to_try):
     """
@@ -8,6 +9,11 @@ def initial_network_generation(rho, lx, ly, lz, l_fiber, n_neighbors_to_try):
     """
     # Number of nodes
     N = round(rho * lx * ly * lz)
+    volume = lx * ly * lz
+    print(f'[init] rho={rho}, volume={volume:.0f}, N={N} nodes')
+    print(f'[init] Fiber assignment loop is O(N^2) — {N}^2 = {N**2:.2e} operations')
+    if N > 50000:
+        print(f'[init] WARNING: N={N} is very large. This will be slow (minutes to hours).')
     
     # Number of boundary nodes
     NBx = round(.05 * (N))
@@ -76,8 +82,23 @@ def initial_network_generation(rho, lx, ly, lz, l_fiber, n_neighbors_to_try):
     current_valency_matrix[:, 0] = np.arange(N)
     fiberid = 0
     n_wll = 0
+    _t0 = _time.time()
+    _last_print = _t0
+    _print_interval = 5.0  # seconds between progress prints
+    print(f'[init] Starting fiber assignment loop over {N} nodes...')
     
     for k in range(N):
+        _now = _time.time()
+        if _now - _last_print >= _print_interval or k == 0:
+            elapsed = _now - _t0
+            if k > 0:
+                eta = elapsed / k * (N - k)
+                print(f'[init]   node {k}/{N} ({100*k/N:.1f}%) — '
+                      f'elapsed {elapsed:.1f}s, ETA {eta:.1f}s, '
+                      f'fibers so far: {fiberid}, whileloop breaks: {n_wll}')
+            else:
+                print(f'[init]   node {k}/{N} — starting...')
+            _last_print = _now
         currentvalency = current_valency_matrix[k, 1]
         node_loc = nodes[k, :]
         neighbors = []
@@ -118,6 +139,10 @@ def initial_network_generation(rho, lx, ly, lz, l_fiber, n_neighbors_to_try):
             current_valency_matrix[endpoint, 1] += 1
             fiberid += 1
     
+    _elapsed_total = _time.time() - _t0
+    print(f'[init] Fiber assignment loop done: {fiberid} fibers in {_elapsed_total:.1f}s '
+          f'({n_wll} whileloop breaks)')
+
     # Crop fibers
     fibers = fibers[~np.all(fibers == 0, axis=1)]
     
@@ -152,14 +177,19 @@ def initial_network_generation(rho, lx, ly, lz, l_fiber, n_neighbors_to_try):
     val_2 = np.where(valencycheck == 2)[0]
     print(f'N valency=2 is {len(val_2)}')
     
+    print(f'[init] Fixing under-connected nodes: '
+          f'{len(val_0)} with valency 0, {len(val_1)} with valency 1, {len(val_2)} with valency 2')
     add_fibers_0_1 = np.zeros((len(val_0), 2), dtype=int)
     add_fibers_0_2 = add_fibers_0_1.copy()
     add_fibers_0_3 = add_fibers_0_1.copy()
     add_fibers_1_1 = np.zeros((len(val_1), 2), dtype=int)
     add_fibers_1_2 = add_fibers_1_1.copy()
     add_fibers_3 = np.zeros((len(val_2), 2), dtype=int)
+    _t_fix = _time.time()
     
     for k in range(len(val_0)):
+        if k % max(1, len(val_0)//5) == 0 and len(val_0) > 100:
+            print(f'[init]   valency-0 fix: {k}/{len(val_0)}')
         distances = np.sqrt(np.sum((nodes[val_0[k], :] - nodes) ** 2, axis=1))
         neighbors = np.argsort(distances)[1:4]
         add_fibers_0_1[k, :] = [val_0[k], neighbors[0]]
@@ -167,16 +197,22 @@ def initial_network_generation(rho, lx, ly, lz, l_fiber, n_neighbors_to_try):
         add_fibers_0_3[k, :] = [val_0[k], neighbors[2]]
     
     for k in range(len(val_1)):
+        if k % max(1, len(val_1)//5) == 0 and len(val_1) > 100:
+            print(f'[init]   valency-1 fix: {k}/{len(val_1)}')
         distances = np.sqrt(np.sum((nodes[val_1[k], :] - nodes) ** 2, axis=1))
         neighbors = np.argsort(distances)[1:3]
         add_fibers_1_1[k, :] = [val_1[k], neighbors[0]]
         add_fibers_1_2[k, :] = [val_1[k], neighbors[1]]
     
     for k in range(len(val_2)):
+        if k % max(1, len(val_2)//5) == 0 and len(val_2) > 100:
+            print(f'[init]   valency-2 fix: {k}/{len(val_2)}')
         distances = np.sqrt(np.sum((nodes[val_2[k], :] - nodes) ** 2, axis=1))
         neighbor = np.argsort(distances)[1]
         add_fibers_3[k, :] = [val_2[k], neighbor]
     
+    _t_fix_done = _time.time()
+    print(f'[init] Valency fix done in {_t_fix_done - _t_fix:.1f}s')
     fibers = np.vstack([fibers, add_fibers_0_1, add_fibers_0_2, add_fibers_0_3, add_fibers_1_1, add_fibers_1_2, add_fibers_3])
     
     for k in range(N):

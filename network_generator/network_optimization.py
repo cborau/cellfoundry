@@ -1,4 +1,5 @@
 import numpy as np
+import time as _time
 
 def network_optimization(fraction_to_try_swap, N, nodes, fibers, N_anneal, lx, ly, lz, l_fiber, fiberlengths, fiberenergy, N1, N2, N_boundary_nodes, stepsize, swap_skip_energy, enforce_bounds=False, bounds=None, bound_mode="reject", min_swap_sweeps=0, return_stats=False):
     """
@@ -29,6 +30,7 @@ def network_optimization(fraction_to_try_swap, N, nodes, fibers, N_anneal, lx, l
     n_swaps_rejected = 0
     n_accepted = 0
     n_prob = 0
+    _opt_t0 = _time.time()
     
     # Initialize node_fiber_matrix
     node_fiber_mat = np.full((len(nodes), 10), np.nan)
@@ -38,10 +40,19 @@ def network_optimization(fraction_to_try_swap, N, nodes, fibers, N_anneal, lx, l
         node_fiber_mat[i, :len(nlf)] = nlf
     
     for m in range(N_anneal):
+        _sweep_t0 = _time.time()
+        _sweep_type = "swap" if swap_sweep_mask[m] else "displacement"
+        print(f'  [opt] Anneal sweep {m+1}/{N_anneal} ({_sweep_type})...', end='', flush=True)
         if not swap_sweep_mask[m]:
             # Do node displacement, just on interior nodes
-            for j in N_interior:
+            _last_pct = -1
+            for j_idx, j in enumerate(N_interior):
                 anneal_id += 1
+                pct = 100 * j_idx // N_int
+                if pct >= _last_pct + 25:
+                    _last_pct = pct
+                    if pct > 0:
+                        print(f' {pct}%', end='', flush=True)
                 # Try displacing the jth node by a random 3D spatial step
                 newx = nodes[j, 0] + stepsize * (2 * (-.5 + np.random.rand())) * (((N_anneal * N_int) - n_accepted) / (N_anneal * N_int))
                 newy = nodes[j, 1] + (ly / lx) * stepsize * (2 * (-.5 + np.random.rand())) * (((N_anneal * N_int) - n_accepted) / (N_anneal * N_int))
@@ -96,7 +107,13 @@ def network_optimization(fraction_to_try_swap, N, nodes, fibers, N_anneal, lx, l
                     n_accepted += 1
         else:
             # Do node swapping
+            _last_pct = -1
             for j in range(N):
+                pct = 100 * j // N
+                if pct >= _last_pct + 25:
+                    _last_pct = pct
+                    if pct > 0:
+                        print(f' {pct}%', end='', flush=True)
                 node1 = j
                 n1f = node_fiber_mat[node1, ~np.isnan(node_fiber_mat[node1, :])].astype(int)
                 current_nodal_energy = fiberenergy[n1f]
@@ -218,6 +235,11 @@ def network_optimization(fraction_to_try_swap, N, nodes, fibers, N_anneal, lx, l
                         break
                     else:
                         n_swaps_rejected += 1
+        _sweep_elapsed = _time.time() - _sweep_t0
+        _total_elapsed = _time.time() - _opt_t0
+        _sweeps_done = m + 1
+        _eta = (_total_elapsed / _sweeps_done) * (N_anneal - _sweeps_done)
+        print(f' done ({_sweep_elapsed:.1f}s, accepted={n_accepted}, ETA remaining={_eta:.0f}s)')
     
     percent_accepted_iterations = 100 * n_accepted / anneal_id if anneal_id > 0 else 0.0
     print(f'Percent accepted iterations for that optimization run = {percent_accepted_iterations}')

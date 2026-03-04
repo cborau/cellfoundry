@@ -171,17 +171,17 @@ if __name__ == "__main__":
     MAX_CONNECTIVITY = 8
     # Units: choose any consistent spatial unit (e.g., microns).
     # All lengths below (LX, LY, LZ, L_FIBER, EDGE_LENGTH, SNAP_DISTANCE) use that unit.
-    LX = 200
-    LY = 200
-    LZ = 200
+    LX = 1000
+    LY = 1000
+    LZ = 1000
     L_FIBER = 45.0
-    RHO = 0.0001 # number of nodes per unit volume
+    RHO = 0.000001 # number of nodes per unit volume
 
     # EDGE_LENGTH controls the target segment length when splitting long fibers.
     # Units must match l_fiber and lx/ly/lz.
-    EDGE_LENGTH = 15.0
-    file_name = 'network_3d.pkl'
-    file_path = os.path.abspath(file_name)
+    EDGE_LENGTH = 45.0
+    file_name = 'network_low_density'
+    file_path = os.path.abspath(file_name + '.pkl')
 
     # ENFORCE_BOUNDS keeps optimization moves inside the initial box.
     # BOUND_MODE="reject" skips out-of-bounds moves; "clip" clamps them to the box.
@@ -210,9 +210,9 @@ if __name__ == "__main__":
     #           local minima, then becomes more selective. More sweeps = more trials.
     # N_optimize: number of outer rounds with progressively smaller stepsizes and
     #            swap fractions (cooling schedule), refining the network.
-    N_ANNEAL = 15
-    N_OPTIMIZE = 5
-    N_BRANCHING_OPTIMIZE = 6
+    N_ANNEAL = 50
+    N_OPTIMIZE = 50
+    N_BRANCHING_OPTIMIZE = 20
 
     if os.path.exists(file_name):
         print(f'Loading network from {file_path}')
@@ -274,7 +274,7 @@ if __name__ == "__main__":
         #plt.show()
         # Save to a pickle file
         print(f'Saving network to {file_path}')
-        with open('network_3d.pkl', 'wb') as f:
+        with open(file_name + '.pkl', 'wb') as f:
             pickle.dump(
                 {
                     'node_coords': new_nodes,
@@ -297,7 +297,7 @@ if __name__ == "__main__":
     
     # get_valency_and_pore_size(nodes, connectivity, MAX_CONNECTIVITY)
     scalar_vars, vector_vars = generate_random_vars(nodes)
-    save_network_to_vtk('network_3d.vtk', nodes, connectivity, scalar_vars=scalar_vars, vector_vars=vector_vars)
+    save_network_to_vtk(file_name + '.vtk', nodes, connectivity, scalar_vars=scalar_vars, vector_vars=vector_vars)
     # median_edge_length = get_node_median_distance(nodes, connectivity, plot_histogram=True)
     # print(f'Median edge length: {median_edge_length}')
     # plot_network_3d(nodes, connectivity, title ='before fix')

@@ -14,14 +14,15 @@ Usage
     python tools/benchmark_perf.py --steps 10
     python tools/benchmark_perf.py --steps 20 --dry-run
     python tools/benchmark_perf.py --steps 10 --n 21 41 --n-cells 100 1000 --focad 5 25
+    python tools/benchmark_perf.py --steps 10 --n 21 41 --cell-radius 5.0 8.412 15.0
 
 The script:
   1. Copies all source files into a disposable working directory under
      ``tools/_benchmark_workdir/<timestamp>/`` (heavy folders like .git,
      result_files, results, __pycache__ are excluded).
-  2. For each (N, N_CELLS, INIT_N_FOCAD_PER_CELL, network) combination
-     it patches the *copies* of the .cpp and model.py files and runs the
-     simulation as a subprocess from the working directory.
+  2. For each (N, N_CELLS, INIT_N_FOCAD_PER_CELL, CELL_RADIUS, network)
+     combination it patches the *copies* of the .cpp and model.py files
+     and runs the simulation as a subprocess from the working directory.
   3. Parses stdout for the ``[BENCHMARK]`` line emitted by model.py.
   4. When finished, the working directory is deleted (pass ``--keep-workdir``
      to keep it for inspection).
@@ -32,8 +33,8 @@ What gets patched (in the working copy only)
 - ``model.py``  ``N = <val>``  (changes ECM grid density)
 - 5 ``.cpp`` files  ``ECM_POPULATION_SIZE = <N^3>``  (template parameter)
 - Runtime overrides via JSON: ``N_CELLS``, ``INIT_N_FOCAD_PER_CELL``,
-  ``STEPS``, ``SAVE_DATA_TO_FILE``, ``SAVE_PICKLE``, ``SHOW_PLOTS``,
-  ``VISUALISATION``, ``NETWORK_FILE``
+  ``CELL_RADIUS``, ``STEPS``, ``SAVE_DATA_TO_FILE``, ``SAVE_PICKLE``,
+  ``SHOW_PLOTS``, ``VISUALISATION``, ``NETWORK_FILE``
 """
 from __future__ import annotations
 
@@ -71,7 +72,6 @@ COPY_EXCLUDE_DIRS = {
     "postprocessing",
     "tools",
     "_benchmark_workdir",
-    "_benchmark_backups",
     "optuna_results",
     ".vscode",
     "node_modules",
@@ -95,6 +95,7 @@ RE_ECM_POP_CPP = re.compile(
 )
 RE_BENCHMARK = re.compile(
     r"\[BENCHMARK\]\s+EXECUTION_TIME=([\d.]+)\s+STEPS=(\d+)\s+TIME_PER_STEP=([\d.]+)"
+    r"\s+INIT_TIME=([\d.]+)\s+SIMULATION_TIME=([\d.]+)"
 )
 
 
@@ -220,6 +221,7 @@ def _run_single(
     n: int,
     n_cells: int,
     init_focad: int,
+    cell_radius: float,
     steps: int,
     network_file: str,
     run_index: int,
@@ -230,6 +232,7 @@ def _run_single(
     """Patch working copy, run model.py, parse output, return metrics dict."""
 
     ecm_pop = _compute_ecm_pop(n)
+    search_radius = 3.0 * cell_radius  # MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION
 
     # Count FNODES from the network pickle (working copy or project root)
     if not dry and wc.workdir is not None:
@@ -241,15 +244,15 @@ def _run_single(
     print(
         f"\n{'='*60}\n"
         f"  Run {run_index}/{total_runs}:  N={n}  N_CELLS={n_cells}  "
-        f"FOCAD={init_focad}  N_FNODES={n_fnodes}\n"
-        f"  ECM_POPULATION_SIZE={ecm_pop}  STEPS={steps}\n"
+        f"FOCAD={init_focad}  CELL_RADIUS={cell_radius}  N_FNODES={n_fnodes}\n"
+        f"  ECM_POPULATION_SIZE={ecm_pop}  SEARCH_RADIUS={search_radius:.2f}  STEPS={steps}\n"
         f"{'='*60}"
     )
 
     if dry:
         return _make_result(
-            n, ecm_pop, n_cells, init_focad, n_fnodes, steps,
-            status="dry-run",
+            n, ecm_pop, n_cells, init_focad, n_fnodes, cell_radius,
+            search_radius, steps, status="dry-run",
         )
 
     # 1. Patch the working copy
@@ -260,6 +263,7 @@ def _run_single(
     overrides = {
         "N_CELLS": n_cells,
         "INIT_N_FOCAD_PER_CELL": init_focad,
+        "CELL_RADIUS": cell_radius,
         "STEPS": steps,
         "SAVE_DATA_TO_FILE": False,
         "SAVE_PICKLE": False,
@@ -295,7 +299,8 @@ def _run_single(
     except subprocess.TimeoutExpired:
         print("  TIMEOUT (>1h)")
         return _make_result(n, ecm_pop, n_cells, init_focad, n_fnodes,
-                            steps, status="TIMEOUT")
+                            cell_radius, search_radius, steps,
+                            status="TIMEOUT")
 
     # 4. Parse output
     stdout = result.stdout or ""
@@ -307,32 +312,25 @@ def _run_single(
         for line in combined[-20:]:
             print(f"    | {line}")
         return _make_result(n, ecm_pop, n_cells, init_focad, n_fnodes,
-                            steps, status=f"ERROR({result.returncode})")
+                            cell_radius, search_radius, steps,
+                            status=f"ERROR({result.returncode})")
 
     m = RE_BENCHMARK.search(stdout)
     if m:
         total_time = float(m.group(1))
         actual_steps = int(m.group(2))
         time_per_step = float(m.group(3))
+        init_time = float(m.group(4))
+        sim_time = float(m.group(5))
         print(f"  OK: {total_time:.2f}s total, "
+              f"init={init_time:.2f}s, sim={sim_time:.2f}s, "
               f"{time_per_step:.4f}s/step ({actual_steps} steps)")
         return _make_result(
-            n, ecm_pop, n_cells, init_focad, n_fnodes, steps,
+            n, ecm_pop, n_cells, init_focad, n_fnodes,
+            cell_radius, search_radius, steps,
             total_time_s=total_time, time_per_step_s=time_per_step,
+            init_time_s=init_time, simulation_time_s=sim_time,
             status="OK",
-        )
-
-    # Fallback: try to find execution time the old way
-    exec_match = re.search(r"EXECUTION TIME:\s*([\d.]+)\s*seconds", stdout)
-    if exec_match:
-        total_time = float(exec_match.group(1))
-        time_per_step = total_time / max(steps, 1)
-        print(f"  Fallback: {total_time:.2f}s total, "
-              f"{time_per_step:.4f}s/step")
-        return _make_result(
-            n, ecm_pop, n_cells, init_focad, n_fnodes, steps,
-            total_time_s=total_time, time_per_step_s=time_per_step,
-            status="OK(fallback)",
         )
 
     # Detect model.py's silent quit() on critical_error
@@ -343,19 +341,24 @@ def _run_single(
             if any(kw in line.lower() for kw in ("error", "must be", "critical")):
                 print(f"    | {line}")
         return _make_result(n, ecm_pop, n_cells, init_focad, n_fnodes,
-                            steps, status="CRITICAL_ERROR")
+                            cell_radius, search_radius, steps,
+                            status="CRITICAL_ERROR")
 
     print("  WARNING: could not parse timing from output")
     print("  (last 15 lines of stdout:)")
     for line in stdout.strip().splitlines()[-15:]:
         print(f"    | {line}")
     return _make_result(n, ecm_pop, n_cells, init_focad, n_fnodes,
-                        steps, status="NO_TIMING")
+                        cell_radius, search_radius, steps,
+                        status="NO_TIMING")
 
 
 def _make_result(
-    n, ecm_pop, n_cells, init_focad, n_fnodes, steps,
-    total_time_s=None, time_per_step_s=None, status="",
+    n, ecm_pop, n_cells, init_focad, n_fnodes,
+    cell_radius, search_radius, steps,
+    total_time_s=None, time_per_step_s=None,
+    init_time_s=None, simulation_time_s=None,
+    status="",
 ) -> dict:
     return {
         "N": n,
@@ -364,7 +367,11 @@ def _make_result(
         "INIT_N_FOCAD_PER_CELL": init_focad,
         "FOCAD_count_init": n_cells * init_focad,
         "N_FNODES": n_fnodes,
+        "CELL_RADIUS": cell_radius,
+        "MAX_SEARCH_RADIUS": search_radius,
         "steps": steps,
+        "init_time_s": init_time_s,
+        "simulation_time_s": simulation_time_s,
         "total_time_s": total_time_s,
         "time_per_step_s": time_per_step_s,
         "status": status,
@@ -377,7 +384,8 @@ def _make_result(
 
 FIELDNAMES = [
     "run", "N", "ECM_POPULATION_SIZE", "N_CELLS", "INIT_N_FOCAD_PER_CELL",
-    "FOCAD_count_init", "N_FNODES", "steps",
+    "FOCAD_count_init", "N_FNODES", "CELL_RADIUS", "MAX_SEARCH_RADIUS",
+    "steps", "init_time_s", "simulation_time_s",
     "total_time_s", "time_per_step_s", "status", "timestamp",
 ]
 
@@ -405,6 +413,7 @@ def main():
 Examples:
   python tools/benchmark_perf.py --steps 10
   python tools/benchmark_perf.py --steps 20 --n 21 41 --n-cells 100 1000
+  python tools/benchmark_perf.py --steps 10 --cell-radius 5.0 8.412 15.0
   python tools/benchmark_perf.py --steps 10 --dry-run
   python tools/benchmark_perf.py --steps 5 --keep-workdir   # inspect patched files
         """,
@@ -416,15 +425,19 @@ Examples:
         "--n", type=int, nargs="+", default=[21, 41, 81],
         help="ECM grid sizes (N). ECM agents = N^3. Default: 21 41 81")
     parser.add_argument(
-        "--n-cells", type=int, nargs="+", default=[100, 1000, 1000000],
-        help="Number of cells. Default: 100 1000 1000000")
+        "--n-cells", type=int, nargs="+", default=[100, 1000, 10000],
+        help="Number of cells. Default: 100 1000 10000")
     parser.add_argument(
         "--focad", type=int, nargs="+", default=[5, 25, 50],
         help="INIT_N_FOCAD_PER_CELL values. Default: 5 25 50")
     parser.add_argument(
+        "--cell-radius", type=float, nargs="+", default=[5.0, 8.412, 15.0],
+        help="CELL_RADIUS values (µm). Affects MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION "
+             "(= 3×CELL_RADIUS) and other derived parameters. Default: 8.412")
+    parser.add_argument(
         "--network", type=str, nargs="+",
-        default=["network_3d_small.pkl", "network_3d_medium.pkl", "network_3d_big.pkl"],
-        help="Network .pkl files. Default: network_3d_small.pkl network_3d_medium.pkl network_3d_big.pkl")
+        default=["network_low_density.pkl", "network_medium_density.pkl", "network_high_density.pkl"],
+        help="Network .pkl files. Default: network_low_density.pkl network_medium_density.pkl network_high_density.pkl")
     parser.add_argument(
         "--output", type=str, default=None,
         help="Output CSV path. Default: tools/benchmark_results.csv")
@@ -444,15 +457,16 @@ Examples:
 
     # Build the full parameter grid
     grid = list(itertools.product(
-        args.n, args.n_cells, args.focad, args.network))
+        args.n, args.n_cells, args.focad, args.cell_radius, args.network))
     total = len(grid)
 
     print(f"Performance benchmark: {total} configurations, "
           f"{args.steps} steps each")
-    print(f"  N:       {args.n}")
-    print(f"  N_CELLS: {args.n_cells}")
-    print(f"  FOCAD:   {args.focad}")
-    print(f"  Network: {args.network}")
+    print(f"  N:           {args.n}")
+    print(f"  N_CELLS:     {args.n_cells}")
+    print(f"  FOCAD:       {args.focad}")
+    print(f"  CELL_RADIUS: {args.cell_radius}")
+    print(f"  Network:     {args.network}")
     if args.dry_run:
         print("  (DRY RUN — nothing will be copied or executed)\n")
 
@@ -460,12 +474,13 @@ Examples:
     ts_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     with WorkingCopy(dry=args.dry_run, keep=args.keep_workdir) as wc:
-        for idx, (n, n_cells, focad, net_file) in enumerate(grid, 1):
+        for idx, (n, n_cells, focad, crad, net_file) in enumerate(grid, 1):
             row = _run_single(
                 wc=wc,
                 n=n,
                 n_cells=n_cells,
                 init_focad=focad,
+                cell_radius=crad,
                 steps=args.steps,
                 network_file=net_file,
                 run_index=idx,

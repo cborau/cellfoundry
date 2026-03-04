@@ -13,3 +13,4 @@ optimizer/optuna_results/*
 *.tex
 *.log
 *.db
+network_generator/.vscode/settings.json

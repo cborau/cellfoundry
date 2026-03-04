@@ -25,11 +25,12 @@ automated performance-scaling studies on the cellfoundry simulation.
    - [Inspecting patched files](#97-inspecting-patched-files)
    - [Running inside a specific conda environment](#98-running-inside-a-specific-conda-environment)
 10. [Understanding the Results CSV](#understanding-the-results-csv)
-11. [Interpreting Status Codes](#interpreting-status-codes)
-12. [Architecture & Safety Guarantees](#architecture--safety-guarantees)
-13. [Excluded Directories](#excluded-directories)
-14. [Troubleshooting](#troubleshooting)
-15. [Advanced: Adding New Sweep Axes](#advanced-adding-new-sweep-axes)
+11. [Plotting Results](#plotting-results)
+12. [Interpreting Status Codes](#interpreting-status-codes)
+13. [Architecture & Safety Guarantees](#architecture--safety-guarantees)
+14. [Excluded Directories](#excluded-directories)
+15. [Troubleshooting](#troubleshooting)
+16. [Advanced: Adding New Sweep Axes](#advanced-adding-new-sweep-axes)
 
 ---
 
@@ -43,12 +44,25 @@ over combinations of:
 | **N** (ECM grid) | `--n` | 21, 41, 81 | ECM agents = N³ (9 261 → 531 441) |
 | **N_CELLS** | `--n-cells` | 100, 1 000, 1 000 000 | Number of cell agents |
 | **INIT_N_FOCAD_PER_CELL** | `--focad` | 5, 25, 50 | Focal adhesions per cell |
-| **Network file** | `--network` | `network_3d_small.pkl`, `network_3d_medium.pkl`, `network_3d_big.pkl` | Fibre network geometry |
+| **CELL_RADIUS** | `--cell-radius` | 8.412 | Cell radius (µm); controls `MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION` = 3× |
+| **Network file** | `--network` | `network_low_density.pkl`, `network_medium_density.pkl`, `network_high_density.pkl` | Fibre network geometry |
 
-With the defaults, the full Cartesian product is **3 × 3 × 3 × 3 = 81 runs**.
+With the defaults, the full Cartesian product is **3 × 3 × 3 × 1 × 3 = 81 runs**
+(add more `--cell-radius` values to grow the grid).
 
-For each configuration the script records the wall-clock execution time and
-time-per-step, then saves everything to a CSV file for later analysis.
+For each configuration the script records **initialization time**
+(CPU-side agent/variable setup), **simulation time** (GPU step loop),
+wall-clock execution time, and time-per-step, then saves everything to a
+CSV file for later analysis.
+
+> **Why CELL_RADIUS matters for performance:** The cell–cell interaction
+> search radius (`MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION = 3 × CELL_RADIUS`)
+> determines how many spatial neighbours each cell must inspect every step.
+> At high cell densities the number of pair-wise interactions grows
+> super-linearly with the search radius, so even a modest increase in
+> `CELL_RADIUS` can result in a disproportionately large slowdown.
+> Including this axis in the benchmark allows you to quantify and
+> visualise that effect.
 
 ---
 
@@ -73,9 +87,9 @@ Original project (NEVER touched)
 │
 ├── model.py          ← stays untouched
 ├── *.cpp             ← stays untouched
-├── network_3d_small.pkl
-├── network_3d_medium.pkl
-├── network_3d_big.pkl
+├── network_low_density.pkl
+├── network_medium_density.pkl
+├── network_high_density.pkl
 └── ...
 
         ┌──────────────────────────────────┐
@@ -90,7 +104,8 @@ Original project (NEVER touched)
         │     • ECM_POPULATION_SIZE = N³   │
         │       in 5 .cpp files            │
         │     • Write JSON overrides for   │
-        │       N_CELLS, FOCAD, STEPS, etc │
+        │       N_CELLS, FOCAD, CELL_RADIUS│
+        │       STEPS, etc                 │
         └──────────┬───────────────────────┘
                    │
         ┌──────────▼───────────────────────┐
@@ -136,7 +151,7 @@ python tools/benchmark_perf.py --steps 5 --dry-run
 # Run a small test: 1 ECM size, 2 cell counts, 1 FOCAD count = 2 runs
 python tools/benchmark_perf.py --steps 5 --n 21 --n-cells 100 500 --focad 10
 
-# Full default sweep (27 runs)
+# Full default sweep (81 runs)
 python tools/benchmark_perf.py --steps 10
 ```
 
@@ -149,6 +164,7 @@ usage: benchmark_perf.py [-h] --steps STEPS
                          [--n N [N ...]]
                          [--n-cells N_CELLS [N_CELLS ...]]
                          [--focad FOCAD [FOCAD ...]]
+                         [--cell-radius CELL_RADIUS [CELL_RADIUS ...]]
                          [--network NETWORK [NETWORK ...]]
                          [--output OUTPUT]
                          [--conda-env CONDA_ENV]
@@ -162,7 +178,8 @@ usage: benchmark_perf.py [-h] --steps STEPS
 | `--n` | No | ECM grid sizes. Each value produces N³ ECM agents. Default: `21 41 81`. |
 | `--n-cells` | No | Cell agent counts. Default: `100 1000 1000000`. |
 | `--focad` | No | Initial focal adhesions per cell. Default: `5 25 50`. |
-| `--network` | No | Network `.pkl` file name(s). Default: `network_3d_small.pkl network_3d_medium.pkl network_3d_big.pkl`. |
+| `--cell-radius` | No | Cell radius (µm). Each value also sets `MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION = 3×`. Default: `8.412`. |
+| `--network` | No | Network `.pkl` file name(s). Default: `network_low_density.pkl network_medium_density.pkl network_high_density.pkl`. |
 | `--output` | No | Custom path for the results CSV. Default: `tools/benchmark_results.csv`. |
 | `--conda-env` | No | Name of a conda environment to activate for each subprocess run. |
 | `--keep-workdir` | No | Do not delete the working copy after completion. Useful for inspecting patched files. |
@@ -175,19 +192,19 @@ usage: benchmark_perf.py [-h] --steps STEPS
 The script builds the **Cartesian product** of all axes:
 
 ```
-total_runs = len(N_values) × len(N_CELLS_values) × len(FOCAD_values) × len(network_files)
+total_runs = len(N_values) × len(N_CELLS_values) × len(FOCAD_values) × len(CELL_RADIUS_values) × len(network_files)
 ```
 
 Default grid (showing a subset — network axis omitted for brevity):
 
-| N | ECM agents (N³) | N_CELLS | FOCAD | Total FOCAD agents (initial) |
-|---|-----------------|---------|-------|-----------------------------|
-| 21 | 9 261 | 100 | 5 | 500 |
-| 21 | 9 261 | 100 | 25 | 2 500 |
-| 21 | 9 261 | 100 | 50 | 5 000 |
-| 21 | 9 261 | 1 000 | 5 | 5 000 |
-| … | … | … | … | … |
-| 81 | 531 441 | 1 000 000 | 50 | 50 000 000 |
+| N | ECM agents (N³) | N_CELLS | FOCAD | CELL_RADIUS | Search radius | Total FOCAD agents (initial) |
+|---|-----------------|---------|-------|-------------|---------------|-----------------------------|
+| 21 | 9 261 | 100 | 5 | 8.412 | 25.24 | 500 |
+| 21 | 9 261 | 100 | 25 | 8.412 | 25.24 | 2 500 |
+| 21 | 9 261 | 100 | 50 | 8.412 | 25.24 | 5 000 |
+| 21 | 9 261 | 1 000 | 5 | 8.412 | 25.24 | 5 000 |
+| … | … | … | … | … | … | … |
+| 81 | 531 441 | 1 000 000 | 50 | 8.412 | 25.24 | 50 000 000 |
 
 Each row is run 3× (once per network file), giving **81 total runs**.
 
@@ -226,12 +243,13 @@ copy and passed to `model.py --overrides`:
 {
   "N_CELLS": 1000,
   "INIT_N_FOCAD_PER_CELL": 25,
+  "CELL_RADIUS": 8.412,
   "STEPS": 10,
   "SAVE_DATA_TO_FILE": false,
   "SAVE_PICKLE": false,
   "SHOW_PLOTS": false,
   "VISUALISATION": false,
-  "NETWORK_FILE": "network_3d_small.pkl"
+  "NETWORK_FILE": "network_low_density.pkl"
 }
 ```
 
@@ -255,20 +273,24 @@ by `--output`).
 | `N_CELLS` | int | Number of cell agents. |
 | `INIT_N_FOCAD_PER_CELL` | int | Focal adhesions seeded per cell. |
 | `FOCAD_count_init` | int | `N_CELLS × INIT_N_FOCAD_PER_CELL`. |
-| `network_file` | str | Network file used. |
+| `N_FNODES` | int | Number of fibre-network nodes (from the `.pkl` file). |
+| `CELL_RADIUS` | float | Cell radius (µm) used for this run. |
+| `MAX_SEARCH_RADIUS` | float | `3 × CELL_RADIUS` — cell–cell interaction search radius. |
 | `steps` | int | Number of simulation steps requested. |
-| `total_time_s` | float | Total wall-clock execution time (seconds). |
-| `time_per_step_s` | float | `total_time_s / steps`. |
+| `init_time_s` | float | CPU-side initialization time (seconds) — agent creation, variable setup, RTC compilation. |
+| `simulation_time_s` | float | GPU simulation loop time (seconds) — the actual step execution. |
+| `total_time_s` | float | Total wall-clock execution time (seconds), `init_time_s + simulation_time_s + overhead`. |
+| `time_per_step_s` | float | `simulation_time_s / steps` — pure per-step cost excluding initialization. |
 | `status` | str | Run outcome (see [Status Codes](#interpreting-status-codes)). |
 | `timestamp` | str | When the benchmark batch was started. |
 
 ### Example CSV
 
 ```csv
-run,N,ECM_POPULATION_SIZE,N_CELLS,INIT_N_FOCAD_PER_CELL,FOCAD_count_init,network_file,steps,total_time_s,time_per_step_s,status,timestamp
-1,21,9261,100,5,500,network_3d_small.pkl,10,12.345678,1.234568,OK,2026-03-03 14:30:00
-2,21,9261,100,5,500,network_3d_medium.pkl,10,13.456789,1.345679,OK,2026-03-03 14:30:00
-3,21,9261,100,5,500,network_3d_big.pkl,10,14.567890,1.456789,OK,2026-03-03 14:30:00
+run,N,ECM_POPULATION_SIZE,N_CELLS,INIT_N_FOCAD_PER_CELL,FOCAD_count_init,N_FNODES,CELL_RADIUS,MAX_SEARCH_RADIUS,steps,init_time_s,simulation_time_s,total_time_s,time_per_step_s,status,timestamp
+1,21,9261,100,5,500,1234,8.412,25.236,10,5.123456,12.345678,17.469134,1.234568,OK,2026-03-03 14:30:00
+2,21,9261,100,5,500,2468,8.412,25.236,10,5.234567,13.456789,18.691356,1.345679,OK,2026-03-03 14:30:00
+3,21,9261,100,5,500,4936,8.412,25.236,10,5.345678,14.567890,19.913568,1.456789,OK,2026-03-03 14:30:00
 ```
 
 ---
@@ -298,15 +320,16 @@ Output:
 
 ```
 Performance benchmark: 24 configurations, 10 steps each
-  N:       [21, 41]
-  N_CELLS: [100, 1000]
-  FOCAD:   [5, 25]
-  Network: ['network_3d_small.pkl', 'network_3d_medium.pkl', 'network_3d_big.pkl']
+  N:           [21, 41]
+  N_CELLS:     [100, 1000]
+  FOCAD:       [5, 25]
+  CELL_RADIUS: [8.412]
+  Network:     ['network_low_density.pkl', 'network_medium_density.pkl', 'network_high_density.pkl']
   (DRY RUN — nothing will be copied or executed)
 
 ============================================================
-  Run 1/24:  N=21  N_CELLS=100  FOCAD=5  network=network_3d_small.pkl
-  ECM_POPULATION_SIZE=9261  STEPS=10
+  Run 1/24:  N=21  N_CELLS=100  FOCAD=5  CELL_RADIUS=8.412  N_FNODES=1234
+  ECM_POPULATION_SIZE=9261  SEARCH_RADIUS=25.24  STEPS=10
 ============================================================
 ...
 ```
@@ -332,7 +355,8 @@ python tools/benchmark_perf.py --steps 10
 ```
 
 Uses the default grid: N ∈ {21, 41, 81}, N_CELLS ∈ {100, 1000, 1000000},
-FOCAD ∈ {5, 25, 50}, network ∈ {small, medium, big}. → 81 runs.
+FOCAD ∈ {5, 25, 50}, CELL_RADIUS ∈ {8.412},
+network ∈ {low_density, medium_density, high_density}. → 81 runs.
 
 > **Estimated time:** hours to days depending on GPU and the largest
 > configurations. Consider starting with `--steps 3` for a rough estimate,
@@ -344,21 +368,21 @@ Three fibre-network geometries are included by default:
 
 | File | Description |
 |------|-------------|
-| `network_3d_small.pkl` | Sparse / low-density fibre network |
-| `network_3d_medium.pkl` | Medium-density fibre network |
-| `network_3d_big.pkl` | Dense / high-density fibre network |
+| `network_low_density.pkl` | Sparse / low-density fibre network |
+| `network_medium_density.pkl` | Medium-density fibre network |
+| `network_high_density.pkl` | Dense / high-density fibre network |
 
 All three are swept automatically. To benchmark with only one:
 
 ```bash
-python tools/benchmark_perf.py --steps 10 --network network_3d_medium.pkl
+python tools/benchmark_perf.py --steps 10 --network network_medium_density.pkl
 ```
 
 Or supply your own files:
 
 ```bash
 python tools/benchmark_perf.py --steps 10 \
-    --network network_3d_medium.pkl my_custom_network.pkl
+    --network network_medium_density.pkl my_custom_network.pkl
 ```
 
 Network files must exist in the project root (they get copied into the
@@ -443,6 +467,137 @@ plt.savefig("tools/benchmark_scaling.png", dpi=150)
 plt.show()
 ```
 
+### Initialization vs simulation time
+
+```python
+import matplotlib.pyplot as plt
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+# Left: init time vs total agent count
+ok["total_agents"] = ok["ECM_POPULATION_SIZE"] + ok["N_CELLS"] + ok["FOCAD_count_init"]
+axes[0].scatter(ok["total_agents"], ok["init_time_s"], alpha=0.6)
+axes[0].set_xlabel("Total agents (ECM + Cells + FOCAD)")
+axes[0].set_ylabel("Initialization time (s)")
+axes[0].set_xscale("log")
+axes[0].set_title("Init time vs agent count")
+
+# Right: simulation time as stacked bar
+axes[1].bar(ok["run"], ok["init_time_s"], label="Initialization")
+axes[1].bar(ok["run"], ok["simulation_time_s"], bottom=ok["init_time_s"],
+            label="Simulation")
+axes[1].set_xlabel("Run")
+axes[1].set_ylabel("Time (s)")
+axes[1].set_title("Time breakdown per run")
+axes[1].legend()
+plt.tight_layout()
+plt.savefig("tools/benchmark_init_vs_sim.png", dpi=150)
+plt.show()
+```
+
+### Cell radius / search radius effect
+
+When multiple `--cell-radius` values are used, the impact of the
+interaction search radius on performance can be visualised:
+
+```python
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots()
+for cr, group in ok.groupby("CELL_RADIUS"):
+    group = group.sort_values("N_CELLS")
+    sr = 3.0 * cr
+    ax.plot(group["N_CELLS"], group["time_per_step_s"],
+            marker="o", label=f"CELL_RADIUS={cr} (search={sr:.1f})")
+ax.set_xlabel("N_CELLS")
+ax.set_ylabel("Time per step (s)")
+ax.set_xscale("log")
+ax.set_yscale("log")
+ax.legend()
+ax.set_title("Effect of cell radius / search radius on scaling")
+plt.tight_layout()
+plt.savefig("tools/benchmark_cell_radius.png", dpi=150)
+plt.show()
+```
+
+> **Tip:** To produce the cell-radius plot, run the benchmark with several
+> radius values, e.g.:
+> ```bash
+> python tools/benchmark_perf.py --steps 10 --cell-radius 5.0 8.412 15.0 --n 21 --focad 10
+> ```
+
+---
+
+## Plotting Results
+
+A companion script, **`tools/plot_benchmark_results.py`**, generates a
+complete set of publication-quality figures from the benchmark CSV.
+
+### Basic usage
+
+```bash
+# Generate all plots (saved to tools/benchmark_plots/ by default)
+python tools/plot_benchmark_results.py
+
+# Also display figures interactively
+python tools/plot_benchmark_results.py --show
+
+# Use a different CSV file
+python tools/plot_benchmark_results.py --csv tools/benchmark_results_20260315.csv
+
+# Custom output directory and resolution
+python tools/plot_benchmark_results.py --csv results.csv --outdir my_figs/ --dpi 150
+```
+
+### Command-line options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--csv` | `tools/benchmark_results.csv` | Path to the benchmark CSV file |
+| `--outdir` | `tools/benchmark_plots/` | Output directory for saved PNG figures |
+| `--show` | off | Display figures interactively after saving |
+| `--dpi` | 300 | Resolution for saved PNGs |
+
+### Figures produced
+
+The script generates up to 11 figure types (some are skipped automatically
+when the data does not contain enough variation):
+
+| # | Figure | File name pattern | Notes |
+|---|--------|-------------------|-------|
+| 1 | Pairwise heatmaps | `heatmap_*.png` | Mean time/step for each pair of swept variables |
+| 2 | Scaling curves (log-log) | `scaling_*.png` | One per swept variable, grouped by secondary variable |
+| 3 | Total-agent scatter | `total_agent_scatter.png` | Power-law fit included |
+| 4 | Scaling exponents | `scaling_exponents.png` | Bar chart of log-log slopes |
+| 5 | Cost breakdown | `cost_breakdown.png` | Pie chart of marginal cost attribution |
+| 6 | Box-plots | `boxplot_*.png` | Distribution by each swept variable |
+| 7 | Total time bars | `total_time_bars.png` | Sorted wall-clock time per configuration |
+| 8 | Contourf panel | `contourf_panel.png` | Combined filled-contour figure |
+| 9 | Summary panel | `summary_panel.png` | One-page overview |
+| 10 | **Cell-radius scaling** | `cell_radius_scaling.png` | x = N_CELLS, y = time/step, curves per CELL_RADIUS |
+| 11 | **Init vs simulation time** | `init_vs_sim_time.png` | Scatter + stacked-bar breakdown |
+
+Figure #10 is particularly useful when benchmarking with multiple
+`--cell-radius` values, since the `MAX_SEARCH_RADIUS` (= 3 × CELL_RADIUS)
+directly controls the size of the cell–cell interaction neighbourhood and
+has a large impact on performance.
+
+### Example workflow
+
+```bash
+# 1. Run a benchmark sweeping cell radius and cell count
+python tools/benchmark_perf.py --steps 10 \
+    --cell-radius 5.0 8.412 15.0 \
+    --n-cells 100 500 1000 \
+    --n 21 --focad 10
+
+# 2. Generate all plots
+python tools/plot_benchmark_results.py --show
+
+# 3. Or point at a specific CSV
+python tools/plot_benchmark_results.py --csv tools/benchmark_results.csv --outdir figures/
+```
+
 ---
 
 ## Interpreting Status Codes
@@ -450,11 +605,11 @@ plt.show()
 | Status | Meaning |
 |--------|---------|
 | `OK` | Run completed successfully; timing parsed from `[BENCHMARK]` output line. |
-| `OK(fallback)` | Run completed but the `[BENCHMARK]` line was not found; timing was extracted from the older `EXECUTION TIME: X.XX seconds` output instead. |
 | `dry-run` | Dry-run mode — no simulation was launched. |
 | `ERROR(<code>)` | The subprocess exited with a non-zero return code. Last 20 lines of output are printed to the console. |
 | `TIMEOUT` | The run exceeded the 1-hour timeout. |
-| `NO_TIMING` | The subprocess exited normally (code 0) but no timing information was found in stdout. |
+| `CRITICAL_ERROR` | model.py hit a critical-error check and quit before completing. |
+| `NO_TIMING` | The subprocess exited normally (code 0) but no `[BENCHMARK]` line was found in stdout. |
 
 ---
 
@@ -489,7 +644,6 @@ directories:
 | `__pycache__` | Regenerated automatically |
 | `result_files`, `results` | Potentially very large output data |
 | `_benchmark_workdir` | Avoids recursive nesting |
-| `_benchmark_backups` | Legacy backup folder |
 | `.vscode` | Editor settings |
 | `manual_tests`, `docs`, `assets` | Not needed at runtime |
 | `optimizer`, `postprocessing` | Not needed for the simulation run |
@@ -503,12 +657,12 @@ Files with suffix `.db` are also excluded.
 `model.py` emits a structured line at the end of each run:
 
 ```
-[BENCHMARK] EXECUTION_TIME=12.345678 STEPS=10 TIME_PER_STEP=1.234568
+[BENCHMARK] EXECUTION_TIME=17.469134 STEPS=10 TIME_PER_STEP=1.234568 INIT_TIME=5.123456 SIMULATION_TIME=12.345678
 ```
 
-The benchmark script parses this with a regex. If it is missing (e.g., in
-an older version of model.py), the script falls back to parsing the legacy
-`EXECUTION TIME: X.XX seconds` line.
+The benchmark script parses this with a regex. All five fields
+(`EXECUTION_TIME`, `STEPS`, `TIME_PER_STEP`, `INIT_TIME`,
+`SIMULATION_TIME`) are required.
 
 ---
 
@@ -597,7 +751,8 @@ To add a new parameter axis (e.g., `TIME_STEP`):
 2. **Include it in the grid** product:
    ```python
    grid = list(itertools.product(
-       args.n, args.n_cells, args.focad, args.network, args.time_step))
+       args.n, args.n_cells, args.focad, args.cell_radius,
+       args.network, args.time_step))
    ```
 
 3. **Unpack it** in the loop and pass to `_run_single()`.
