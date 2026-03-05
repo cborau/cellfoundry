@@ -445,11 +445,11 @@ Examples:
         "--n", type=int, nargs="+", default=[21, 46, 100], # 21^3~10k, 46^3~100k, 100^3=1M
         help="ECM grid sizes (N). ECM agents = N^3. Default: 21 46 100")
     parser.add_argument(
-        "--n-cells", type=int, nargs="+", default=[100, 1000, 10000],
-        help="Number of cells. Default: 100 1000 10000")
+        "--n-cells", type=int, nargs="+", default=[1000, 10000, 100000, 1000000],
+        help="Number of cells. Default: 1000 10000 100000 1000000")
     parser.add_argument(
-        "--focad", type=int, nargs="+", default=[5, 25, 50],
-        help="INIT_N_FOCAD_PER_CELL values. Default: 5 25 50")
+        "--focad", type=int, nargs="+", default=[5, 50],
+        help="INIT_N_FOCAD_PER_CELL values. Default: 5 50")
     parser.add_argument(
         "--cell-radius", type=float, nargs="+", default=[5.0, 8.412, 15.0],
         help="CELL_RADIUS values (µm). Affects MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION "
