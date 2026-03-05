@@ -31,8 +31,10 @@ Figures produced
     total-agent scatter + power-law fit.
 10. **Cell-radius scaling** – x = N_CELLS, y = time/step, one curve per
     CELL_RADIUS value (includes MAX_SEARCH_RADIUS in legend).
-11. **Init vs simulation time** – Two-panel figure showing initialization
-    and simulation time vs agent count, plus a stacked-bar breakdown.
+11a. **Init vs step time** – Dual y-axis scatter of init time (left) and
+     mean step time (right, pie-chart markers) vs total agents.
+11b. **Time breakdown bars** – Stacked horizontal bars per run with dual
+     x-axes: init-function time on one axis, other components on another.
 """
 from __future__ import annotations
 
@@ -43,6 +45,8 @@ from pathlib import Path
 
 import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.offsetbox import AnnotationBbox, DrawingArea
+from matplotlib.patches import Wedge
 import numpy as np
 import pandas as pd
 from matplotlib.colors import LogNorm
@@ -188,8 +192,7 @@ def plot_pairwise_heatmaps(df: pd.DataFrame, outdir: Path) -> list[plt.Figure]:
 def plot_scaling_curves(df: pd.DataFrame, outdir: Path) -> list[plt.Figure]:
     """For each agent column, plot time/step vs. that agent count (log-log).
 
-    Lines are split by the *second most varied* column so the viewer can
-    see interaction effects.
+    Lines are split by the *second most varied* column to see interaction effects.
     """
     cols = [c for c in SWEEP_COLS if c in df.columns and df[c].nunique() > 1]
     figs: list[plt.Figure] = []
@@ -234,42 +237,127 @@ def plot_scaling_curves(df: pd.DataFrame, outdir: Path) -> list[plt.Figure]:
 
 
 # ---------------------------------------------------------------------------
-# 3. Total-agent scatter with power-law fit
+# Helper: draw a pie-chart marker at a data position
+# ---------------------------------------------------------------------------
+
+_PIE_AGENT_COLS = AGENT_COLS  # columns whose shares form the pie
+_PIE_COLORS = ["#0e6377", "#87d1d5", "#f9cb37", "#f37c20"]  # one per agent col: ECM, CELL, FOCAD, FNODES
+
+
+def _add_pie_legend(ax: plt.Axes, existing_handles=None) -> None:
+    """Append a mini legend for the agent-type pie slices."""
+    import matplotlib.patches as mpatches
+    cols = _PIE_AGENT_COLS
+    pie_handles = [
+        mpatches.Patch(color=_PIE_COLORS[i], label=_label(c))
+        for i, c in enumerate(cols)
+    ]
+    handles = (list(existing_handles) if existing_handles else []) + pie_handles
+    ax.legend(handles=handles, fontsize=7, loc="best", framealpha=0.9)
+
+
+def _draw_pie_scatter(
+    ax: plt.Axes,
+    df_rows: pd.DataFrame,
+    x_col: str,
+    y_col: str,
+    size_pt: float = 8.0,
+    alpha: float = 0.82,
+) -> None:
+    """Draw pie-chart markers at data positions using AnnotationBbox.
+
+    Each pie is rendered inside a fixed-size DrawingArea (in points) and
+    anchored to the data-coordinate position, so it is immune to log-axis
+    distortion.
+    """
+    cols = [c for c in _PIE_AGENT_COLS if c in df_rows.columns]
+    if not cols:
+        return
+
+    diameter = size_pt * 2  # DrawingArea width/height in points
+
+    for _, row in df_rows.iterrows():
+        xv, yv = float(row[x_col]), float(row[y_col])
+        fracs = np.array([max(row.get(c, 0), 0) for c in cols], dtype=float)
+        total = fracs.sum()
+        if total <= 0:
+            continue
+        fracs /= total
+
+        da = DrawingArea(diameter, diameter, 0, 0)
+        cx, cy = diameter / 2, diameter / 2  # centre of the drawing area
+
+        theta1 = 0.0
+        for frac, colour in zip(fracs, _PIE_COLORS[: len(cols)]):
+            if frac < 1e-9:
+                theta1 += frac * 360.0
+                continue
+            theta2 = theta1 + frac * 360.0
+            wedge = Wedge(
+                (cx, cy), size_pt, theta1, theta2,
+                facecolor=colour, edgecolor="white", linewidth=0.3,
+                alpha=alpha,
+            )
+            da.add_artist(wedge)
+            theta1 = theta2
+
+        ab = AnnotationBbox(
+            da, (xv, yv),
+            xycoords="data",
+            frameon=False,
+            pad=0,
+        )
+        ax.add_artist(ab)
+
+
+# ---------------------------------------------------------------------------
+# 3. Total-agent scatter with power-law fit  (pie-chart markers)
 # ---------------------------------------------------------------------------
 
 def plot_total_agent_scatter(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
-    """Time/step vs. TOTAL_AGENTS with a simple power-law fit."""
+    """Time/step vs. TOTAL_AGENTS with pie-chart markers showing agent
+    composition and a power-law fit line."""
     if "TOTAL_AGENTS" not in df.columns or df["TOTAL_AGENTS"].nunique() < 2:
         print("  Skipping total-agent scatter (not enough data).")
         return None
 
-    fig, ax = plt.subplots(figsize=(6, 4.5))
+    fig, ax = plt.subplots(figsize=(7, 5))
 
     x = df["TOTAL_AGENTS"].values.astype(float)
     y = df["time_per_step_s"].values.astype(float)
     mask = (x > 0) & (y > 0)
-    x, y = x[mask], y[mask]
 
-    ax.scatter(x, y, s=18, alpha=0.7, edgecolors="none", c="C0")
+    # Invisible scatter to set axis limits correctly
+    ax.scatter(x[mask], y[mask], s=0, alpha=0)
 
-    # Power-law fit:  log(y) = a * log(x) + b  →  y = 10^b * x^a
-    if len(x) >= 3:
+    # Draw pie markers
+    _draw_pie_scatter(ax, df[mask], "TOTAL_AGENTS", "time_per_step_s",
+                      size_pt=6.5, alpha=0.75)
+
+    # Power-law fit
+    xm, ym = x[mask], y[mask]
+    fit_handle = None
+    if len(xm) >= 3:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            coeffs = np.polyfit(np.log10(x), np.log10(y), 1)
+            coeffs = np.polyfit(np.log10(xm), np.log10(ym), 1)
         exponent, intercept = coeffs
-        x_fit = np.logspace(np.log10(x.min()), np.log10(x.max()), 100)
+        x_fit = np.logspace(np.log10(xm.min()), np.log10(xm.max()), 100)
         y_fit = 10 ** intercept * x_fit ** exponent
-        ax.plot(x_fit, y_fit, "r--", lw=1.5,
-                label=f"Power-law fit:  $t \\propto N^{{{exponent:.2f}}}$")
-        ax.legend(fontsize=9, loc="upper left")
+        (fit_handle,) = ax.plot(
+            x_fit, y_fit, "r--", lw=1.5,
+            label=f"Power-law fit:  $t \\propto N^{{{exponent:.2f}}}$",
+        )
 
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlabel("Total agents (ECM + Cells + FOCAD + FNODES)", fontsize=10)
+    ax.set_xlabel("Total agents (ECM + CELL + FOCAD + FNODES)", fontsize=10)
     ax.set_ylabel("Time / step (s)", fontsize=10)
     ax.set_title("Overall computational scaling", fontsize=11)
     ax.grid(True, which="both", ls=":", lw=0.4, alpha=0.6)
+
+    _add_pie_legend(ax, existing_handles=[fit_handle] if fit_handle else None)
+
     fig.tight_layout()
     _savefig(fig, outdir, "total_agent_scatter")
     return fig
@@ -618,78 +706,167 @@ def plot_cell_radius_scaling(df: pd.DataFrame, outdir: Path) -> plt.Figure | Non
 
 
 # ---------------------------------------------------------------------------
-# 11. Initialization vs simulation time
+# 11a. Init time vs total agents  (pie-chart markers + power-law fit)
 # ---------------------------------------------------------------------------
 
-def plot_init_vs_sim_time(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
-    """Two-panel figure: (1) init & sim time vs total agents,
-    (2) stacked bar of init + simulation time per configuration."""
+def plot_init_time_scatter(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
+    """Init time vs. TOTAL_AGENTS with pie-chart markers showing agent
+    composition and a power-law fit line.  Mirror of plot_total_agent_scatter
+    but for initialization cost."""
+    has_init = "init_time_s" in df.columns and df["init_time_s"].notna().any()
+    if not has_init:
+        print("  Skipping init-time scatter (no init_time_s data).")
+        return None
+    if "TOTAL_AGENTS" not in df.columns or df["TOTAL_AGENTS"].nunique() < 2:
+        print("  Skipping init-time scatter (not enough data).")
+        return None
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+
+    x = df["TOTAL_AGENTS"].values.astype(float)
+    y = df["init_time_s"].values.astype(float)
+    mask = (x > 0) & (y > 0)
+
+    # Invisible scatter to set axis limits correctly
+    ax.scatter(x[mask], y[mask], s=0, alpha=0)
+
+    # Draw pie markers
+    _draw_pie_scatter(ax, df[mask], "TOTAL_AGENTS", "init_time_s",
+                      size_pt=6.5, alpha=0.75)
+
+    # Power-law fit
+    xm, ym = x[mask], y[mask]
+    fit_handle = None
+    if len(xm) >= 3:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            coeffs = np.polyfit(np.log10(xm), np.log10(ym), 1)
+        exponent, intercept = coeffs
+        x_fit = np.logspace(np.log10(xm.min()), np.log10(xm.max()), 100)
+        y_fit = 10 ** intercept * x_fit ** exponent
+        (fit_handle,) = ax.plot(
+            x_fit, y_fit, "r--", lw=1.5,
+            label=f"Power-law fit:  $t \\propto N^{{{exponent:.2f}}}$",
+        )
+
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("Total agents (ECM + CELL + FOCAD + FNODES)", fontsize=10)
+    ax.set_ylabel("Init time (s)", fontsize=10)
+    ax.set_title("Initialization-time scaling", fontsize=11)
+    ax.grid(True, which="both", ls=":", lw=0.4, alpha=0.6)
+
+    _add_pie_legend(ax, existing_handles=[fit_handle] if fit_handle else None)
+
+    fig.tight_layout()
+    _savefig(fig, outdir, "init_time_scatter")
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# 11b. Time breakdown stacked bars  (separate figure, dual axes:
+#      init_functions on its own axis, others stacked on a second axis)
+# ---------------------------------------------------------------------------
+
+def plot_time_breakdown_bars(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
+    """Horizontal stacked-bar chart of time components per run.
+
+    Because init-function time dominates, the figure uses dual x-axes:
+    the top axis shows init-function time alone, and the bottom axis
+    shows the remaining components (Python setup, RTC, stepping) stacked.
+    """
     has_init = "init_time_s" in df.columns and df["init_time_s"].notna().any()
     has_sim = "simulation_time_s" in df.columns and df["simulation_time_s"].notna().any()
     if not (has_init and has_sim):
-        print("  Skipping init-vs-sim time (columns missing or empty).")
+        print("  Skipping time-breakdown bars (columns missing or empty).")
         return None
 
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    has_rtc = "rtc_time_s" in df.columns and df["rtc_time_s"].notna().any()
+    has_ifunc = (
+        "init_functions_time_s" in df.columns
+        and df["init_functions_time_s"].notna().any()
+    )
 
-    # Left: init & simulation time vs total agent count
-    ax = axes[0]
-    ax.scatter(df["TOTAL_AGENTS"], df["init_time_s"], alpha=0.6, s=25,
-               edgecolors="none", c="C0", label="Init time")
-    ax.scatter(df["TOTAL_AGENTS"], df["simulation_time_s"], alpha=0.6, s=25,
-               edgecolors="none", c="C1", label="Simulation time")
-    ax.set_xlabel("Total agents (ECM + Cells + FOCAD + FNODES)", fontsize=10)
-    ax.set_ylabel("Time (s)", fontsize=10)
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.set_title("Init & simulation time vs agent count", fontsize=10)
-    ax.legend(fontsize=9)
-    ax.grid(True, which="both", ls=":", lw=0.4, alpha=0.6)
-
-    # Right: stacked bar per run (sorted by total time)
-    ax = axes[1]
     sorted_df = df.sort_values("total_time_s", ascending=True).reset_index(drop=True)
-    idx = range(len(sorted_df))
+    n_runs = len(sorted_df)
+    idx = np.arange(n_runs)
 
-    # Use granular breakdown if available; otherwise fall back to init/sim split
-    has_rtc = "rtc_time_s" in sorted_df.columns and sorted_df["rtc_time_s"].notna().any()
-    has_ifunc = "init_functions_time_s" in sorted_df.columns and sorted_df["init_functions_time_s"].notna().any()
+    fig, ax_ifunc = plt.subplots(
+        figsize=(max(7, 0.22 * n_runs + 3), max(5, 0.15 * n_runs + 2)),
+    )
 
     if has_rtc and has_ifunc:
-        # Granular: python setup | RTC | init functions | stepping
         rtc = sorted_df["rtc_time_s"].fillna(0).values
         ifunc = sorted_df["init_functions_time_s"].fillna(0).values
         py_setup = (sorted_df["init_time_s"].values - rtc - ifunc).clip(min=0)
-        stepping = sorted_df["simulation_time_s"].values
+        stepping = sorted_df["simulation_time_s"].fillna(0).values
 
-        ax.barh(list(idx), py_setup, color="C4", label="Python setup")
-        ax.barh(list(idx), rtc, left=py_setup, color="C0", label="RTC compilation")
-        ax.barh(list(idx), ifunc, left=py_setup + rtc, color="C2", label="Init functions")
-        ax.barh(list(idx), stepping, left=py_setup + rtc + ifunc,
-                color="C1", label="Stepping")
+        # Left axis: init functions only (the dominant component)
+        ax_ifunc.barh(
+            idx - 0.17, ifunc, height=0.34,
+            color="C2", label="Init functions", alpha=0.85,
+        )
+        ax_ifunc.set_xlabel("Init functions time (s)", fontsize=10, color="C2")
+        ax_ifunc.tick_params(axis="x", labelcolor="C2")
+
+        # Right axis: other components stacked
+        ax_other = ax_ifunc.twiny()
+        ax_other.barh(
+            idx + 0.17, py_setup, height=0.34,
+            color="C4", label="Python setup", alpha=0.85,
+        )
+        ax_other.barh(
+            idx + 0.17, rtc, left=py_setup, height=0.34,
+            color="C0", label="RTC compilation", alpha=0.85,
+        )
+        ax_other.barh(
+            idx + 0.17, stepping, left=py_setup + rtc, height=0.34,
+            color="C1", label="Stepping", alpha=0.85,
+        )
+        ax_other.set_xlabel(
+            "Other components (s): Python setup + RTC + Stepping",
+            fontsize=10, color="C0",
+        )
+        ax_other.tick_params(axis="x", labelcolor="C0")
+
+        # Combined legend
+        h1, l1 = ax_ifunc.get_legend_handles_labels()
+        h2, l2 = ax_other.get_legend_handles_labels()
+        ax_ifunc.legend(
+            h1 + h2, l1 + l2, fontsize=8,
+            loc="lower right", framealpha=0.9,
+        )
     else:
-        ax.barh(list(idx), sorted_df["init_time_s"].values,
-                color="C0", label="Initialization")
-        ax.barh(list(idx), sorted_df["simulation_time_s"].values,
-                left=sorted_df["init_time_s"].values,
-                color="C1", label="Simulation")
-    # Build concise labels
+        # Fallback: simple two-component bars
+        ax_ifunc.barh(
+            idx, sorted_df["init_time_s"].values,
+            color="C0", label="Initialization",
+        )
+        ax_ifunc.barh(
+            idx, sorted_df["simulation_time_s"].values,
+            left=sorted_df["init_time_s"].values,
+            color="C1", label="Simulation",
+        )
+        ax_ifunc.set_xlabel("Time (s)", fontsize=10)
+        ax_ifunc.legend(fontsize=9)
+
+    # Y-tick labels
     labels = []
     for _, r in sorted_df.iterrows():
         lbl = f"C={int(r['N_CELLS'])}"
         if "CELL_RADIUS" in r.index and pd.notna(r.get("CELL_RADIUS")):
             lbl += f" R={r['CELL_RADIUS']:g}"
         lbl += f" ECM={int(r['ECM_POPULATION_SIZE'])}"
+        if "N_FNODES" in r.index and pd.notna(r.get("N_FNODES")):
+            lbl += f" FN={int(r['N_FNODES'])}"
         labels.append(lbl)
-    ax.set_yticks(list(idx))
-    ax.set_yticklabels(labels, fontsize=6)
-    ax.set_xlabel("Time (s)", fontsize=10)
-    ax.set_title("Time breakdown per run", fontsize=10)
-    ax.legend(fontsize=9)
-    ax.grid(axis="x", ls=":", lw=0.4, alpha=0.6)
+    ax_ifunc.set_yticks(idx)
+    ax_ifunc.set_yticklabels(labels, fontsize=5)
+    ax_ifunc.set_title("Time breakdown per run", fontsize=11)
+    ax_ifunc.grid(axis="x", ls=":", lw=0.4, alpha=0.4)
 
     fig.tight_layout()
-    _savefig(fig, outdir, "init_vs_sim_time")
+    _savefig(fig, outdir, "time_breakdown_bars")
     return fig
 
 
@@ -732,6 +909,9 @@ Examples:
     # If --show not set, use a non-interactive backend for headless servers
     if not args.show:
         matplotlib.use("Agg")
+
+    # Suppress "More than 20 figures" warning — we close all at the end
+    plt.rcParams["figure.max_open_warning"] = 0
 
     print(f"Reading {csv_path} …")
     df = _load(csv_path)
@@ -785,8 +965,13 @@ Examples:
     if fig:
         all_figs.append(fig)
 
-    # 11 – Init vs simulation time breakdown
-    fig = plot_init_vs_sim_time(df, outdir)
+    # 11a – Init time scatter (pie markers + power-law fit)
+    fig = plot_init_time_scatter(df, outdir)
+    if fig:
+        all_figs.append(fig)
+
+    # 11b – Time breakdown stacked bars (separate figure)
+    fig = plot_time_breakdown_bars(df, outdir)
     if fig:
         all_figs.append(fig)
 

@@ -432,7 +432,7 @@ def main():
         epilog="""
 Examples:
   python tools/benchmark_perf.py --steps 10
-  python tools/benchmark_perf.py --steps 20 --n 21 41 --n-cells 100 1000
+  python tools/benchmark_perf.py --steps 20 --n 21 46 100 --n-cells 100 1000 10000
   python tools/benchmark_perf.py --steps 10 --cell-radius 5.0 8.412 15.0
   python tools/benchmark_perf.py --steps 10 --dry-run
   python tools/benchmark_perf.py --steps 5 --keep-workdir   # inspect patched files
@@ -442,8 +442,8 @@ Examples:
         "--steps", type=int, required=True,
         help="Number of simulation steps per run.")
     parser.add_argument(
-        "--n", type=int, nargs="+", default=[21, 41, 81],
-        help="ECM grid sizes (N). ECM agents = N^3. Default: 21 41 81")
+        "--n", type=int, nargs="+", default=[21, 46, 100], # 21^3~10k, 46^3~100k, 100^3=1M
+        help="ECM grid sizes (N). ECM agents = N^3. Default: 21 46 100")
     parser.add_argument(
         "--n-cells", type=int, nargs="+", default=[100, 1000, 10000],
         help="Number of cells. Default: 100 1000 10000")
