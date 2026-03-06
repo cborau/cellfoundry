@@ -8,4 +8,5 @@ This wiki content is generated from source code and project metadata.
 - [C++ Function Reference](Function-Reference)
 - [Model Editor](Model-Editor)
 - [Post Processing](Post-Processing)
-- [Tutorial — Parameter Optimization](Tutorial-Param-Optimization)
+- [Tutorial: Benchmarking Performance](Tutorial-Benchmarking-Performance)
+- [Tutorial: Parameter Optimization](Tutorial-Parameter-Optimization)

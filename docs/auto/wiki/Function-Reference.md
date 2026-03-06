@@ -152,6 +152,22 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - Atomic updates to ECM concentration macro-property (C_SP_MACRO)
 - - -
 
+## 📄 cell_fnode_remodel.cpp
+
+### 🔹 [cell_fnode_remodel](https://github.com/cborau/cellfoundry/blob/master/cell_fnode_remodel.cpp)
+**Type:** `agent`  
+**Source:** [Open cell_fnode_remodel.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_fnode_remodel.cpp)
+
+- 🔸 **Purpose:** Probabilistically create a single FNODE around a CELL and request reciprocal parent-link update through environment macros.
+- ⬇️ **Inputs:**
+  - Nearby FNODE spatial messages (id, x, y, z, connectivity_count)
+  - CELL state (position, stress proxy, concentration, dead)
+  - Remodeling environment properties and macro properties
+- ⬆️ **Outputs:**
+  - Optional newborn FNODE via agent output (max 1 per CELL per step)
+  - Updated CELL cooldown variable `fnode_birth_cooldown`
+- - -
+
 ## 📄 cell_fnode_repulsion.cpp
 
 ### 🔹 [cell_fnode_repulsion](https://github.com/cborau/cellfoundry/blob/master/cell_fnode_repulsion.cpp)
@@ -449,6 +465,22 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - Updated position, velocity, clamp flags, and boundary force channels
 - - -
 
+## 📄 fnode_apply_remodel_updates.cpp
+
+### 🔹 [fnode_apply_remodel_updates](https://github.com/cborau/cellfoundry/blob/master/fnode_apply_remodel_updates.cpp)
+**Type:** `agent`  
+**Source:** [Open fnode_apply_remodel_updates.cpp](https://github.com/cborau/cellfoundry/blob/master/fnode_apply_remodel_updates.cpp)
+
+- 🔸 **Purpose:** Apply remodeling topology updates and optionally remove terminally degraded nodes.
+- ⬇️ **Inputs:**
+  - FNODE connectivity arrays
+  - Spatial FNODE messages (id, x,y,z, closest_fnode_id, second_closest_fnode_id)
+- ⬆️ **Outputs:**
+  - Updated `linked_nodes` / `equilibrium_distance`
+  - Updated `connectivity_count`
+  - Returns DEAD when `marked_for_removal` is set
+- - -
+
 ## 📄 fnode_boundary_interaction.cpp
 
 ### 🔹 [fnode_boundary_interaction](https://github.com/cborau/cellfoundry/blob/master/fnode_boundary_interaction.cpp)
@@ -543,6 +575,21 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - Updated node kinematics, clamp state, and boundary force contributions
 - - -
 
+## 📄 fnode_remodel.cpp
+
+### 🔹 [fnode_remodel](https://github.com/cborau/cellfoundry/blob/master/fnode_remodel.cpp)
+**Type:** `agent`  
+**Source:** [Open fnode_remodel.cpp](https://github.com/cborau/cellfoundry/blob/master/fnode_remodel.cpp)
+
+- 🔸 **Purpose:** Update FNODE degradation/reinforcement state from nearby CELLs and register removal requests when net degradation reaches 1.
+- ⬇️ **Inputs:**
+  - CELL spatial messages (x, y, z, dead)
+  - FNODE state (degradation, reinforcement, id)
+  - Remodeling environment properties and removal macro buffers
+- ⬆️ **Outputs:**
+  - Updated FNODE `degradation`, `reinforcement`, `marked_for_removal`
+- - -
+
 ## 📄 fnode_spatial_location_data.cpp
 
 ### 🔹 [fnode_spatial_location_data](https://github.com/cborau/cellfoundry/blob/master/fnode_spatial_location_data.cpp)
@@ -554,6 +601,21 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - FNODE variables: id, x, y, z
 - ⬆️ **Outputs:**
   - MessageSpatial3D payload used by FNODE/FOCAD interaction kernels
+- - -
+
+## 📄 fnode_update_links.cpp
+
+### 🔹 [fnode_update_links](https://github.com/cborau/cellfoundry/blob/master/fnode_update_links.cpp)
+**Type:** `agent`  
+**Source:** [Open fnode_update_links.cpp](https://github.com/cborau/cellfoundry/blob/master/fnode_update_links.cpp)
+
+- 🔸 **Purpose:** Update FNODE link list using bucket messages keyed by linked node id. If a linked node has no bucket message (e.g., removed), clear that link.
+- ⬇️ **Inputs:**
+  - FNODE bucket messages keyed by id
+  - FNODE linked_nodes / equilibrium_distance
+- ⬆️ **Outputs:**
+  - Updated linked_nodes
+  - Updated connectivity_count
 - - -
 
 ## 📄 focad_anchor_update.cpp

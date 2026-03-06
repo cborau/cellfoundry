@@ -196,6 +196,8 @@ def render_wiki_home() -> str:
         "- [C++ Function Reference](Function-Reference)\n"
         "- [Model Editor](Model-Editor)\n"
         "- [Post Processing](Post-Processing)\n"
+        "- [Tutorial: Benchmarking Performance](Tutorial-Benchmarking-Performance)\n"
+        "- [Tutorial: Parameter Optimization](Tutorial-Parameter-Optimization)\n"
     )
 
 
