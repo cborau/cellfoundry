@@ -27,6 +27,8 @@ from helper_module import compute_expected_boundary_pos_from_corners, getRandomV
 # Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
 # Prepare networks of different sizes and densities to test performance.
 # Test organoid calibration
+# Implement periodic boundaries for cells (only if FOCADs are not included)
+# Improve comments on agent variables
 
 start_time = time.time()
 
@@ -1085,8 +1087,8 @@ if INCLUDE_CELLS:
   BCORNER agent
 """
 BCORNER_agent = model.newAgent("BCORNER") # boundary corner agent to track boundary positions
-BCORNER_agent.newVariableInt("id")
-BCORNER_agent.newVariableFloat("x")
+BCORNER_agent.newVariableInt("id") # unique boundary-corner id
+BCORNER_agent.newVariableFloat("x") # boundary corner position [um]
 BCORNER_agent.newVariableFloat("y")
 BCORNER_agent.newVariableFloat("z")
 
@@ -1099,18 +1101,18 @@ if MOVING_BOUNDARIES:
 """
 if INCLUDE_FIBRE_NETWORK:
     FNODE_agent = model.newAgent("FNODE")
-    FNODE_agent.newVariableInt("id")
-    FNODE_agent.newVariableFloat("x")
+    FNODE_agent.newVariableInt("id") # unique fibre-node id
+    FNODE_agent.newVariableFloat("x") # fibre-node position [um]
     FNODE_agent.newVariableFloat("y")
     FNODE_agent.newVariableFloat("z")
-    FNODE_agent.newVariableFloat("vx", 0.0)
+    FNODE_agent.newVariableFloat("vx", 0.0) # fibre-node velocity [um/s]
     FNODE_agent.newVariableFloat("vy", 0.0)
     FNODE_agent.newVariableFloat("vz", 0.0)
-    FNODE_agent.newVariableFloat("fx", 0.0)
+    FNODE_agent.newVariableFloat("fx", 0.0) # net force on the fibre node [nN]
     FNODE_agent.newVariableFloat("fy", 0.0)
     FNODE_agent.newVariableFloat("fz", 0.0)
-    FNODE_agent.newVariableFloat("k_elast")
-    FNODE_agent.newVariableFloat("d_dumping")
+    FNODE_agent.newVariableFloat("k_elast") # effective segment stiffness [nN/um]
+    FNODE_agent.newVariableFloat("d_dumping") # effective segment damping [nN*s/um]
     FNODE_agent.newVariableArrayFloat("equilibrium_distance", MAX_CONNECTIVITY) # each segment can have a different equilibrium distance depending on the rest length assigned during network generation
     FNODE_agent.newVariableFloat("boundary_fx")  # boundary_f[A]: normal force coming from boundary [A] when elastic boundaries option is selected.
     FNODE_agent.newVariableFloat("boundary_fy")
@@ -1133,18 +1135,18 @@ if INCLUDE_FIBRE_NETWORK:
     FNODE_agent.newVariableFloat("f_bz_pos_y")
     FNODE_agent.newVariableFloat("f_bz_neg_x")
     FNODE_agent.newVariableFloat("f_bz_neg_y")
-    FNODE_agent.newVariableFloat("f_extension")
-    FNODE_agent.newVariableFloat("f_compression")
-    FNODE_agent.newVariableFloat("elastic_energy")
-    FNODE_agent.newVariableUInt8("connectivity_count", 0)
-    FNODE_agent.newVariableFloat("degradation", 0.0)
-    FNODE_agent.newVariableFloat("reinforcement", 0.0)
-    FNODE_agent.newVariableInt("secreted", 0)
-    FNODE_agent.newVariableInt("marked_for_removal", 0)
-    FNODE_agent.newVariableInt("closest_fnode_id", -1)
-    FNODE_agent.newVariableInt("second_closest_fnode_id", -1)
-    FNODE_agent.newVariableArrayFloat("linked_nodes", MAX_CONNECTIVITY)
-    FNODE_agent.newVariableUInt8("clamped_bx_pos")
+    FNODE_agent.newVariableFloat("f_extension") # tensile load carried by connected segments [nN]
+    FNODE_agent.newVariableFloat("f_compression") # compressive load carried by connected segments [nN]
+    FNODE_agent.newVariableFloat("elastic_energy") # stored elastic energy [nN*um]
+    FNODE_agent.newVariableUInt8("connectivity_count", 0) # number of linked neighbour nodes
+    FNODE_agent.newVariableFloat("degradation", 0.0) # accumulated degradation state [-]
+    FNODE_agent.newVariableFloat("reinforcement", 0.0) # accumulated reinforcement state [-]
+    FNODE_agent.newVariableInt("secreted", 0) # 1 if this node was newly secreted by a cell
+    FNODE_agent.newVariableInt("marked_for_removal", 0) # 1 if the node should be deleted
+    FNODE_agent.newVariableInt("closest_fnode_id", -1) # id of the nearest neighbouring FNODE
+    FNODE_agent.newVariableInt("second_closest_fnode_id", -1) # id of the second-nearest neighbouring FNODE
+    FNODE_agent.newVariableArrayFloat("linked_nodes", MAX_CONNECTIVITY) # ids of connected neighbour FNODEs
+    FNODE_agent.newVariableUInt8("clamped_bx_pos") # boundary clamp flags for each face (1 = clamped)
     FNODE_agent.newVariableUInt8("clamped_bx_neg")
     FNODE_agent.newVariableUInt8("clamped_by_pos")
     FNODE_agent.newVariableUInt8("clamped_by_neg")
@@ -1171,26 +1173,26 @@ if INCLUDE_FIBRE_NETWORK:
   ECM agent
 """
 ECM_agent = model.newAgent("ECM")
-ECM_agent.newVariableInt("id", 0)
-ECM_agent.newVariableFloat("x", 0.0)
+ECM_agent.newVariableInt("id", 0) # unique ECM-agent id
+ECM_agent.newVariableFloat("x", 0.0) # ECM grid-point position [um]
 ECM_agent.newVariableFloat("y", 0.0)
 ECM_agent.newVariableFloat("z", 0.0)
 ECM_agent.newVariableInt("grid_lin_id", 0) # linear index in the 3D grid that maps to i,j,k positions
-ECM_agent.newVariableUInt8("grid_i", 0)
+ECM_agent.newVariableUInt8("grid_i", 0) # grid index along the x direction
 ECM_agent.newVariableUInt8("grid_j", 0)
 ECM_agent.newVariableUInt8("grid_k", 0)
 ECM_agent.newVariableArrayFloat("D_sp", N_SPECIES)  # diffusion coefficient of each species at the agent location (used for heterogeneous diffusion)
-ECM_agent.newVariableArrayFloat("C_sp", N_SPECIES) 
-ECM_agent.newVariableArrayFloat("C_sp_sat", N_SPECIES) 
-ECM_agent.newVariableFloat("k_elast")
-ECM_agent.newVariableFloat("d_dumping")
-ECM_agent.newVariableFloat("vx")
+ECM_agent.newVariableArrayFloat("C_sp", N_SPECIES) # species concentrations at this ECM node
+ECM_agent.newVariableArrayFloat("C_sp_sat", N_SPECIES) # saturation concentrations for each species
+ECM_agent.newVariableFloat("k_elast") # ECM spring stiffness [nN/um]
+ECM_agent.newVariableFloat("d_dumping") # ECM damping coefficient [nN*s/um]
+ECM_agent.newVariableFloat("vx") # ECM-node velocity [um/s]
 ECM_agent.newVariableFloat("vy")
 ECM_agent.newVariableFloat("vz")
-ECM_agent.newVariableFloat("fx")
+ECM_agent.newVariableFloat("fx") # net force on the ECM node [nN]
 ECM_agent.newVariableFloat("fy")
 ECM_agent.newVariableFloat("fz")
-ECM_agent.newVariableUInt8("clamped_bx_pos")
+ECM_agent.newVariableUInt8("clamped_bx_pos") # boundary clamp flags for each face (1 = clamped)
 ECM_agent.newVariableUInt8("clamped_bx_neg")
 ECM_agent.newVariableUInt8("clamped_by_pos")
 ECM_agent.newVariableUInt8("clamped_by_neg")
@@ -1211,24 +1213,24 @@ if MOVING_BOUNDARIES:
 if INCLUDE_CELLS:
     cell_focad_update_fn = None
     CELL_agent = model.newAgent("CELL")
-    CELL_agent.newVariableInt("id", 0)
-    CELL_agent.newVariableFloat("x", 0.0)
+    CELL_agent.newVariableInt("id", 0) # unique cell id
+    CELL_agent.newVariableFloat("x", 0.0) # cell-center position [um]
     CELL_agent.newVariableFloat("y", 0.0)
     CELL_agent.newVariableFloat("z", 0.0)
-    CELL_agent.newVariableFloat("vx", 0.0)
+    CELL_agent.newVariableFloat("vx", 0.0) # cell velocity [um/s]
     CELL_agent.newVariableFloat("vy", 0.0)
     CELL_agent.newVariableFloat("vz", 0.0)
-    CELL_agent.newVariableFloat("orx")
+    CELL_agent.newVariableFloat("orx") # cell polarity/orientation unit vector
     CELL_agent.newVariableFloat("ory")
     CELL_agent.newVariableFloat("orz")
-    CELL_agent.newVariableFloat("k_elast")
-    CELL_agent.newVariableFloat("d_dumping")
-    CELL_agent.newVariableFloat("alignment", 0.0)
-    CELL_agent.newVariableArrayFloat("k_consumption", N_SPECIES) 
-    CELL_agent.newVariableArrayFloat("k_production", N_SPECIES) 
-    CELL_agent.newVariableArrayFloat("k_reaction", N_SPECIES) 
-    CELL_agent.newVariableArrayFloat("C_sp", N_SPECIES) 
-    CELL_agent.newVariableArrayFloat("M_sp", N_SPECIES) 
+    CELL_agent.newVariableFloat("k_elast") # cell stiffness [nN/um]
+    CELL_agent.newVariableFloat("d_dumping") # cell damping coefficient [nN*s/um]
+    CELL_agent.newVariableFloat("alignment", 0.0) # alignment score with the local fibre field [-]
+    CELL_agent.newVariableArrayFloat("k_consumption", N_SPECIES) # per-species consumption rate constants
+    CELL_agent.newVariableArrayFloat("k_production", N_SPECIES) # per-species production rate constants
+    CELL_agent.newVariableArrayFloat("k_reaction", N_SPECIES) # per-species reaction rate constants
+    CELL_agent.newVariableArrayFloat("C_sp", N_SPECIES) # per-species cell-associated concentration state
+    CELL_agent.newVariableArrayFloat("M_sp", N_SPECIES) # per-species cell-associated mass state
     CELL_agent.newVariableFloat("speed_ref")   # per-type; set during init
     CELL_agent.newVariableFloat("radius")        # per-type; set during init
     CELL_agent.newVariableFloat("nucleus_radius") # per-type; set during init
@@ -1241,17 +1243,17 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableInt("cycle_phase", 1) # [1:G1] [2:S] [3:G2] [4:M]
     CELL_agent.newVariableInt("cell_type", 0) # to represent different phenotypes, e.g. for different cell lines or for cancer vs stromal cells. The specific meaning of the values assigned to this variable is up to the user and is not defined by the model.
     CELL_agent.newVariableFloat("clock", 0.0) # internal clock of the cell to switch phases
-    CELL_agent.newVariableInt("completed_cycles", 0)
+    CELL_agent.newVariableInt("completed_cycles", 0) # number of completed cell cycles
     CELL_agent.newVariableInt("max_global_cell_id", 0) # cached global max CELL id (updated in pre-cycle layer)
     CELL_agent.newVariableFloat("damage", 0.0) # accumulated damage score in [0,1], where 1 is lethal threshold
     CELL_agent.newVariableInt("dead", 0) # 0: alive, 1: dead
     CELL_agent.newVariableInt("dead_by", -1) # -1:none, 0:hypoxia, 1:starvation, 2:mechanical, 3:cumulative_damage
-    CELL_agent.newVariableInt("mother_id", -1)
-    CELL_agent.newVariableInt("daughter_id", -1)
-    CELL_agent.newVariableInt("just_divided", 0)
-    CELL_agent.newVariableInt("marked_for_removal", 0)
-    CELL_agent.newVariableFloat("fnode_birth_cooldown", 0.0)
-    CELL_agent.newVariableFloat("focad_birth_cooldown", 0.0)
+    CELL_agent.newVariableInt("mother_id", -1) # id of the parent cell if this cell is a daughter
+    CELL_agent.newVariableInt("daughter_id", -1) # id of the daughter created in the latest division
+    CELL_agent.newVariableInt("just_divided", 0) # 1 during the step immediately after division
+    CELL_agent.newVariableInt("marked_for_removal", 0) # 1 if the cell should be removed
+    CELL_agent.newVariableFloat("fnode_birth_cooldown", 0.0) # refractory time before creating another FNODE [s]
+    CELL_agent.newVariableFloat("focad_birth_cooldown", 0.0) # refractory time before creating another FOCAD [s]
     CELL_agent.newRTCFunctionFile("cell_spatial_location_data", cell_spatial_location_data_file).setMessageOutput("cell_spatial_location_message")
     if INCLUDE_CELL_CELL_INTERACTION:
         CELL_agent.newRTCFunctionFile("cell_cell_interaction", cell_cell_interaction_file).setMessageInput("cell_spatial_location_message")
@@ -1281,31 +1283,31 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableFloat("sig_xy", 0.0)
     CELL_agent.newVariableFloat("sig_xz", 0.0)
     CELL_agent.newVariableFloat("sig_yz", 0.0)
-    CELL_agent.newVariableFloat("sig_eig_1", 0.0)
-    CELL_agent.newVariableFloat("sig_eig_2", 0.0)
-    CELL_agent.newVariableFloat("sig_eig_3", 0.0)
-    CELL_agent.newVariableFloat("sig_eigvec1_x", 0.0)
+    CELL_agent.newVariableFloat("sig_eig_1", 0.0) # first principal stress [kPa]
+    CELL_agent.newVariableFloat("sig_eig_2", 0.0) # second principal stress [kPa]
+    CELL_agent.newVariableFloat("sig_eig_3", 0.0) # third principal stress [kPa]
+    CELL_agent.newVariableFloat("sig_eigvec1_x", 0.0) # x component of the first principal-stress direction
     CELL_agent.newVariableFloat("sig_eigvec1_y", 0.0)
     CELL_agent.newVariableFloat("sig_eigvec1_z", 0.0)
-    CELL_agent.newVariableFloat("sig_eigvec2_x", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec2_x", 0.0) # x component of the second principal-stress direction
     CELL_agent.newVariableFloat("sig_eigvec2_y", 0.0)
     CELL_agent.newVariableFloat("sig_eigvec2_z", 0.0)
-    CELL_agent.newVariableFloat("sig_eigvec3_x", 0.0)
+    CELL_agent.newVariableFloat("sig_eigvec3_x", 0.0) # x component of the third principal-stress direction
     CELL_agent.newVariableFloat("sig_eigvec3_y", 0.0)
     CELL_agent.newVariableFloat("sig_eigvec3_z", 0.0)
-    CELL_agent.newVariableFloat("eps_eig_1", 0.0)
-    CELL_agent.newVariableFloat("eps_eig_2", 0.0)
-    CELL_agent.newVariableFloat("eps_eig_3", 0.0)
-    CELL_agent.newVariableFloat("eps_eigvec1_x", 0.0)
+    CELL_agent.newVariableFloat("eps_eig_1", 0.0) # first principal strain [-]
+    CELL_agent.newVariableFloat("eps_eig_2", 0.0) # second principal strain [-]
+    CELL_agent.newVariableFloat("eps_eig_3", 0.0) # third principal strain [-]
+    CELL_agent.newVariableFloat("eps_eigvec1_x", 0.0) # x component of the first principal-strain direction
     CELL_agent.newVariableFloat("eps_eigvec1_y", 0.0)
     CELL_agent.newVariableFloat("eps_eigvec1_z", 0.0)
-    CELL_agent.newVariableFloat("eps_eigvec2_x", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec2_x", 0.0) # x component of the second principal-strain direction
     CELL_agent.newVariableFloat("eps_eigvec2_y", 0.0)
     CELL_agent.newVariableFloat("eps_eigvec2_z", 0.0)
-    CELL_agent.newVariableFloat("eps_eigvec3_x", 0.0)
+    CELL_agent.newVariableFloat("eps_eigvec3_x", 0.0) # x component of the third principal-strain direction
     CELL_agent.newVariableFloat("eps_eigvec3_y", 0.0)
     CELL_agent.newVariableFloat("eps_eigvec3_z", 0.0)
-    CELL_agent.newVariableArrayFloat("chemotaxis_sensitivity", N_SPECIES)
+    CELL_agent.newVariableArrayFloat("chemotaxis_sensitivity", N_SPECIES) # per-species chemotactic sensitivity weights
     if INCLUDE_FOCAL_ADHESIONS:  
         CELL_agent.newRTCFunctionFile("cell_bucket_location_data", cell_bucket_location_data_file).setMessageOutput("cell_bucket_location_message")
         cell_focad_update_fn = CELL_agent.newRTCFunctionFile("cell_focad_update", cell_focad_update_file)
@@ -1321,43 +1323,43 @@ if INCLUDE_CELLS:
 """
 if INCLUDE_FOCAL_ADHESIONS:
     FOCAD_agent = model.newAgent("FOCAD")
-    FOCAD_agent.newVariableInt("id", 0)
-    FOCAD_agent.newVariableInt("cell_id")
+    FOCAD_agent.newVariableInt("id", 0) # unique focal-adhesion id
+    FOCAD_agent.newVariableInt("cell_id") # id of the parent cell
     FOCAD_agent.newVariableInt("cell_type", 0)  # cell type of the parent cell (for per-type property lookups)
-    FOCAD_agent.newVariableInt("fnode_id")    
-    FOCAD_agent.newVariableFloat("x", 0.0)
+    FOCAD_agent.newVariableInt("fnode_id") # id of the interacting fibre node
+    FOCAD_agent.newVariableFloat("x", 0.0) # focal-adhesion position [um]
     FOCAD_agent.newVariableFloat("y", 0.0)
     FOCAD_agent.newVariableFloat("z", 0.0)
-    FOCAD_agent.newVariableFloat("vx", 0.0)
+    FOCAD_agent.newVariableFloat("vx", 0.0) # focal-adhesion velocity [um/s]
     FOCAD_agent.newVariableFloat("vy", 0.0)
     FOCAD_agent.newVariableFloat("vz", 0.0)
-    FOCAD_agent.newVariableFloat("fx", 0.0)
+    FOCAD_agent.newVariableFloat("fx", 0.0) # net force on the focal adhesion [nN]
     FOCAD_agent.newVariableFloat("fy", 0.0)
     FOCAD_agent.newVariableFloat("fz", 0.0)
-    FOCAD_agent.newVariableInt("anchor_id",-1)
-    FOCAD_agent.newVariableFloat("x_i", 0.0)
+    FOCAD_agent.newVariableInt("anchor_id",-1) # index of the associated cell anchor point
+    FOCAD_agent.newVariableFloat("x_i", 0.0) # anchor-point position on the cell surface [um]
     FOCAD_agent.newVariableFloat("y_i", 0.0)
     FOCAD_agent.newVariableFloat("z_i", 0.0)
-    FOCAD_agent.newVariableFloat("x_c", 0.0)
+    FOCAD_agent.newVariableFloat("x_c", 0.0) # parent-cell center position [um]
     FOCAD_agent.newVariableFloat("y_c", 0.0)
     FOCAD_agent.newVariableFloat("z_c", 0.0)
-    FOCAD_agent.newVariableFloat("orx", 1.0)
+    FOCAD_agent.newVariableFloat("orx", 1.0) # parent-cell orientation unit vector
     FOCAD_agent.newVariableFloat("ory", 0.0)
     FOCAD_agent.newVariableFloat("orz", 0.0)
-    FOCAD_agent.newVariableFloat("rest_length_0")
-    FOCAD_agent.newVariableFloat("rest_length")
-    FOCAD_agent.newVariableFloat("k_fa")
-    FOCAD_agent.newVariableFloat("f_max")
-    FOCAD_agent.newVariableInt("attached")
-    FOCAD_agent.newVariableUInt8("active")
-    FOCAD_agent.newVariableFloat("v_c")
-    FOCAD_agent.newVariableUInt8("fa_state")
-    FOCAD_agent.newVariableFloat("age")
-    FOCAD_agent.newVariableFloat("detached_age", 0.0)
-    FOCAD_agent.newVariableFloat("k_on")
-    FOCAD_agent.newVariableFloat("k_off_0")
-    FOCAD_agent.newVariableFloat("f_c")
-    FOCAD_agent.newVariableFloat("k_reinf")
+    FOCAD_agent.newVariableFloat("rest_length_0") # rest length at adhesion birth [um]
+    FOCAD_agent.newVariableFloat("rest_length") # current effective rest length [um]
+    FOCAD_agent.newVariableFloat("k_fa") # focal-adhesion stiffness [nN/um]
+    FOCAD_agent.newVariableFloat("f_max") # maximum sustainable traction force [nN]
+    FOCAD_agent.newVariableInt("attached") # 1 if attached to a fibre node
+    FOCAD_agent.newVariableUInt8("active") # 1 if the adhesion is active in the simulation
+    FOCAD_agent.newVariableFloat("v_c") # rest-length shortening speed [um/s]
+    FOCAD_agent.newVariableUInt8("fa_state") # adhesion state code: 1 nascent, 2 mature, 3 disassembling
+    FOCAD_agent.newVariableFloat("age") # adhesion lifetime [s]
+    FOCAD_agent.newVariableFloat("detached_age", 0.0) # time spent detached [s]
+    FOCAD_agent.newVariableFloat("k_on") # attachment rate [1/s]
+    FOCAD_agent.newVariableFloat("k_off_0") # baseline detachment rate [1/s]
+    FOCAD_agent.newVariableFloat("f_c") # force scale in the slip-bond law [nN]
+    FOCAD_agent.newVariableFloat("k_reinf") # force-dependent reinforcement rate [1/s]
     FOCAD_agent.newVariableFloat("f_mag", 0.0)  # |F_FA| traction magnitude [nN] at current step
     FOCAD_agent.newVariableInt("is_front", 0)  # 1 if adhesion is classified in the cell front hemisphere, else 0
     FOCAD_agent.newVariableInt("is_rear", 0)  # 1 if adhesion is classified in the cell rear hemisphere, else 0
