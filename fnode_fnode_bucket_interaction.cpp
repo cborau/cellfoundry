@@ -218,7 +218,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket,
         }
 
         if (k_elast > 1e-12f) {
-          agent_elastic_energy += 0.5f * (total_f * total_f) / k_elast;
+          agent_elastic_energy += 0.5f * (total_f * total_f) / k_elast; // [nN * um] as k_elast is in [nN/um] and total_f in [nN]
         }
 
         agent_fx += -1 * total_f * cos_x; // minus comes from the direction definition (agent-message)
