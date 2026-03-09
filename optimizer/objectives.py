@@ -2,13 +2,15 @@
 Objective (error) functions for Optuna-based parameter optimization.
 
 Each function takes the simulation results dictionary (as saved in the pickle)
-and a reference data source, and returns a scalar error value to minimize.
+and a reference data source, and returns a tuple
+``(error, display_text)`` where ``display_text`` is an optional string used
+only for human-readable optimizer output.
 
 Add your own objective functions here following the same signature::
 
-    def my_objective(results: dict, reference_path: str, **kwargs) -> float:
+    def my_objective(results: dict, reference_path: str, **kwargs) -> tuple[float, str | None]:
         ...
-        return error
+        return error, None
 
 Then register the function name in the ``OBJECTIVE_REGISTRY`` at the bottom.
 
@@ -48,6 +50,22 @@ def _interpolate_to_match(series: pd.Series, target_len: int) -> np.ndarray:
     x_old = np.linspace(0, 1, len(series))
     x_new = np.linspace(0, 1, target_len)
     return np.interp(x_new, x_old, series.values)
+
+
+def _format_percent_text(error: float, target: float, label: str = "target") -> str:
+    abs_target = abs(float(target))
+    if abs_target <= 1e-12:
+        return f"({label}~0; % error unavailable)"
+    percent_error = 100.0 * abs(float(error)) / abs_target
+    return f"({percent_error:.2f}% off {label})"
+
+
+def _format_percent_detail(label: str, error: float, target: float) -> str:
+    abs_target = abs(float(target))
+    if abs_target <= 1e-12:
+        return f"{label}: target~0"
+    percent_error = 100.0 * abs(float(error)) / abs_target
+    return f"{label}: {percent_error:.2f}% off"
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +109,7 @@ def stress_strain_curve_error(results: dict, reference_path: str, **kwargs) -> f
     stress_err = _mse(sim_stress_interp, ref["stress"].values)
 
     # Combined error (stress dominates since that's what we're fitting)
-    return float(stress_err + 0.1 * strain_err)
+    return float(stress_err + 0.1 * strain_err), None
 
 
 def boundary_force_curve_error(results: dict, reference_path: str, **kwargs) -> float:
@@ -115,7 +133,7 @@ def boundary_force_curve_error(results: dict, reference_path: str, **kwargs) -> 
 
     if n_cols == 0:
         raise ValueError("No matching force columns found between reference and results")
-    return total_error / n_cols
+    return total_error / n_cols, None
 
 
 def cell_population_error(results: dict, reference_path: str, **kwargs) -> float:
@@ -131,7 +149,7 @@ def cell_population_error(results: dict, reference_path: str, **kwargs) -> float
         raise ValueError("Reference CSV must contain 'n_cells_alive' column")
 
     sim_alive = _interpolate_to_match(cell_met["n_cells_alive"], len(ref))
-    return _rmse(sim_alive, ref["n_cells_alive"].values)
+    return _rmse(sim_alive, ref["n_cells_alive"].values), None
 
 
 def focad_attached_ratio_error(results: dict, reference_path: str, **kwargs) -> float:
@@ -147,7 +165,7 @@ def focad_attached_ratio_error(results: dict, reference_path: str, **kwargs) -> 
         raise ValueError("Reference CSV must contain 'attached_ratio' column")
 
     sim_ratio = _interpolate_to_match(focad_met["attached_ratio"], len(ref))
-    return _rmse(sim_ratio, ref["attached_ratio"].values)
+    return _rmse(sim_ratio, ref["attached_ratio"].values), None
 
 
 def poisson_ratio_error(results: dict, reference_path: str = None, **kwargs) -> float:
@@ -163,14 +181,15 @@ def poisson_ratio_error(results: dict, reference_path: str = None, **kwargs) -> 
     if "target_poisson" in kwargs:
         target = float(kwargs["target_poisson"])
         sim_final = float(pr.iloc[-1])
-        return abs(sim_final - target)
+        error = abs(sim_final - target)
+        return error, _format_percent_text(error, target)
 
     if reference_path:
         ref = _load_reference_csv(reference_path)
         if "poisson_ratio" not in ref.columns:
             raise ValueError("Reference CSV must contain 'poisson_ratio' column")
         sim_interp = _interpolate_to_match(pr.iloc[:, 0] if hasattr(pr, "iloc") else pr, len(ref))
-        return _rmse(sim_interp, ref["poisson_ratio"].values)
+        return _rmse(sim_interp, ref["poisson_ratio"].values), None
 
     raise ValueError("Provide either reference_path or target_poisson kwarg")
 
@@ -199,7 +218,7 @@ def matrix_remodeling_error(results: dict, reference_path: str, **kwargs) -> flo
 
     if n_cols == 0:
         raise ValueError("No matching remodeling columns found between reference and results")
-    return total_error / n_cols
+    return total_error / n_cols, None
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +259,8 @@ def final_cell_count_error(results: dict, reference_path: str = None, **kwargs) 
     # --- Option A: scalar target ---
     if "target_cell_count" in kwargs:
         target = float(kwargs["target_cell_count"])
-        return abs(final_alive - target)
+        error = abs(final_alive - target)
+        return error, _format_percent_text(error, target)
 
     # --- Option B: reference CSV (may include per-type targets) ---
     if reference_path is None:
@@ -253,13 +273,17 @@ def final_cell_count_error(results: dict, reference_path: str = None, **kwargs) 
     normalize = kwargs.get("normalize", False)
     total_error = 0.0
     n_targets = 0
+    display_parts = []
 
     for _, row in ref.iterrows():
         ct = row.get("cell_type", -1)
         # -1 or "all" → compare total alive
         if ct == -1 or str(ct).strip().lower() == "all":
-            total_error += abs(final_alive - float(row["target_count"]))
+            target = float(row["target_count"])
+            error = abs(final_alive - target)
+            total_error += error
             n_targets += 1
+            display_parts.append(_format_percent_detail("all", error, target))
         else:
             # Per-type columns are only present when the simulation exports
             # them (VTK path with per-type counting).  The column convention
@@ -267,8 +291,11 @@ def final_cell_count_error(results: dict, reference_path: str = None, **kwargs) 
             col_name = f"n_alive_type_{int(ct)}"
             if col_name in cell_met.columns:
                 sim_val = int(cell_met[col_name].iloc[-1])
-                total_error += abs(sim_val - float(row["target_count"]))
+                target = float(row["target_count"])
+                error = abs(sim_val - target)
+                total_error += error
                 n_targets += 1
+                display_parts.append(_format_percent_detail(f"type {int(ct)}", error, target))
             else:
                 # Silently skip types we can't measure (avoids hard crash when
                 # per-type tracking is not available).
@@ -277,7 +304,8 @@ def final_cell_count_error(results: dict, reference_path: str = None, **kwargs) 
     if n_targets == 0:
         raise ValueError("No usable target rows found in reference CSV")
 
-    return total_error / n_targets if normalize else total_error
+    display_text = f"({'; '.join(display_parts)})" if display_parts else None
+    return (total_error / n_targets if normalize else total_error), display_text
 
 
 def final_focad_per_cell_error(results: dict, reference_path: str = None, **kwargs) -> float:
@@ -304,7 +332,8 @@ def final_focad_per_cell_error(results: dict, reference_path: str = None, **kwar
     # --- Option A: scalar target ---
     if "target_focad_per_cell" in kwargs:
         target = float(kwargs["target_focad_per_cell"])
-        return abs(sim_focad_per_cell - target)
+        error = abs(sim_focad_per_cell - target)
+        return error, _format_percent_text(error, target)
 
     # --- Option B: reference CSV ---
     if reference_path is None:
@@ -315,7 +344,8 @@ def final_focad_per_cell_error(results: dict, reference_path: str = None, **kwar
         raise ValueError("Reference CSV must contain 'target_focad_per_cell' column")
 
     target = float(ref["target_focad_per_cell"].iloc[0])
-    return abs(sim_focad_per_cell - target)
+    error = abs(sim_focad_per_cell - target)
+    return error, _format_percent_text(error, target)
 
 
 # ---------------------------------------------------------------------------
@@ -498,7 +528,8 @@ def organoid_size_error(results: dict, reference_path: str = None, **kwargs) -> 
     # --- Option A: scalar target ---
     if "target_size" in kwargs:
         target = float(kwargs["target_size"])
-        return abs(sim_value - target)
+        error = abs(sim_value - target)
+        return error, _format_percent_text(error, target)
 
     # --- Option B: reference CSV ---
     if reference_path is None:
@@ -509,7 +540,8 @@ def organoid_size_error(results: dict, reference_path: str = None, **kwargs) -> 
         raise ValueError("Reference CSV must contain a 'target_size' column")
 
     target = float(ref["target_size"].iloc[0])
-    return abs(sim_value - target)
+    error = abs(sim_value - target)
+    return error, _format_percent_text(error, target)
 
 
 # ---------------------------------------------------------------------------

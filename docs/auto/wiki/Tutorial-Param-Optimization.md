@@ -84,7 +84,7 @@ The `function` field must match a name registered in `objectives.py`.  Available
 | `final_focad_per_cell_error` | Final FOCAD per alive cell | |Δ| |
 | `organoid_size_error` | Organoid / spheroid size from VTK | |ΔR| |
 
-> **Adding your own** — define a function with signature `f(results: dict, reference_path: str, **kwargs) -> float` in `objectives.py` and add it to `OBJECTIVE_REGISTRY`.
+> **Adding your own** — define a function with signature `f(results: dict, reference_path: str, **kwargs) -> tuple[float, str | None]` in `objectives.py` and add it to `OBJECTIVE_REGISTRY`.
 
 ### 2.3 Parameters to tune
 
@@ -149,14 +149,14 @@ Each trial prints a one-line summary:
 ```
   [trial] Running: python model.py --overrides .../trial_00003/overrides.json --result-dir .../trial_00003
   [trial] Finished in 4.2s (exit code 0)
-  [trial 3] final_cell_count_error=41.000000
+  [trial 3] final_cell_count_error=41.000000 (all: 20.00% off; type 0: 12.50% off)
 ```
 
 At the end, the best parameters are saved:
 
 ```
   Best trial #15
-  Error: 0.000000
+  Objective: final_cell_count_error=0.000000 (0.00% off target)
   Parameters:
     N_CELLS: 3
     CELL_SPEED_REF: 0.573
@@ -231,11 +231,11 @@ python optimizer/dashboard.py --storage sqlite:///path/to/study.db --port 9090
 Create a new function in `optimizer/objectives.py`:
 
 ```python
-def my_custom_error(results: dict, reference_path: str = None, **kwargs) -> float:
+def my_custom_error(results: dict, reference_path: str = None, **kwargs) -> tuple[float, str | None]:
     """Compare some quantity from the simulation against a target."""
     cell_met = results["CELL_METRICS_OVER_TIME"]
     # ... compute your error ...
-    return error
+    return error, None
 ```
 
 Then register it at the bottom of the file:
@@ -258,7 +258,20 @@ Now you can use `function: my_custom_error` in your YAML config.
 | `**kwargs` | | Extra keyword arguments from the `kwargs:` block in YAML |
 | `kwargs["trial_dir"]` | `str` | Path to the trial output directory (auto-injected) |
 
-The function must return a **single float** (the error to minimize).
+The function must return a tuple `(error, display_text)`.  The optimizer minimizes `error`, while `display_text` is printed in the console summaries.
+
+If you want richer console output, return a display string as the second tuple element:
+
+```python
+def my_custom_error(results: dict, reference_path: str = None, **kwargs) -> tuple[float, str | None]:
+    target = float(kwargs["target_value"])
+    simulated = float(results["CELL_METRICS_OVER_TIME"]["n_cells_alive"].iloc[-1])
+    error = abs(simulated - target)
+    display_text = f"({100.0 * error / abs(target):.2f}% off target)"
+    return error, display_text
+```
+
+If no extra display text is useful, return `None` as the second element.
 
 ---
 

@@ -78,7 +78,36 @@ def _load_pickle(path):
 
 def load_config(config_path: str) -> dict:
     with open(config_path, "r") as f:
-        return yaml.safe_load(f)
+        config = yaml.safe_load(f)
+    return config
+
+
+def _normalize_objective_result(result) -> tuple[float, str | None]:
+    if not isinstance(result, tuple) or len(result) != 2:
+        raise ValueError(
+            "Objective functions must return a tuple of (error, display_text)."
+        )
+
+    error, display_text = result
+    if display_text is not None and not isinstance(display_text, str):
+        raise ValueError(
+            "display_text must be a string or None."
+        )
+
+    return float(error), display_text
+
+
+def _format_objective_label(name: str, error: float, display_text: str | None) -> str:
+    label = f"{name}={error:.6f}"
+    if not display_text:
+        return label
+    return f"{label} {display_text}"
+
+
+def _get_display_text(display_texts: list[str | None], index: int) -> str | None:
+    if index < len(display_texts):
+        return display_texts[index]
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -265,19 +294,26 @@ def make_objective(config: dict, model_script: str, base_result_dir: str):
 
         # 4. Compute objective(s)
         errors = []
+        display_texts = []
         for obj in obj_funcs:
             try:
                 # Pass trial_dir so spatial objectives (e.g. organoid_size)
                 # can read VTK files directly
                 kw = dict(obj["kwargs"])
                 kw["trial_dir"] = trial_dir
-                error = obj["func"](results, obj["reference"], **kw)
+                raw_result = obj["func"](results, obj["reference"], **kw)
+                error, display_text = _normalize_objective_result(raw_result)
                 errors.append(error)
+                display_texts.append(display_text)
             except Exception as e:
                 print(f"  [trial {trial.number}] Objective '{obj['name']}' failed: {e}")
                 raise optuna.TrialPruned()
 
-        label = " | ".join(f"{o['name']}={e:.6f}" for o, e in zip(obj_funcs, errors))
+        label = " | ".join(
+            _format_objective_label(obj["name"], error, display_text)
+            for obj, error, display_text in zip(obj_funcs, errors, display_texts)
+        )
+        trial.set_user_attr("display_texts", display_texts)
         print(f"  [trial {trial.number}] {label}")
 
         # 5. Optionally clean up trial output to save disk space
@@ -287,7 +323,7 @@ def make_objective(config: dict, model_script: str, base_result_dir: str):
         # Return scalar for single-objective, tuple for multi-objective
         return tuple(errors) if multi else errors[0]
 
-    return objective, multi
+    return objective, multi, obj_funcs
 
 
 # ---------------------------------------------------------------------------
@@ -313,7 +349,6 @@ def main():
     args = parser.parse_args()
 
     config = load_config(args.config)
-
     # Resolve paths
     script_dir = Path(__file__).resolve().parent
     project_root = script_dir.parent          # optimizer/ lives one level below project root
@@ -330,7 +365,11 @@ def main():
     n_trials = study_cfg.get("n_trials", 20)
 
     # Build objective(s)
-    objective_fn, is_multi = make_objective(config, model_script, base_result_dir)
+    objective_fn, is_multi, objective_display_specs = make_objective(
+        config,
+        model_script,
+        base_result_dir,
+    )
 
     # ---- Directions ----
     # Multi-objective: study.directions is a list, e.g. [minimize, minimize]
@@ -414,8 +453,16 @@ def main():
         print(f"\n{'='*60}")
         print(f"  Pareto front: {len(pareto_trials)} trial(s)")
         for t in pareto_trials:
-            vals = ", ".join(f"{v:.6f}" for v in t.values)
-            print(f"  Trial #{t.number}: errors=[{vals}]")
+            display_texts = t.user_attrs.get("display_texts", [])
+            labels = " | ".join(
+                _format_objective_label(
+                    obj["name"],
+                    value,
+                    _get_display_text(display_texts, idx),
+                )
+                for idx, (obj, value) in enumerate(zip(objective_display_specs, t.values))
+            )
+            print(f"  Trial #{t.number}: {labels}")
             for k, v in t.params.items():
                 print(f"    {k}: {v}")
         print(f"{'='*60}\n")
@@ -431,9 +478,16 @@ def main():
         print(f"Pareto front saved to {pareto_path}")
     else:
         best = study.best_trial
+        best_display_texts = best.user_attrs.get("display_texts", [])
+        best_display_text = best_display_texts[0] if best_display_texts else None
+        best_label = _format_objective_label(
+            objective_display_specs[0]["name"],
+            best.value,
+            best_display_text,
+        )
         print(f"\n{'='*60}")
         print(f"  Best trial #{best.number}")
-        print(f"  Error: {best.value:.6f}")
+        print(f"  Objective: {best_label}")
         print(f"  Parameters:")
         for k, v in best.params.items():
             print(f"    {k}: {v}")
