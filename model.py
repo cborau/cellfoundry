@@ -21,7 +21,7 @@ import os
 import pickle
 import matplotlib.pyplot as plt
 import check_hard_coded_values
-from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary, apply_param_overrides, load_param_overrides_from_cli
+from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary, apply_param_overrides, load_param_overrides_from_cli, loadCachedCellInitialization, generateCellInitializationData
 
 # TODO LIST:
 # Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
@@ -50,6 +50,7 @@ CURR_PATH = pathlib.Path(__file__).resolve().parent
 RES_PATH = CURR_PATH / 'result_files'
 RES_PATH.mkdir(parents=True, exist_ok=True)
 EPSILON = 0.0000000001
+CELL_INIT_CACHE_DIR = CURR_PATH
 
 print("Executing in ", CURR_PATH)
 # Minimum number of ECM agents per direction (x,y,z). 
@@ -156,7 +157,7 @@ if OSCILLATORY_SHEAR_ASSAY:
 # | FIBRE NETWORK PARAMETERS                                           |
 # +====================================================================+
 INCLUDE_FIBRE_NETWORK = True
-NETWORK_FILE = 'network_3d.pkl'  # path to the .pkl file with node_coords + connectivity
+NETWORK_FILE = 'network_medium_density.pkl'  # path to the .pkl file with node_coords + connectivity
 
 MAX_CONNECTIVITY = 8 # must match hard-coded C++ values
 # NOTE: These are calibrated model parameters (effective segment-level mechanics), not universal material constants.
@@ -314,7 +315,7 @@ else:
 # +====================================================================+
 INCLUDE_FOCAL_ADHESIONS = True
 INIT_N_FOCAD_PER_CELL = 10 # initial number of focal adhesions per cell. 
-N_ANCHOR_POINTS = 100 # number of anchor points to which focal adhesions can attach on the nucleus surface. Their positions change with nucleus deformation
+N_ANCHOR_POINTS = 50 # number of anchor points to which focal adhesions can attach on the nucleus surface. Their positions change with nucleus deformation
 MAX_SEARCH_RADIUS_FOCAD = 3.0 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE  # TEMP(debug attach): increased to strongly favor FA-node encounters. Reasonable baseline: 1.0 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
 MAX_FOCAD_ARM_LENGTH = 4 * max(CELL_RADIUS)  # maximum length of the focal adhesion "arm". Uses max radius across cell types. WARNING: make sure this value is consistent with CELL_RADIUS and MAX_SEARCH_RADIUS_FOCAD to avoid unrealistic behavior.
 # WARNING: rate values below assume global timestep ~ 1.0 s
@@ -1555,14 +1556,25 @@ class initAgentPopulations(pyflamegpu.HostFunction):
             print(f"--- Initializing CELLS ({N_CELLS})")
             print("  |-> current_id:", current_id)
             count = -1
-            cell_pos = getRandomCoords3D(N_CELLS,
-                                        coord_boundary[0], coord_boundary[1],
-                                        coord_boundary[2], coord_boundary[3],
-                                        coord_boundary[4], coord_boundary[5])
             if N_CELLS == 1: # DEBUGGING. FIX CELL POSITION TO 0,0,0
                 cell_pos = np.array([[0.0, 0.0, 0.0]], dtype=float) # for testing with 1 cell. 
-            cell_orientations = getRandomVectors3D(N_CELLS)
+                cell_orientations = np.array([[1.0, 0.0, 0.0]], dtype=float) 
+            else:
+                cached_cell_init = loadCachedCellInitialization(N_CELLS, coord_boundary, CELL_INIT_CACHE_DIR, atol=EPSILON)
+                if cached_cell_init is not None:
+                    cell_pos, cell_orientations, cache_path, _cache_data = cached_cell_init
+                    print(f"  |-> Loaded cached cell positions/orientations from {cache_path}")
+                else:
+                    init_gen_start = time.perf_counter()
+                    cell_pos, cell_orientations = generateCellInitializationData(N_CELLS, coord_boundary)
+                    total_gen_time = time.perf_counter() - init_gen_start
+                    print(
+                        f"  |-> Generated cell positions/orientations on the fly "
+                        f"(total: {total_gen_time:.3f}s)"
+                    )
+            
             cell_id_list = []
+            cell_progress_interval = max(1, N_CELLS // 100)
             for i in range(N_CELLS):
                 count += 1
                 cell_type_i = i % N_CELL_TYPES  # assign cell types round-robin; customize as needed
@@ -1673,6 +1685,8 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableArrayFloat("u_ref_y_i", u_ref[:, 1].tolist())
                 instance.setVariableArrayFloat("u_ref_z_i", u_ref[:, 2].tolist())
                 instance.setVariableArrayFloat("chemotaxis_sensitivity", CHEMOTAXIS_SENSITIVITY) 
+                if N_CELLS >= 100000 and ((i + 1) % cell_progress_interval == 0 or (i + 1) == N_CELLS):
+                    print(f"  |-> Cells initialized: {i + 1}/{N_CELLS}")
 
 
             FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
@@ -1685,6 +1699,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
             print(f"--- Initializing FOCAL ADHESIONS ({N_CELLS * INIT_N_FOCAD_PER_CELL})")
             print("  |-> current_id:", current_id)
             count = -1
+            focad_progress_interval = max(1, N_CELLS // 100)
             for i in range(N_CELLS):
                 cell_type_i = i % N_CELL_TYPES
                 focad_pos = getRandomCoordsAroundPoint(INIT_N_FOCAD_PER_CELL, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_RADIUS[cell_type_i], on_surface=True)
@@ -1743,6 +1758,8 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableFloat("k_off_0_eff_front", 0.0)
                     instance.setVariableFloat("k_off_0_eff_rear", 0.0)
                     instance.setVariableFloat("linc_prev_total_length", 0.0)
+                if N_CELLS >= 100000 and ((i + 1) % focad_progress_interval == 0 or (i + 1) == N_CELLS):
+                    print(f"  |-> Cells with focal adhesions initialized: {i + 1}/{N_CELLS}")
             
             FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
 

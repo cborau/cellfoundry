@@ -1,6 +1,7 @@
 import math
 import os
 import pickle
+import time
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -399,9 +400,7 @@ def getRandomCoords3D(n, minx, maxx, miny, maxy, minz, maxz):
     Returns:
         numpy.ndarray: Array of random numbers with shape (n, 3).
     """
-    np.random.seed()
-    random_array = np.random.uniform(low=[minx, miny, minz], high=[maxx, maxy, maxz], size=(n, 3))
-    return random_array
+    return np.random.uniform(low=[minx, miny, minz], high=[maxx, maxy, maxz], size=(n, 3))
     
 
 def randomVector3D():
@@ -436,12 +435,113 @@ def getRandomVectors3D(n_vectors: int):
     v_array : Numpy array
         Coordinates of the vectors. Shape: [n_vectors, 3].
     """
-    v_array = np.zeros((n_vectors, 3))
-    for i in range(n_vectors):
-        vi = randomVector3D()
-        v_array[i, :] = np.array(vi, dtype='float')
+    phi = np.random.uniform(0.0, 2.0 * np.pi, size=n_vectors)
+    costheta = np.random.uniform(-1.0, 1.0, size=n_vectors)
+    sintheta = np.sqrt(np.maximum(0.0, 1.0 - costheta * costheta))
 
+    v_array = np.empty((n_vectors, 3), dtype=float)
+    v_array[:, 0] = sintheta * np.cos(phi)
+    v_array[:, 1] = sintheta * np.sin(phi)
+    v_array[:, 2] = costheta
     return v_array
+
+
+def getCellInitCachePath(cache_dir, n_cells: int):
+    cache_dir = os.fspath(cache_dir)
+    return os.path.join(cache_dir, f"cell_pos_ori_{n_cells}.pkl")
+
+
+def generateCellInitializationData(n_cells: int, boundary_coords):
+    boundary_coords = np.asarray(boundary_coords, dtype=float)
+    cell_pos = getRandomCoords3D(
+        n_cells,
+        boundary_coords[0], boundary_coords[1],
+        boundary_coords[2], boundary_coords[3],
+        boundary_coords[4], boundary_coords[5],
+    )
+    cell_orientations = getRandomVectors3D(n_cells)
+    return cell_pos, cell_orientations
+
+
+def saveCellInitializationCache(n_cells: int, boundary_coords, cache_dir, extra_data=None):
+    os.makedirs(cache_dir, exist_ok=True)
+    boundary_coords = np.asarray(boundary_coords, dtype=float)
+
+    pos_start = time.perf_counter()
+    cell_pos = getRandomCoords3D(
+        n_cells,
+        boundary_coords[0], boundary_coords[1],
+        boundary_coords[2], boundary_coords[3],
+        boundary_coords[4], boundary_coords[5],
+    )
+    pos_seconds = time.perf_counter() - pos_start
+
+    ori_start = time.perf_counter()
+    cell_orientations = getRandomVectors3D(n_cells)
+    ori_seconds = time.perf_counter() - ori_start
+
+    cache_data = {
+        "n_cells": int(n_cells),
+        "boundary_coords": boundary_coords,
+        "domain_size": boundary_coords.copy(),
+        "cell_pos": np.asarray(cell_pos, dtype=float),
+        "cell_orientations": np.asarray(cell_orientations, dtype=float),
+        "generation_time_seconds": {
+            "positions": pos_seconds,
+            "orientations": ori_seconds,
+            "total": pos_seconds + ori_seconds,
+        },
+    }
+    if extra_data:
+        cache_data.update(extra_data)
+
+    output_path = getCellInitCachePath(cache_dir, n_cells)
+    with open(output_path, 'wb') as fh:
+        pickle.dump(cache_data, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    return output_path, cache_data
+
+
+def loadCachedCellInitialization(n_cells: int, boundary_coords, cache_dir, atol=1.0e-10):
+    cache_path = getCellInitCachePath(cache_dir, n_cells)
+    if not os.path.exists(cache_path):
+        return None
+
+    try:
+        with open(cache_path, 'rb') as fh:
+            cache_data = pickle.load(fh)
+    except Exception as exc:
+        print(f"WARNING: Could not read cached cell initialization from {cache_path}: {exc}")
+        return None
+
+    cached_boundary = cache_data.get('boundary_coords', cache_data.get('domain_size'))
+    if cached_boundary is None:
+        print(f"WARNING: Cached cell initialization file {cache_path} does not contain boundary coordinates.")
+        return None
+
+    cached_boundary = np.asarray(cached_boundary, dtype=float)
+    current_boundary = np.asarray(boundary_coords, dtype=float)
+    if cached_boundary.shape != (6,) or current_boundary.shape != (6,):
+        print(f"WARNING: Cached cell initialization file {cache_path} has invalid boundary shape.")
+        return None
+
+    if not np.allclose(cached_boundary, current_boundary, rtol=0.0, atol=atol):
+        print(
+            f"WARNING: Cached cell initialization file {cache_path} was generated for a different domain. "
+            "Falling back to on-the-fly generation."
+        )
+        return None
+
+    cell_pos = np.asarray(cache_data.get('cell_pos'), dtype=float)
+    cell_orientations = np.asarray(cache_data.get('cell_orientations'), dtype=float)
+    expected_shape = (n_cells, 3)
+    if cell_pos.shape != expected_shape or cell_orientations.shape != expected_shape:
+        print(
+            f"WARNING: Cached cell initialization file {cache_path} has unexpected array shapes "
+            f"(positions={cell_pos.shape}, orientations={cell_orientations.shape}, expected={expected_shape})."
+        )
+        return None
+
+    return cell_pos, cell_orientations, cache_path, cache_data
 
 
 def getFixedVectors3D(n_vectors: int, v_dir: np.array):
@@ -488,19 +588,14 @@ def getRandomCoordsAroundPoint(n, px, py, pz, radius, on_surface=False):
     coords
         A numpy array of randomly generated 3D coordinates with shape (n, 3).
     """
-    central_point = np.array([px, py, pz])
+    central_point = np.asarray([px, py, pz], dtype=float)
     rand_dirs = getRandomVectors3D(n)
-    coords = np.zeros((n, 3))
-    np.random.seed()
-    for i in range(n):
-        if on_surface:
-            radius_i = radius
-        else:
-            radius_i = np.random.uniform(0.0, 1.0) * radius
-        coords[i, :] = central_point + np.array(rand_dirs[i, :] * radius_i, dtype='float')
-    
+    if on_surface:
+        radii = np.full((n, 1), radius, dtype=float)
+    else:
+        radii = np.random.uniform(0.0, 1.0, size=(n, 1)) * radius
 
-    return coords
+    return central_point + rand_dirs * radii
 
 
 def compute_u_ref_from_anchor_pos(anchor_pos: np.ndarray,

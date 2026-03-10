@@ -230,6 +230,7 @@ def _run_single(
     run_index: int,
     total_runs: int,
     conda_env: str | None,
+    show_model_output: bool,
     dry: bool,
 ) -> dict:
     """Patch working copy, run model.py, parse output, return metrics dict."""
@@ -284,21 +285,50 @@ def _run_single(
     if conda_env:
         cmd = [
             "conda", "run", "-n", conda_env, "--no-capture-output",
-            sys.executable, model_path, "--overrides", overrides_path,
+            sys.executable, "-u", model_path, "--overrides", overrides_path,
         ]
     else:
-        cmd = [sys.executable, model_path, "--overrides", overrides_path]
+        cmd = [sys.executable, "-u", model_path, "--overrides", overrides_path]
 
     print(f"  cwd: {wc.workdir}")
     print(f"  cmd: {' '.join(cmd)}")
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=str(wc.workdir),
-            capture_output=True,
-            text=True,
-            timeout=3600,  # 1 hour max per run
-        )
+        if show_model_output:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(wc.workdir),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            output_lines: list[str] = []
+            try:
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    print(f"    | {line.rstrip()}")
+                    output_lines.append(line)
+                result_returncode = proc.wait(timeout=3600)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                print("  TIMEOUT (>1h)")
+                return _make_result(n, ecm_pop, n_cells, init_focad, n_fnodes,
+                                    cell_radius, search_radius, steps,
+                                    status="TIMEOUT")
+            stdout = "".join(output_lines)
+            stderr = ""
+        else:
+            result = subprocess.run(
+                cmd,
+                cwd=str(wc.workdir),
+                capture_output=True,
+                text=True,
+                timeout=3600,  # 1 hour max per run
+            )
+            result_returncode = result.returncode
+            stdout = result.stdout or ""
+            stderr = result.stderr or ""
     except subprocess.TimeoutExpired:
         print("  TIMEOUT (>1h)")
         return _make_result(n, ecm_pop, n_cells, init_focad, n_fnodes,
@@ -306,17 +336,14 @@ def _run_single(
                             status="TIMEOUT")
 
     # 4. Parse output
-    stdout = result.stdout or ""
-    stderr = result.stderr or ""
-
-    if result.returncode != 0:
-        print(f"  FAILED (exit code {result.returncode})")
+    if result_returncode != 0:
+        print(f"  FAILED (exit code {result_returncode})")
         combined = (stdout + stderr).strip().splitlines()
         for line in combined[-20:]:
             print(f"    | {line}")
         return _make_result(n, ecm_pop, n_cells, init_focad, n_fnodes,
                             cell_radius, search_radius, steps,
-                            status=f"ERROR({result.returncode})")
+                            status=f"ERROR({result_returncode})")
 
     m = RE_BENCHMARK.search(stdout)
     if m:
@@ -471,6 +498,9 @@ Examples:
     parser.add_argument(
         "--dry-run", action="store_true",
         help="Print the run matrix without copying or executing anything.")
+    parser.add_argument(
+        "--show-model-output", action="store_true",
+        help="Stream stdout/stderr from model.py live during each benchmark run.")
     args = parser.parse_args()
 
     out_path = Path(args.output) if args.output else RESULTS_CSV
@@ -506,6 +536,7 @@ Examples:
                 run_index=idx,
                 total_runs=total,
                 conda_env=args.conda_env,
+                show_model_output=args.show_model_output,
                 dry=args.dry_run,
             )
             row["run"] = idx
