@@ -90,7 +90,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
   int agent_completed_cycles = FLAMEGPU->getVariable<int>("completed_cycles");
 
   const uint8_t N_SPECIES = 2;       // WARNING: must match main python model
-  const uint8_t N_ANCHOR_POINTS = 100; // WARNING: must match main python model
+  const uint8_t N_ANCHOR_POINTS = 50; // WARNING: must match main python model
 
   float agent_k_consumption[N_SPECIES] = {};
   float agent_k_production[N_SPECIES] = {};

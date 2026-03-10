@@ -72,7 +72,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   const float agent_cf_dvy = FLAMEGPU->getVariable<float>("cf_dvy");
   const float agent_cf_dvz = FLAMEGPU->getVariable<float>("cf_dvz");
 
-  const uint8_t N_ANCHOR_POINTS = 100; // WARNING: must match main python
+  const uint8_t N_ANCHOR_POINTS = 50; // WARNING: must match main python
   float agent_x_i[N_ANCHOR_POINTS] = {};
   for (int i = 0; i < N_ANCHOR_POINTS; i++) {
     agent_x_i[i] = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("x_i", i);

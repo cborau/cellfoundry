@@ -20,7 +20,7 @@
  */
 FLAMEGPU_AGENT_FUNCTION(focad_post_cycle_update, flamegpu::MessageBucket, flamegpu::MessageNone) {
   const int agent_cell_id = FLAMEGPU->getVariable<int>("cell_id");
-  const uint8_t N_ANCHOR_POINTS = 100; // WARNING: must match main python model
+  const uint8_t N_ANCHOR_POINTS = 50; // WARNING: must match main python model
   const float agent_x = FLAMEGPU->getVariable<float>("x");
   const float agent_y = FLAMEGPU->getVariable<float>("y");
   const float agent_z = FLAMEGPU->getVariable<float>("z");

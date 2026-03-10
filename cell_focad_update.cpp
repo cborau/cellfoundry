@@ -257,7 +257,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_focad_update, flamegpu::MessageBucket, flamegpu::Me
   const float FOCAD_F_C = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_F_C", agent_cell_type);
   const float FOCAD_K_REINF = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_K_REINF", agent_cell_type);
 
-  const uint8_t N_ANCHOR_POINTS = 100; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  const uint8_t N_ANCHOR_POINTS = 50; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
   const uint8_t N_SPECIES = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
 
   // -------------------------

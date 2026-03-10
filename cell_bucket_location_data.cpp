@@ -31,7 +31,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_bucket_location_data, flamegpu::MessageNone, flameg
   FLAMEGPU->message_out.setVariable<int>("daughter_id", FLAMEGPU->getVariable<int>("daughter_id"));
   FLAMEGPU->message_out.setVariable<int>("marked_for_removal", FLAMEGPU->getVariable<int>("marked_for_removal"));
 
-  const uint8_t N_ANCHOR_POINTS = 100; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  const uint8_t N_ANCHOR_POINTS = 50; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
 
   for (int i = 0; i < N_ANCHOR_POINTS; i++) {
     float u_ref_x = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("u_ref_x_i", i);
