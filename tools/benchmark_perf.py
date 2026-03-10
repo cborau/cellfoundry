@@ -308,7 +308,7 @@ def _run_single(
                 for line in proc.stdout:
                     print(f"    | {line.rstrip()}")
                     output_lines.append(line)
-                result_returncode = proc.wait(timeout=3600)
+                result_returncode = proc.wait(timeout=10800)
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
@@ -324,13 +324,13 @@ def _run_single(
                 cwd=str(wc.workdir),
                 capture_output=True,
                 text=True,
-                timeout=3600,  # 1 hour max per run
+                timeout=10800,  # 3 hours max per run
             )
             result_returncode = result.returncode
             stdout = result.stdout or ""
             stderr = result.stderr or ""
     except subprocess.TimeoutExpired:
-        print("  TIMEOUT (>1h)")
+        print("  TIMEOUT (>3h)")
         return _make_result(n, ecm_pop, n_cells, init_focad, n_fnodes,
                             cell_radius, search_radius, steps,
                             status="TIMEOUT")
