@@ -14,27 +14,33 @@ Usage
 
 Figures produced
 ----------------
- 1. **Pairwise heatmaps** – For every pair of swept columns (agent counts
-    + CELL_RADIUS), a heatmap of mean time/step.
+ 1. **Pairwise heatmaps** – For every pair of swept columns, a heatmap of
+     mean time/step.
  2. **Scaling curves (log-log)** – One panel per swept variable showing how
-    time/step grows with that variable.
- 3. **Total-agent scatter** – Time/step vs. total agents with a power-law fit.
+     time/step grows with that variable.
+ 3. **Total-agent scatter** – Time/step vs. total agents with pie-chart
+     markers showing agent composition.
  4. **Per-variable scaling exponents** – Bar chart of estimated log-log slopes.
  5. **Cost breakdown** – Approximate contribution of each swept variable to
-    total step time (marginal-difference pie chart).
+     total step time (marginal-difference pie chart).
  6. **Box-plots of time/step** – Distribution grouped by each swept variable.
  7. **Total wall-clock time bars** – Sorted horizontal bar chart of total
-    simulation time per configuration.
+     simulation time per configuration.
  8. **Pairwise contourf panel** – Filled-contour combined figure for all
-    pairs of swept columns.
+     pairs of swept columns.
  9. **Multi-panel summary** – One-page summary with mini scaling curves and
-    total-agent scatter + power-law fit.
-10. **Cell-radius scaling** – x = N_CELLS, y = time/step, one curve per
-    CELL_RADIUS value (includes MAX_SEARCH_RADIUS in legend).
-11a. **Init vs step time** – Dual y-axis scatter of init time (left) and
-     mean step time (right, pie-chart markers) vs total agents.
+     total-agent scatter.
+10. **Cell-radius scaling** – x = CELL, y = time/step, one curve per
+     R_cell value (includes R_search in legend).
+11a. **Init-time scatter** – Init time vs total agents with pie-chart markers.
 11b. **Time breakdown bars** – Stacked horizontal bars per run with dual
-     x-axes: init-function time on one axis, other components on another.
+      x-axes: init-function time on one axis, other components on another.
+12. **Total-agent fit residuals** – Residual diagnostic for the log-log
+     power-law fit used in the total-agent scatter.
+13. **Multivariate fit diagnostics** – Actual-vs-predicted and residual
+     diagnostics for log-log models using the swept benchmark dimensions.
+14. **Multivariate fit summary panel** – 2x2 summary of init-time and
+     step-time multivariate fits and standardized term strengths.
 """
 from __future__ import annotations
 
@@ -58,6 +64,21 @@ TOOLS_DIR = Path(__file__).resolve().parent
 DEFAULT_CSV = TOOLS_DIR / "benchmark_results.csv"
 DEFAULT_OUTDIR = TOOLS_DIR / "benchmark_plots"
 
+# Global typography. Adjust BASE_FONT_SIZE to scale the whole plotting style.
+BASE_FONT_SIZE = 12
+FONT_SIZE_SMALL = BASE_FONT_SIZE - 1
+FONT_SIZE_TEXT = BASE_FONT_SIZE - 2
+FONT_SIZE_LABEL = BASE_FONT_SIZE + 1
+FONT_SIZE_TITLE = BASE_FONT_SIZE + 2
+FONT_SIZE_SUPTITLE = BASE_FONT_SIZE + 3
+FONT_SIZE_LEGEND = BASE_FONT_SIZE
+FONT_SIZE_TICKS = BASE_FONT_SIZE
+FONT_SIZE_YTICKS_COMPACT = BASE_FONT_SIZE - 4
+
+YLABEL_STEP = "Time/step (s)"
+YLABEL_INIT = "Init time (s)"
+XLABEL_TOTAL_AGENTS = "Total agents (ECM + CELL + FOCAD + FNODES)"
+
 # Agent-count columns present in the CSV (ordered for display)
 AGENT_COLS = [
     "ECM_POPULATION_SIZE",
@@ -71,16 +92,28 @@ PARAM_COLS = [
     "CELL_RADIUS",
 ]
 
+# Independent benchmark inputs for regression. Use per-cell focal adhesions
+# instead of total focal adhesions because FOCAD_count_init is derived from
+# N_CELLS * INIT_N_FOCAD_PER_CELL.
+REGRESSION_BASE_COLS = [
+    "ECM_POPULATION_SIZE",
+    "N_CELLS",
+    "INIT_N_FOCAD_PER_CELL",
+    "N_FNODES",
+    "CELL_RADIUS",
+]
+
 # All columns that may be swept in benchmark runs
 SWEEP_COLS = AGENT_COLS + PARAM_COLS
 
 COL_LABELS = {
-    "ECM_POPULATION_SIZE": "ECM agents ($N^3$)",
-    "N_CELLS": "Cells",
-    "FOCAD_count_init": "Focal adhesions",
-    "N_FNODES": "Fibre-network nodes",
-    "CELL_RADIUS": "Cell radius",
-    "MAX_SEARCH_RADIUS": "Max search radius",
+    "ECM_POPULATION_SIZE": "ECM",
+    "N_CELLS": "CELL",
+    "INIT_N_FOCAD_PER_CELL": "FOCAD/CELL",
+    "FOCAD_count_init": "FOCAD",
+    "N_FNODES": "FNODES",
+    "CELL_RADIUS": "R_cell",
+    "MAX_SEARCH_RADIUS": "R_search",
     "TOTAL_AGENTS": "Total agents",
 }
 
@@ -91,6 +124,68 @@ COL_LABELS = {
 
 def _label(col: str) -> str:
     return COL_LABELS.get(col, col)
+
+
+def _apply_plot_style() -> None:
+    """Set global matplotlib font sizes from the module constants."""
+    plt.rcParams.update({
+        "font.size": BASE_FONT_SIZE,
+        "axes.labelsize": FONT_SIZE_LABEL,
+        "axes.titlesize": FONT_SIZE_TITLE,
+        "xtick.labelsize": FONT_SIZE_TICKS,
+        "ytick.labelsize": FONT_SIZE_TICKS,
+        "legend.fontsize": FONT_SIZE_LEGEND,
+        "figure.titlesize": FONT_SIZE_SUPTITLE,
+    })
+
+
+def _has_varied_focad_init(df: pd.DataFrame) -> bool:
+    """Return whether focal adhesions per cell were explicitly swept."""
+    return (
+        "INIT_N_FOCAD_PER_CELL" in df.columns
+        and df["INIT_N_FOCAD_PER_CELL"].nunique(dropna=True) > 1
+    )
+
+
+def _varied_cols(df: pd.DataFrame, cols: list[str] | None = None) -> list[str]:
+    """Return columns present in *df* with at least two distinct values."""
+    cols = cols if cols is not None else SWEEP_COLS
+    varied: list[str] = []
+    focad_init_varied = _has_varied_focad_init(df)
+    for col in cols:
+        if col not in df.columns:
+            continue
+        if col == "FOCAD_count_init" and not focad_init_varied:
+            continue
+        if df[col].nunique(dropna=True) > 1:
+            varied.append(col)
+    return varied
+
+
+def _varied_agent_cols(df: pd.DataFrame) -> list[str]:
+    """Return agent-count columns that actually vary in the loaded dataframe."""
+    return _varied_cols(df, AGENT_COLS)
+
+
+def _pie_agent_cols(df: pd.DataFrame) -> list[str]:
+    """Return all agent-count columns present in the dataframe for pie charts."""
+    return [c for c in AGENT_COLS if c in df.columns]
+
+
+def _format_run_label(row: pd.Series, varied_cols: list[str]) -> str:
+    """Compact run label including only varied benchmark parameters."""
+    parts: list[str] = []
+    if "ECM_POPULATION_SIZE" in varied_cols and pd.notna(row.get("ECM_POPULATION_SIZE")):
+        parts.append(f"ECM={int(row['ECM_POPULATION_SIZE'])}")
+    if "N_CELLS" in varied_cols and pd.notna(row.get("N_CELLS")):
+        parts.append(f"CELL={int(row['N_CELLS'])}")
+    if "FOCAD_count_init" in varied_cols and pd.notna(row.get("FOCAD_count_init")):
+        parts.append(f"FOCAD={int(row['FOCAD_count_init'])}")
+    if "N_FNODES" in varied_cols and pd.notna(row.get("N_FNODES")):
+        parts.append(f"FNODES={int(row['N_FNODES'])}")
+    if "CELL_RADIUS" in varied_cols and pd.notna(row.get("CELL_RADIUS")):
+        parts.append(f"R_cell={row['CELL_RADIUS']:g}")
+    return " ".join(parts) if parts else f"run {int(row.name) + 1}"
 
 
 def _load(csv_path: Path) -> pd.DataFrame:
@@ -129,8 +224,7 @@ def _savefig(fig: plt.Figure, outdir: Path, name: str, dpi: int = 300) -> None:
 
 def plot_pairwise_heatmaps(df: pd.DataFrame, outdir: Path) -> list[plt.Figure]:
     """One heatmap per pair of swept columns.  Colour = mean time/step."""
-    # Only pairs where at least one of the two has more than 1 unique value
-    cols = [c for c in SWEEP_COLS if c in df.columns and df[c].nunique() > 1]
+    cols = _varied_cols(df)
     figs: list[plt.Figure] = []
     if len(cols) < 2:
         print("  Skipping pairwise heatmaps (need ≥2 varied agent columns).")
@@ -155,14 +249,14 @@ def plot_pairwise_heatmaps(df: pd.DataFrame, outdir: Path) -> list[plt.Figure]:
         im = ax.imshow(vals, aspect="auto", origin="lower", norm=norm,
                         cmap="YlOrRd")
         ax.set_xticks(range(len(table.columns)))
-        ax.set_xticklabels([f"{v:g}" for v in table.columns], fontsize=8)
+        ax.set_xticklabels([f"{v:g}" for v in table.columns], fontsize=FONT_SIZE_SMALL)
         ax.set_yticks(range(len(table.index)))
-        ax.set_yticklabels([f"{v:g}" for v in table.index], fontsize=8)
-        ax.set_xlabel(_label(col_x), fontsize=10)
-        ax.set_ylabel(_label(col_y), fontsize=10)
+        ax.set_yticklabels([f"{v:g}" for v in table.index], fontsize=FONT_SIZE_SMALL)
+        ax.set_xlabel(_label(col_x), fontsize=FONT_SIZE_LABEL)
+        ax.set_ylabel(_label(col_y), fontsize=FONT_SIZE_LABEL)
 
         cbar = fig.colorbar(im, ax=ax, pad=0.02)
-        cbar.set_label("Mean time / step (s)", fontsize=9)
+        cbar.set_label(YLABEL_STEP, fontsize=FONT_SIZE_LABEL)
 
         # Annotate cells
         for i in range(vals.shape[0]):
@@ -172,11 +266,11 @@ def plot_pairwise_heatmaps(df: pd.DataFrame, outdir: Path) -> list[plt.Figure]:
                     continue
                 txt = f"{v:.3g}" if v < 100 else f"{v:.1f}"
                 text_color = "white" if (use_log and v > np.sqrt(vmin * vmax)) or (not use_log and v > (vmin + vmax) / 2) else "black"
-                ax.text(j, i, txt, ha="center", va="center", fontsize=7,
+                ax.text(j, i, txt, ha="center", va="center", fontsize=FONT_SIZE_TEXT,
                         color=text_color)
 
         ax.set_title(f"Mean time/step:  {_label(col_y)}  vs  {_label(col_x)}",
-                      fontsize=10, pad=8)
+                     fontsize=FONT_SIZE_TITLE, pad=8)
         fig.tight_layout()
         fname = f"heatmap_{col_y}_vs_{col_x}"
         _savefig(fig, outdir, fname)
@@ -194,7 +288,7 @@ def plot_scaling_curves(df: pd.DataFrame, outdir: Path) -> list[plt.Figure]:
 
     Lines are split by the *second most varied* column to see interaction effects.
     """
-    cols = [c for c in SWEEP_COLS if c in df.columns and df[c].nunique() > 1]
+    cols = _varied_cols(df)
     figs: list[plt.Figure] = []
     if not cols:
         print("  Skipping scaling curves (no varied agent columns).")
@@ -223,11 +317,11 @@ def plot_scaling_curves(df: pd.DataFrame, outdir: Path) -> list[plt.Figure]:
 
         ax.set_xscale("log")
         ax.set_yscale("log")
-        ax.set_xlabel(_label(main_col), fontsize=10)
-        ax.set_ylabel("Time / step (s)", fontsize=10)
-        ax.set_title(f"Scaling:  time/step  vs  {_label(main_col)}", fontsize=10)
+        ax.set_xlabel(_label(main_col), fontsize=FONT_SIZE_LABEL)
+        ax.set_ylabel(YLABEL_STEP, fontsize=FONT_SIZE_LABEL)
+        ax.set_title(f"Scaling:  time/step  vs  {_label(main_col)}", fontsize=FONT_SIZE_TITLE)
         if grp_col:
-            ax.legend(fontsize=7, loc="best", framealpha=0.9)
+            ax.legend(fontsize=FONT_SIZE_LEGEND, loc="best", framealpha=0.9)
         ax.grid(True, which="both", ls=":", lw=0.4, alpha=0.6)
         fig.tight_layout()
         _savefig(fig, outdir, f"scaling_{main_col}")
@@ -240,20 +334,18 @@ def plot_scaling_curves(df: pd.DataFrame, outdir: Path) -> list[plt.Figure]:
 # Helper: draw a pie-chart marker at a data position
 # ---------------------------------------------------------------------------
 
-_PIE_AGENT_COLS = AGENT_COLS  # columns whose shares form the pie
 _PIE_COLORS = ["#0e6377", "#87d1d5", "#f9cb37", "#f37c20"]  # one per agent col: ECM, CELL, FOCAD, FNODES
 
 
-def _add_pie_legend(ax: plt.Axes, existing_handles=None) -> None:
+def _add_pie_legend(ax: plt.Axes, pie_cols: list[str], existing_handles=None) -> None:
     """Append a mini legend for the agent-type pie slices."""
     import matplotlib.patches as mpatches
-    cols = _PIE_AGENT_COLS
     pie_handles = [
         mpatches.Patch(color=_PIE_COLORS[i], label=_label(c))
-        for i, c in enumerate(cols)
+        for i, c in enumerate(pie_cols)
     ]
     handles = (list(existing_handles) if existing_handles else []) + pie_handles
-    ax.legend(handles=handles, fontsize=7, loc="best", framealpha=0.9)
+    ax.legend(handles=handles, fontsize=FONT_SIZE_LEGEND, loc="best", framealpha=0.9)
 
 
 def _draw_pie_scatter(
@@ -261,6 +353,7 @@ def _draw_pie_scatter(
     df_rows: pd.DataFrame,
     x_col: str,
     y_col: str,
+    pie_cols: list[str],
     size_pt: float = 8.0,
     alpha: float = 0.82,
 ) -> None:
@@ -270,7 +363,7 @@ def _draw_pie_scatter(
     anchored to the data-coordinate position, so it is immune to log-axis
     distortion.
     """
-    cols = [c for c in _PIE_AGENT_COLS if c in df_rows.columns]
+    cols = [c for c in pie_cols if c in df_rows.columns]
     if not cols:
         return
 
@@ -310,18 +403,170 @@ def _draw_pie_scatter(
         ax.add_artist(ab)
 
 
+def _fit_loglog_power_law(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """Fit log10(y) = a log10(x) + b on positive finite samples."""
+    mask = np.isfinite(x) & np.isfinite(y) & (x > 0) & (y > 0)
+    xm, ym = x[mask], y[mask]
+    if len(xm) < 3:
+        return None
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        coeffs = np.polyfit(np.log10(xm), np.log10(ym), 1)
+    return xm, ym, coeffs
+
+
+def _annotate_horizontal_bars(ax: plt.Axes, bars, values: np.ndarray) -> None:
+    """Write coefficient values next to horizontal bars."""
+    span = float(np.max(np.abs(values))) if len(values) else 0.0
+    offset = max(0.01, 0.04 * span)
+    for bar, value in zip(bars, values):
+        x_text = value + offset if value >= 0 else value - offset
+        ha = "left" if value >= 0 else "right"
+        ax.text(
+            x_text,
+            bar.get_y() + bar.get_height() / 2,
+            f"{value:+.2f}",
+            va="center",
+            ha=ha,
+            fontsize=FONT_SIZE_TEXT,
+        )
+
+
+def _draw_pie_scatter_xy(
+    ax: plt.Axes,
+    x_vals: np.ndarray,
+    y_vals: np.ndarray,
+    composition_rows: pd.DataFrame,
+    pie_cols: list[str],
+    size_pt: float = 8.0,
+    alpha: float = 0.82,
+) -> None:
+    """Draw pie-chart markers from explicit x/y arrays and composition rows."""
+    plot_rows = composition_rows.reset_index(drop=True).copy()
+    plot_rows["_plot_x"] = np.asarray(x_vals, dtype=float)
+    plot_rows["_plot_y"] = np.asarray(y_vals, dtype=float)
+    _draw_pie_scatter(ax, plot_rows, "_plot_x", "_plot_y", pie_cols, size_pt=size_pt, alpha=alpha)
+
+
+def _multivariate_fit_cols(df: pd.DataFrame) -> list[str]:
+    """Return independent positive-valued swept columns for regression."""
+    fit_cols: list[str] = []
+    for col in REGRESSION_BASE_COLS:
+        if col not in df.columns:
+            continue
+        values = pd.to_numeric(df[col], errors="coerce")
+        valid = np.isfinite(values)
+        if not valid.any():
+            continue
+        if values.nunique(dropna=True) < 2:
+            continue
+        if (values[valid] > 0).all():
+            fit_cols.append(col)
+    return fit_cols
+
+
+def _interaction_term_name(col_a: str, col_b: str) -> str:
+    """Human-readable label for a pairwise interaction term."""
+    return f"{_label(col_a)} × {_label(col_b)}"
+
+
+def _fit_multivariate_loglog(
+    df: pd.DataFrame,
+    y_col: str,
+    feature_cols: list[str] | None = None,
+) -> dict[str, object] | None:
+    """Fit log10(y) against z-scored log features and all pairwise interactions."""
+    if y_col not in df.columns:
+        return None
+
+    feature_cols = feature_cols if feature_cols is not None else _multivariate_fit_cols(df)
+    if not feature_cols:
+        return None
+
+    y = pd.to_numeric(df[y_col], errors="coerce").to_numpy(dtype=float)
+    x_arrays = [pd.to_numeric(df[col], errors="coerce").to_numpy(dtype=float) for col in feature_cols]
+
+    mask = np.isfinite(y) & (y > 0)
+    for values in x_arrays:
+        mask &= np.isfinite(values) & (values > 0)
+
+    if mask.sum() < len(feature_cols) + 2:
+        return None
+
+    logx = np.column_stack([np.log10(values[mask]) for values in x_arrays])
+    logy = np.log10(y[mask])
+
+    means = logx.mean(axis=0)
+    scales = logx.std(axis=0, ddof=0)
+    keep = scales > 0
+    if not np.any(keep):
+        return None
+    if not np.all(keep):
+        logx = logx[:, keep]
+        means = means[keep]
+        scales = scales[keep]
+        feature_cols = [col for col, use_col in zip(feature_cols, keep) if use_col]
+
+    z_main = (logx - means) / scales
+    term_arrays = [z_main]
+    term_names = [_label(col) for col in feature_cols]
+
+    interaction_arrays: list[np.ndarray] = []
+    interaction_names: list[str] = []
+    for i in range(len(feature_cols)):
+        for j in range(i + 1, len(feature_cols)):
+            interaction_arrays.append((z_main[:, i] * z_main[:, j])[:, None])
+            interaction_names.append(_interaction_term_name(feature_cols[i], feature_cols[j]))
+    if interaction_arrays:
+        term_arrays.extend(interaction_arrays)
+        term_names.extend(interaction_names)
+
+    design_terms = np.column_stack(term_arrays)
+    design = np.column_stack([np.ones(design_terms.shape[0]), design_terms])
+    coeffs, _, _, _ = np.linalg.lstsq(design, logy, rcond=None)
+    pred_logy = design @ coeffs
+    residuals = logy - pred_logy
+    ss_res = float(np.sum(residuals ** 2))
+    ss_tot = float(np.sum((logy - logy.mean()) ** 2))
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 1.0
+
+    return {
+        "feature_cols": feature_cols,
+        "term_names": term_names,
+        "coeffs": coeffs,
+        "logy": logy,
+        "pred_logy": pred_logy,
+        "residuals": residuals,
+        "y": y[mask],
+        "pred_y": 10 ** pred_logy,
+        "r2": r2,
+        "mask": mask,
+    }
+
+
+def _summarize_top_terms(term_names: list[str], term_coeffs: np.ndarray, top_n: int = 5) -> str:
+    """Compact summary of the strongest signed coefficients."""
+    if len(term_names) == 0:
+        return "No fitted terms"
+    order = np.argsort(np.abs(term_coeffs))[::-1][:top_n]
+    lines = ["Strongest standardized terms:"]
+    for idx in order:
+        lines.append(f"{term_coeffs[idx]:+,.2f}  {term_names[idx]}")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # 3. Total-agent scatter with power-law fit  (pie-chart markers)
 # ---------------------------------------------------------------------------
 
 def plot_total_agent_scatter(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
-    """Time/step vs. TOTAL_AGENTS with pie-chart markers showing agent
-    composition and a power-law fit line."""
+    """Time/step vs. TOTAL_AGENTS with pie-chart markers showing composition."""
     if "TOTAL_AGENTS" not in df.columns or df["TOTAL_AGENTS"].nunique() < 2:
         print("  Skipping total-agent scatter (not enough data).")
         return None
 
     fig, ax = plt.subplots(figsize=(7, 5))
+    pie_cols = _pie_agent_cols(df)
 
     x = df["TOTAL_AGENTS"].values.astype(float)
     y = df["time_per_step_s"].values.astype(float)
@@ -331,35 +576,189 @@ def plot_total_agent_scatter(df: pd.DataFrame, outdir: Path) -> plt.Figure | Non
     ax.scatter(x[mask], y[mask], s=0, alpha=0)
 
     # Draw pie markers
-    _draw_pie_scatter(ax, df[mask], "TOTAL_AGENTS", "time_per_step_s",
+    _draw_pie_scatter(ax, df[mask], "TOTAL_AGENTS", "time_per_step_s", pie_cols,
                       size_pt=6.5, alpha=0.75)
-
-    # Power-law fit
-    xm, ym = x[mask], y[mask]
-    fit_handle = None
-    if len(xm) >= 3:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            coeffs = np.polyfit(np.log10(xm), np.log10(ym), 1)
-        exponent, intercept = coeffs
-        x_fit = np.logspace(np.log10(xm.min()), np.log10(xm.max()), 100)
-        y_fit = 10 ** intercept * x_fit ** exponent
-        (fit_handle,) = ax.plot(
-            x_fit, y_fit, "r--", lw=1.5,
-            label=f"Power-law fit:  $t \\propto N^{{{exponent:.2f}}}$",
-        )
 
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlabel("Total agents (ECM + CELL + FOCAD + FNODES)", fontsize=10)
-    ax.set_ylabel("Time / step (s)", fontsize=10)
-    ax.set_title("Overall computational scaling", fontsize=11)
+    ax.set_xlabel(XLABEL_TOTAL_AGENTS, fontsize=FONT_SIZE_LABEL)
+    ax.set_ylabel(YLABEL_STEP, fontsize=FONT_SIZE_LABEL)
+    ax.set_title("Overall computational scaling", fontsize=FONT_SIZE_TITLE)
     ax.grid(True, which="both", ls=":", lw=0.4, alpha=0.6)
 
-    _add_pie_legend(ax, existing_handles=[fit_handle] if fit_handle else None)
+    if pie_cols:
+        _add_pie_legend(ax, pie_cols)
 
     fig.tight_layout()
     _savefig(fig, outdir, "total_agent_scatter")
+    return fig
+
+
+def plot_total_agent_fit_residuals(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
+    """Residual diagnostic for the log-log power-law fit vs TOTAL_AGENTS."""
+    if "TOTAL_AGENTS" not in df.columns or df["TOTAL_AGENTS"].nunique() < 2:
+        print("  Skipping total-agent fit residuals (not enough data).")
+        return None
+
+    x = df["TOTAL_AGENTS"].to_numpy(dtype=float)
+    y = df["time_per_step_s"].to_numpy(dtype=float)
+    fit_result = _fit_loglog_power_law(x, y)
+    if fit_result is None:
+        print("  Skipping total-agent fit residuals (need at least 3 positive samples).")
+        return None
+
+    xm, ym, coeffs = fit_result
+    logx = np.log10(xm)
+    residuals = np.log10(ym) - np.polyval(coeffs, logx)
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.5))
+    ax.scatter(logx, residuals, s=28, alpha=0.8, color="C0", edgecolors="none")
+    ax.axhline(0.0, color="r", ls="--", lw=1.0)
+    ax.set_xlabel("log10(Total agents)", fontsize=FONT_SIZE_LABEL)
+    ax.set_ylabel("Residual in log10(Time/step)", fontsize=FONT_SIZE_LABEL)
+    ax.set_title(
+        f"Residuals of total-agent power-law fit ($\\alpha={coeffs[0]:.2f}$)",
+        fontsize=FONT_SIZE_TITLE,
+    )
+    ax.grid(True, ls=":", lw=0.4, alpha=0.6)
+
+    fig.tight_layout()
+    _savefig(fig, outdir, "total_agent_fit_residuals")
+    return fig
+
+
+def plot_multivariate_fit_diagnostics(
+    df: pd.DataFrame,
+    y_col: str,
+    outdir: Path,
+    name: str,
+    title: str,
+    y_label: str,
+) -> plt.Figure | None:
+    """Actual-vs-predicted and residual diagnostics for a multivariate log-log fit."""
+    fit = _fit_multivariate_loglog(df, y_col)
+    if fit is None:
+        print(f"  Skipping {name} (not enough positive data for multivariate fit).")
+        return None
+
+    coeffs = fit["coeffs"]
+    feature_cols = fit["feature_cols"]
+    term_names = fit["term_names"]
+    pred_y = fit["pred_y"]
+    y = fit["y"]
+    pred_logy = fit["pred_logy"]
+    residuals = fit["residuals"]
+    r2 = fit["r2"]
+    term_coeffs = coeffs[1:]
+    order = np.argsort(np.abs(term_coeffs))[::-1]
+    ordered_terms = [term_names[idx] for idx in order]
+    ordered_coeffs = term_coeffs[order]
+
+    fit_rows = df.loc[fit["mask"]].copy()
+    pie_cols = _pie_agent_cols(df)
+
+    fig, (ax_fit, ax_res, ax_terms) = plt.subplots(1, 3, figsize=(16.2, 4.8))
+
+    ax_fit.scatter(pred_y, y, s=0, alpha=0)
+    _draw_pie_scatter_xy(ax_fit, pred_y, y, fit_rows, pie_cols, size_pt=6.2, alpha=0.78)
+    lo = min(pred_y.min(), y.min())
+    hi = max(pred_y.max(), y.max())
+    ax_fit.plot([lo, hi], [lo, hi], "r--", lw=1.0)
+    ax_fit.set_xscale("log")
+    ax_fit.set_yscale("log")
+    ax_fit.set_xlabel(f"Predicted {y_label}", fontsize=FONT_SIZE_LABEL)
+    ax_fit.set_ylabel(f"Observed {y_label}", fontsize=FONT_SIZE_LABEL)
+    ax_fit.set_title(f"{title}: predicted vs observed ($R^2={r2:.3f}$)", fontsize=FONT_SIZE_TITLE)
+    ax_fit.grid(True, which="both", ls=":", lw=0.4, alpha=0.6)
+    ax_fit.text(
+        0.03, 0.97,
+        "Independent inputs:\n"
+        + "\n".join(_label(col) for col in feature_cols)
+        + "\n\n"
+        + _summarize_top_terms(term_names, term_coeffs),
+        transform=ax_fit.transAxes,
+        va="top",
+        ha="left",
+        fontsize=FONT_SIZE_TEXT,
+        bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.9, "edgecolor": "0.8"},
+    )
+    if pie_cols:
+        _add_pie_legend(ax_fit, pie_cols)
+
+    ax_res.scatter(pred_logy, residuals, s=28, alpha=0.8, color="C1", edgecolors="none")
+    ax_res.axhline(0.0, color="r", ls="--", lw=1.0)
+    ax_res.set_xlabel(f"Predicted log10({y_label})", fontsize=FONT_SIZE_LABEL)
+    ax_res.set_ylabel(f"Residual in log10({y_label})", fontsize=FONT_SIZE_LABEL)
+    ax_res.set_title(f"{title}: residuals", fontsize=FONT_SIZE_TITLE)
+    ax_res.grid(True, ls=":", lw=0.4, alpha=0.6)
+
+    colours = ["C0" if coef >= 0 else "C3" for coef in ordered_coeffs]
+    bars = ax_terms.barh(ordered_terms, ordered_coeffs, color=colours, edgecolor="k", lw=0.4)
+    ax_terms.axvline(0.0, color="0.3", lw=0.8)
+    ax_terms.set_xlabel("Standardized coefficient", fontsize=FONT_SIZE_LABEL)
+    ax_terms.set_title(f"{title}: term strengths", fontsize=FONT_SIZE_TITLE)
+    ax_terms.grid(axis="x", ls=":", lw=0.4, alpha=0.6)
+    ax_terms.tick_params(axis="y", labelsize=FONT_SIZE_TEXT)
+    _annotate_horizontal_bars(ax_terms, bars, ordered_coeffs)
+
+    fig.tight_layout()
+    _savefig(fig, outdir, name)
+    return fig
+
+
+def plot_multivariate_summary_panel(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
+    """2x2 summary of init-time and step-time multivariate fits and term strengths."""
+    step_fit = _fit_multivariate_loglog(df, "time_per_step_s")
+    init_fit = _fit_multivariate_loglog(df, "init_time_s")
+    if step_fit is None or init_fit is None:
+        print("  Skipping multivariate fit summary panel (fit unavailable).")
+        return None
+
+    pie_cols = _pie_agent_cols(df)
+    fig, axes = plt.subplots(2, 2, figsize=(13.8, 10.6))
+    panel_specs = [
+        (axes[0, 0], init_fit, YLABEL_INIT, "Init-time fit"),
+        (axes[1, 0], step_fit, YLABEL_STEP, "Step-time fit"),
+    ]
+    for ax, fit, y_label, title in panel_specs:
+        fit_rows = df.loc[fit["mask"]].copy()
+        pred_y = fit["pred_y"]
+        y = fit["y"]
+        ax.scatter(pred_y, y, s=0, alpha=0)
+        _draw_pie_scatter_xy(ax, pred_y, y, fit_rows, pie_cols, size_pt=6.5, alpha=0.8)
+        lo = min(pred_y.min(), y.min())
+        hi = max(pred_y.max(), y.max())
+        ax.plot([lo, hi], [lo, hi], "r--", lw=1.0)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel(f"Predicted {y_label}", fontsize=FONT_SIZE_LABEL)
+        ax.set_ylabel(f"Observed {y_label}", fontsize=FONT_SIZE_LABEL)
+        ax.set_title(f"{title} ($R^2={fit['r2']:.3f}$)", fontsize=FONT_SIZE_TITLE)
+        ax.grid(True, which="both", ls=":", lw=0.4, alpha=0.6)
+        _add_pie_legend(ax, pie_cols)
+
+    term_specs = [
+        (axes[0, 1], init_fit, "Init-time model term strengths"),
+        (axes[1, 1], step_fit, "Step-time model term strengths"),
+    ]
+    for ax, fit, title in term_specs:
+        coeffs = fit["coeffs"][1:]
+        term_names = fit["term_names"]
+        order = np.argsort(np.abs(coeffs))[::-1]
+        ordered_terms = [term_names[idx] for idx in order]
+        ordered_coeffs = coeffs[order]
+        colours = ["C0" if coef >= 0 else "C3" for coef in ordered_coeffs]
+        bars = ax.barh(ordered_terms, ordered_coeffs, color=colours, edgecolor="k", lw=0.4)
+        ax.axvline(0.0, color="0.3", lw=0.8)
+        ax.set_xlabel("Standardized coefficient", fontsize=FONT_SIZE_LABEL)
+        ax.set_title(title, fontsize=FONT_SIZE_TITLE)
+        ax.grid(axis="x", ls=":", lw=0.4, alpha=0.6)
+        ax.tick_params(axis="y", labelsize=FONT_SIZE_SMALL)
+        _annotate_horizontal_bars(ax, bars, ordered_coeffs)
+
+    fig.suptitle("Cellfoundry - Multivariate fit summary", fontsize=FONT_SIZE_SUPTITLE, y=1.01)
+    fig.tight_layout()
+    _savefig(fig, outdir, "multivariate_fit_summary_panel")
     return fig
 
 
@@ -369,7 +768,7 @@ def plot_total_agent_scatter(df: pd.DataFrame, outdir: Path) -> plt.Figure | Non
 
 def plot_scaling_exponents(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
     """Estimate and compare the log-log slope for each swept variable."""
-    cols = [c for c in SWEEP_COLS if c in df.columns and df[c].nunique() > 1]
+    cols = _varied_cols(df)
     if not cols:
         print("  Skipping scaling exponents (no varied columns).")
         return None
@@ -397,11 +796,11 @@ def plot_scaling_exponents(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
     bars = ax.barh(labels, values, color=colours, edgecolor="k", lw=0.6)
     for bar, v in zip(bars, values):
         ax.text(bar.get_width() + 0.02, bar.get_y() + bar.get_height() / 2,
-                f"{v:.2f}", va="center", fontsize=9)
-    ax.set_xlabel("Scaling exponent  $\\alpha$  ($t \\propto N^\\alpha$)", fontsize=10)
-    ax.set_title("Per-agent-type scaling exponents", fontsize=11)
+                f"{v:.2f}", va="center", fontsize=FONT_SIZE_SMALL)
+    ax.set_xlabel("Scaling exponent  $\\alpha$  ($t \\propto N^\\alpha$)", fontsize=FONT_SIZE_LABEL)
+    ax.set_title("Per-agent-type scaling exponents", fontsize=FONT_SIZE_TITLE)
     ax.axvline(1.0, ls="--", lw=0.8, color="grey", label="Linear ($\\alpha=1$)")
-    ax.legend(fontsize=8)
+    ax.legend(fontsize=FONT_SIZE_LEGEND)
     ax.grid(axis="x", ls=":", lw=0.4, alpha=0.6)
     fig.tight_layout()
     _savefig(fig, outdir, "scaling_exponents")
@@ -415,7 +814,7 @@ def plot_scaling_exponents(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
 def plot_cost_breakdown(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
     """Pie chart showing relative time contribution when increasing each
     swept variable, estimated via marginal differences."""
-    cols = [c for c in SWEEP_COLS if c in df.columns and df[c].nunique() > 1]
+    cols = _varied_cols(df)
     if len(cols) < 2:
         print("  Skipping cost breakdown (need ≥2 varied columns).")
         return None
@@ -439,9 +838,9 @@ def plot_cost_breakdown(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
     sizes = [marginals[c] for c in marginals]
     colours = plt.cm.Set2(np.linspace(0, 1, len(sizes)))
     ax.pie(sizes, labels=labels, autopct="%1.0f%%", startangle=140,
-           colors=colours, textprops={"fontsize": 9})
+            colors=colours, textprops={"fontsize": FONT_SIZE_SMALL})
     ax.set_title("Approximate cost attribution\n(marginal increase min → max)",
-                  fontsize=10)
+                fontsize=FONT_SIZE_TITLE)
     fig.tight_layout()
     _savefig(fig, outdir, "cost_breakdown")
     return fig
@@ -453,7 +852,7 @@ def plot_cost_breakdown(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
 
 def plot_boxplots(df: pd.DataFrame, outdir: Path) -> list[plt.Figure]:
     """Box-plot of time/step grouped by each swept variable."""
-    cols = [c for c in SWEEP_COLS if c in df.columns and df[c].nunique() > 1]
+    cols = _varied_cols(df)
     figs: list[plt.Figure] = []
     if not cols:
         return figs
@@ -468,10 +867,10 @@ def plot_boxplots(df: pd.DataFrame, outdir: Path) -> list[plt.Figure]:
         for patch, colour in zip(bp["boxes"],
                                   plt.cm.Blues(np.linspace(0.3, 0.85, len(groups)))):
             patch.set_facecolor(colour)
-        ax.set_xticklabels([f"{g:g}" for g in groups], fontsize=8)
-        ax.set_xlabel(_label(col), fontsize=10)
-        ax.set_ylabel("Time / step (s)", fontsize=10)
-        ax.set_title(f"Time/step distribution by {_label(col)}", fontsize=10)
+        ax.set_xticklabels([f"{g:g}" for g in groups], fontsize=FONT_SIZE_SMALL)
+        ax.set_xlabel(_label(col), fontsize=FONT_SIZE_LABEL)
+        ax.set_ylabel(YLABEL_STEP, fontsize=FONT_SIZE_LABEL)
+        ax.set_title(f"Time/step distribution by {_label(col)}", fontsize=FONT_SIZE_TITLE)
         ax.grid(axis="y", ls=":", lw=0.4, alpha=0.6)
         fig.tight_layout()
         _savefig(fig, outdir, f"boxplot_{col}")
@@ -490,25 +889,19 @@ def plot_total_time_bars(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
         return None
 
     sorted_df = df.sort_values("total_time_s", ascending=True).reset_index(drop=True)
+    varied_cols = _varied_cols(df)
     fig, ax = plt.subplots(figsize=(max(5, 0.35 * len(sorted_df) + 2), 4.5))
 
     # Build a descriptive label for each run
-    labels = []
-    for _, r in sorted_df.iterrows():
-        lbl = f"ECM={int(r['ECM_POPULATION_SIZE'])} C={int(r['N_CELLS'])} F={int(r['FOCAD_count_init'])}"
-        if "N_FNODES" in r and pd.notna(r["N_FNODES"]):
-            lbl += f" FN={int(r['N_FNODES'])}"
-        if "CELL_RADIUS" in r and pd.notna(r.get("CELL_RADIUS")):
-            lbl += f" R={r['CELL_RADIUS']:g}"
-        labels.append(lbl)
+    labels = [_format_run_label(r, varied_cols) for _, r in sorted_df.iterrows()]
 
     colours = plt.cm.viridis(np.linspace(0.15, 0.85, len(sorted_df)))
     ax.barh(range(len(sorted_df)), sorted_df["total_time_s"], color=colours,
             edgecolor="k", lw=0.3)
     ax.set_yticks(range(len(sorted_df)))
-    ax.set_yticklabels(labels, fontsize=6)
-    ax.set_xlabel("Total wall-clock time (s)", fontsize=10)
-    ax.set_title("Total simulation time per configuration", fontsize=10)
+    ax.set_yticklabels(labels, fontsize=FONT_SIZE_YTICKS_COMPACT)
+    ax.set_xlabel("Total wall-clock time (s)", fontsize=FONT_SIZE_LABEL)
+    ax.set_title("Total simulation time per configuration", fontsize=FONT_SIZE_TITLE)
     ax.grid(axis="x", ls=":", lw=0.4, alpha=0.6)
     fig.tight_layout()
     _savefig(fig, outdir, "total_time_bars")
@@ -522,7 +915,7 @@ def plot_total_time_bars(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
 def plot_surface_panel(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
     """Single figure with one filled-contour (contourf) subplot per pair of
     swept columns.  Colour = mean time/step."""
-    cols = [c for c in SWEEP_COLS if c in df.columns and df[c].nunique() > 1]
+    cols = _varied_cols(df)
     if len(cols) < 2:
         print("  Skipping contourf panel (need ≥2 varied agent columns).")
         return None
@@ -573,15 +966,15 @@ def plot_surface_panel(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
             X_mesh, Y_mesh, Z,
             levels=cf.levels, colors="k", linewidths=0.5, alpha=0.55,
         )
-        ax.clabel(cs, inline=True, fontsize=12, fmt="%.2g")
+        ax.clabel(cs, inline=True, fontsize=BASE_FONT_SIZE, fmt="%.2g")
 
-        ax.set_xlabel(_label(col_x), fontsize=15)
-        ax.set_ylabel(_label(col_y), fontsize=15)
+        ax.set_xlabel(_label(col_x), fontsize=FONT_SIZE_LABEL + 2)
+        ax.set_ylabel(_label(col_y), fontsize=FONT_SIZE_LABEL + 2)
         ax.set_title(
             f"{_label(col_y)}  vs  {_label(col_x)}",
-            fontsize=15, pad=6,
+            fontsize=FONT_SIZE_TITLE + 2, pad=6,
         )
-        ax.tick_params(labelsize=15)
+        ax.tick_params(labelsize=FONT_SIZE_TICKS + 2)
         ax.ticklabel_format(style="scientific", scilimits=(0, 3),
                             axis="both", useMathText=True)
 
@@ -591,7 +984,7 @@ def plot_surface_panel(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
 
     fig.suptitle(
         "Cellfoundry – Pairwise Cost Contours (mean time/step)",
-        fontsize=13, y=1.01,
+        fontsize=FONT_SIZE_SUPTITLE, y=1.01,
     )
     fig.tight_layout()
     _savefig(fig, outdir, "contourf_panel")
@@ -604,7 +997,7 @@ def plot_surface_panel(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
 
 def plot_summary_panel(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
     """A single multi-panel figure with the key insights for quick review."""
-    cols = [c for c in SWEEP_COLS if c in df.columns and df[c].nunique() > 1]
+    cols = _varied_cols(df)
     n_panels = min(len(cols), 4) + 1  # scaling curves + total scatter
     if n_panels < 2:
         print("  Skipping summary panel (not enough varied columns).")
@@ -624,9 +1017,9 @@ def plot_summary_panel(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
         ax.errorbar(agg[col], agg["mean"], yerr=agg["std"],
                      marker="o", markersize=4, capsize=3, color="C0")
         ax.set_xscale("log"); ax.set_yscale("log")
-        ax.set_xlabel(_label(col), fontsize=9)
-        ax.set_ylabel("Time/step (s)", fontsize=9)
-        ax.set_title(f"Scaling: {_label(col)}", fontsize=9)
+        ax.set_xlabel(_label(col), fontsize=FONT_SIZE_SMALL)
+        ax.set_ylabel(YLABEL_STEP, fontsize=FONT_SIZE_SMALL)
+        ax.set_title(f"Scaling: {_label(col)}", fontsize=FONT_SIZE_SMALL)
         ax.grid(True, which="both", ls=":", lw=0.3, alpha=0.5)
 
     # Total-agent scatter
@@ -636,25 +1029,17 @@ def plot_summary_panel(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
         y = df["time_per_step_s"].values.astype(float)
         mask = (x > 0) & (y > 0)
         ax.scatter(x[mask], y[mask], s=12, alpha=0.7, c="C1", edgecolors="none")
-        if mask.sum() >= 3:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                coeffs = np.polyfit(np.log10(x[mask]), np.log10(y[mask]), 1)
-            x_fit = np.logspace(np.log10(x[mask].min()), np.log10(x[mask].max()), 80)
-            ax.plot(x_fit, 10**coeffs[1] * x_fit**coeffs[0], "r--", lw=1.2)
-            ax.set_title(f"Total agents ($\\alpha={coeffs[0]:.2f}$)", fontsize=9)
-        else:
-            ax.set_title("Total agents", fontsize=9)
+        ax.set_title("Total agents", fontsize=FONT_SIZE_SMALL)
         ax.set_xscale("log"); ax.set_yscale("log")
-        ax.set_xlabel("Total agents", fontsize=9)
-        ax.set_ylabel("Time/step (s)", fontsize=9)
+        ax.set_xlabel("Total agents", fontsize=FONT_SIZE_SMALL)
+        ax.set_ylabel(YLABEL_STEP, fontsize=FONT_SIZE_SMALL)
         ax.grid(True, which="both", ls=":", lw=0.3, alpha=0.5)
 
     # Hide unused axes
     for j in range(idx, len(axes)):
         axes[j].set_visible(False)
 
-    fig.suptitle("Cellfoundry – Performance Scaling Summary", fontsize=13,
+    fig.suptitle("Cellfoundry – Performance Scaling Summary", fontsize=FONT_SIZE_SUPTITLE,
                   y=1.01)
     fig.tight_layout()
     _savefig(fig, outdir, "summary_panel")
@@ -671,8 +1056,8 @@ def plot_cell_radius_scaling(df: pd.DataFrame, outdir: Path) -> plt.Figure | Non
     This is the key plot for understanding how the cell-cell interaction
     search radius affects performance scaling.
     """
-    if "CELL_RADIUS" not in df.columns or df["CELL_RADIUS"].nunique() < 1:
-        print("  Skipping cell-radius scaling (no CELL_RADIUS data).")
+    if "CELL_RADIUS" not in _varied_cols(df, ["CELL_RADIUS"]):
+        print("  Skipping cell-radius scaling (need >=2 CELL_RADIUS values).")
         return None
     if "N_CELLS" not in df.columns or df["N_CELLS"].nunique() < 2:
         print("  Skipping cell-radius scaling (need >=2 N_CELLS values).")
@@ -690,15 +1075,15 @@ def plot_cell_radius_scaling(df: pd.DataFrame, outdir: Path) -> plt.Figure | Non
         ax.errorbar(
             agg["N_CELLS"], agg["mean"], yerr=agg["std"],
             marker="o", markersize=5, capsize=3,
-            label=f"CELL_RADIUS={cr:g}  (search={sr:.1f})",
+            label=f"R_cell={cr:g}  (R_search={sr:.1f})",
         )
 
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlabel("N_CELLS", fontsize=11)
-    ax.set_ylabel("Time / step (s)", fontsize=11)
-    ax.set_title("Effect of cell radius / search radius on scaling", fontsize=12)
-    ax.legend(fontsize=9, loc="best", framealpha=0.9)
+    ax.set_xlabel("CELL", fontsize=FONT_SIZE_LABEL)
+    ax.set_ylabel(YLABEL_STEP, fontsize=FONT_SIZE_LABEL)
+    ax.set_title("Effect of R_cell / R_search on scaling", fontsize=FONT_SIZE_TITLE)
+    ax.legend(fontsize=FONT_SIZE_LEGEND, loc="best", framealpha=0.9)
     ax.grid(True, which="both", ls=":", lw=0.4, alpha=0.6)
     fig.tight_layout()
     _savefig(fig, outdir, "cell_radius_scaling")
@@ -710,9 +1095,7 @@ def plot_cell_radius_scaling(df: pd.DataFrame, outdir: Path) -> plt.Figure | Non
 # ---------------------------------------------------------------------------
 
 def plot_init_time_scatter(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
-    """Init time vs. TOTAL_AGENTS with pie-chart markers showing agent
-    composition and a power-law fit line.  Mirror of plot_total_agent_scatter
-    but for initialization cost."""
+    """Init time vs. TOTAL_AGENTS with pie-chart markers showing composition."""
     has_init = "init_time_s" in df.columns and df["init_time_s"].notna().any()
     if not has_init:
         print("  Skipping init-time scatter (no init_time_s data).")
@@ -722,6 +1105,7 @@ def plot_init_time_scatter(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
         return None
 
     fig, ax = plt.subplots(figsize=(7, 5))
+    pie_cols = _pie_agent_cols(df)
 
     x = df["TOTAL_AGENTS"].values.astype(float)
     y = df["init_time_s"].values.astype(float)
@@ -731,32 +1115,18 @@ def plot_init_time_scatter(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
     ax.scatter(x[mask], y[mask], s=0, alpha=0)
 
     # Draw pie markers
-    _draw_pie_scatter(ax, df[mask], "TOTAL_AGENTS", "init_time_s",
+    _draw_pie_scatter(ax, df[mask], "TOTAL_AGENTS", "init_time_s", pie_cols,
                       size_pt=6.5, alpha=0.75)
-
-    # Power-law fit
-    xm, ym = x[mask], y[mask]
-    fit_handle = None
-    if len(xm) >= 3:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            coeffs = np.polyfit(np.log10(xm), np.log10(ym), 1)
-        exponent, intercept = coeffs
-        x_fit = np.logspace(np.log10(xm.min()), np.log10(xm.max()), 100)
-        y_fit = 10 ** intercept * x_fit ** exponent
-        (fit_handle,) = ax.plot(
-            x_fit, y_fit, "r--", lw=1.5,
-            label=f"Power-law fit:  $t \\propto N^{{{exponent:.2f}}}$",
-        )
 
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlabel("Total agents (ECM + CELL + FOCAD + FNODES)", fontsize=10)
-    ax.set_ylabel("Init time (s)", fontsize=10)
-    ax.set_title("Initialization-time scaling", fontsize=11)
+    ax.set_xlabel(XLABEL_TOTAL_AGENTS, fontsize=FONT_SIZE_LABEL)
+    ax.set_ylabel(YLABEL_INIT, fontsize=FONT_SIZE_LABEL)
+    ax.set_title("Initialization-time scaling", fontsize=FONT_SIZE_TITLE)
     ax.grid(True, which="both", ls=":", lw=0.4, alpha=0.6)
 
-    _add_pie_legend(ax, existing_handles=[fit_handle] if fit_handle else None)
+    if pie_cols:
+        _add_pie_legend(ax, pie_cols)
 
     fig.tight_layout()
     _savefig(fig, outdir, "init_time_scatter")
@@ -788,6 +1158,7 @@ def plot_time_breakdown_bars(df: pd.DataFrame, outdir: Path) -> plt.Figure | Non
     )
 
     sorted_df = df.sort_values("total_time_s", ascending=True).reset_index(drop=True)
+    varied_cols = _varied_cols(df)
     n_runs = len(sorted_df)
     idx = np.arange(n_runs)
 
@@ -806,7 +1177,7 @@ def plot_time_breakdown_bars(df: pd.DataFrame, outdir: Path) -> plt.Figure | Non
             idx - 0.17, ifunc, height=0.34,
             color="C2", label="Init functions", alpha=0.85,
         )
-        ax_ifunc.set_xlabel("Init functions time (s)", fontsize=10, color="C2")
+        ax_ifunc.set_xlabel("Init functions time (s)", fontsize=FONT_SIZE_LABEL, color="C2")
         ax_ifunc.tick_params(axis="x", labelcolor="C2")
 
         # Right axis: other components stacked
@@ -825,7 +1196,7 @@ def plot_time_breakdown_bars(df: pd.DataFrame, outdir: Path) -> plt.Figure | Non
         )
         ax_other.set_xlabel(
             "Other components (s): Python setup + RTC + Stepping",
-            fontsize=10, color="C0",
+            fontsize=FONT_SIZE_LABEL, color="C0",
         )
         ax_other.tick_params(axis="x", labelcolor="C0")
 
@@ -833,7 +1204,7 @@ def plot_time_breakdown_bars(df: pd.DataFrame, outdir: Path) -> plt.Figure | Non
         h1, l1 = ax_ifunc.get_legend_handles_labels()
         h2, l2 = ax_other.get_legend_handles_labels()
         ax_ifunc.legend(
-            h1 + h2, l1 + l2, fontsize=8,
+            h1 + h2, l1 + l2, fontsize=FONT_SIZE_LEGEND,
             loc="lower right", framealpha=0.9,
         )
     else:
@@ -847,22 +1218,14 @@ def plot_time_breakdown_bars(df: pd.DataFrame, outdir: Path) -> plt.Figure | Non
             left=sorted_df["init_time_s"].values,
             color="C1", label="Simulation",
         )
-        ax_ifunc.set_xlabel("Time (s)", fontsize=10)
-        ax_ifunc.legend(fontsize=9)
+        ax_ifunc.set_xlabel("Time (s)", fontsize=FONT_SIZE_LABEL)
+        ax_ifunc.legend(fontsize=FONT_SIZE_LEGEND)
 
     # Y-tick labels
-    labels = []
-    for _, r in sorted_df.iterrows():
-        lbl = f"C={int(r['N_CELLS'])}"
-        if "CELL_RADIUS" in r.index and pd.notna(r.get("CELL_RADIUS")):
-            lbl += f" R={r['CELL_RADIUS']:g}"
-        lbl += f" ECM={int(r['ECM_POPULATION_SIZE'])}"
-        if "N_FNODES" in r.index and pd.notna(r.get("N_FNODES")):
-            lbl += f" FN={int(r['N_FNODES'])}"
-        labels.append(lbl)
+    labels = [_format_run_label(r, varied_cols) for _, r in sorted_df.iterrows()]
     ax_ifunc.set_yticks(idx)
-    ax_ifunc.set_yticklabels(labels, fontsize=5)
-    ax_ifunc.set_title("Time breakdown per run", fontsize=11)
+    ax_ifunc.set_yticklabels(labels, fontsize=FONT_SIZE_YTICKS_COMPACT)
+    ax_ifunc.set_title("Time breakdown per run", fontsize=FONT_SIZE_TITLE)
     ax_ifunc.grid(axis="x", ls=":", lw=0.4, alpha=0.4)
 
     fig.tight_layout()
@@ -912,6 +1275,7 @@ Examples:
 
     # Suppress "More than 20 figures" warning — we close all at the end
     plt.rcParams["figure.max_open_warning"] = 0
+    _apply_plot_style()
 
     print(f"Reading {csv_path} …")
     df = _load(csv_path)
@@ -929,6 +1293,11 @@ Examples:
 
     # 3 – Total-agent scatter
     fig = plot_total_agent_scatter(df, outdir)
+    if fig:
+        all_figs.append(fig)
+
+    # 3b – Total-agent fit residuals
+    fig = plot_total_agent_fit_residuals(df, outdir)
     if fig:
         all_figs.append(fig)
 
@@ -967,6 +1336,35 @@ Examples:
 
     # 11a – Init time scatter (pie markers + power-law fit)
     fig = plot_init_time_scatter(df, outdir)
+    if fig:
+        all_figs.append(fig)
+
+    # 11c – Multivariate step-time diagnostics
+    fig = plot_multivariate_fit_diagnostics(
+        df,
+        y_col="time_per_step_s",
+        outdir=outdir,
+        name="multivariate_step_time_fit",
+        title="Step-time multivariate fit",
+        y_label="time/step (s)",
+    )
+    if fig:
+        all_figs.append(fig)
+
+    # 11d – Multivariate init-time diagnostics
+    fig = plot_multivariate_fit_diagnostics(
+        df,
+        y_col="init_time_s",
+        outdir=outdir,
+        name="multivariate_init_time_fit",
+        title="Init-time multivariate fit",
+        y_label="init time (s)",
+    )
+    if fig:
+        all_figs.append(fig)
+
+    # 13b - Combined multivariate summary panel
+    fig = plot_multivariate_summary_panel(df, outdir)
     if fig:
         all_figs.append(fig)
 
