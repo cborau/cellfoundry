@@ -8,6 +8,14 @@ FLAMEGPU_DEVICE_FUNCTION int clampi(const int x, const int lo, const int hi) {
   return x < lo ? lo : (x > hi ? hi : x);
 }
 
+// Wraps x into the interval [lo, hi).
+FLAMEGPU_DEVICE_FUNCTION float wrapf(const float x, const float lo, const float hi) {
+  const float L = hi - lo;
+  float r = fmodf(x - lo, L);
+  if (r < 0.0f) r += L;
+  return lo + r;
+}
+
 // WARNING: Ensure ECM agents were created with z as the fastest index, then y, then x:
 // grid_lin_id = i*(Ny*Nz) + j*(Nz) + k
 FLAMEGPU_DEVICE_FUNCTION uint32_t macro_lin_idx(const int ii, const int jj, const int kk, const int Ny, const int Nz) {
@@ -389,19 +397,40 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   agent_y += agent_vy * TIME_STEP;
   agent_z += agent_vz * TIME_STEP;
 
-  // Simple clamp to domain
-  agent_x = clampf(agent_x, COORD_BOUNDARY_X_NEG, COORD_BOUNDARY_X_POS);
-  agent_y = clampf(agent_y, COORD_BOUNDARY_Y_NEG, COORD_BOUNDARY_Y_POS);
-  agent_z = clampf(agent_z, COORD_BOUNDARY_Z_NEG, COORD_BOUNDARY_Z_POS);
+  // Boundary handling: periodic wrapping or simple clamping
+  const unsigned int PERIODIC_BOUNDARIES_FOR_CELLS = FLAMEGPU->environment.getProperty<int>("PERIODIC_BOUNDARIES_FOR_CELLS");
+  const unsigned int INCLUDE_FOCAL_ADHESIONS    = FLAMEGPU->environment.getProperty<int>("INCLUDE_INCLUDE_FOCAL_ADHESIONSHESIONS");
 
-  // Move anchor points with the same actual cell displacement (after clamp)
-  const float dx_cell = agent_x - agent_x_prev;
-  const float dy_cell = agent_y - agent_y_prev;
-  const float dz_cell = agent_z - agent_z_prev;
-  for (int i = 0; i < N_ANCHOR_POINTS; i++) {
-    agent_x_i[i] += dx_cell;
-    agent_y_i[i] += dy_cell;
-    agent_z_i[i] += dz_cell;
+  if (PERIODIC_BOUNDARIES_FOR_CELLS == 1 && INCLUDE_FOCAL_ADHESIONS == 0) {
+    // Periodic wrapping for cell position
+    agent_x = wrapf(agent_x, COORD_BOUNDARY_X_NEG, COORD_BOUNDARY_X_POS);
+    agent_y = wrapf(agent_y, COORD_BOUNDARY_Y_NEG, COORD_BOUNDARY_Y_POS);
+    agent_z = wrapf(agent_z, COORD_BOUNDARY_Z_NEG, COORD_BOUNDARY_Z_POS);
+
+    // Move anchor points by the raw displacement and wrap individually
+    const float raw_dx = agent_vx * TIME_STEP;
+    const float raw_dy = agent_vy * TIME_STEP;
+    const float raw_dz = agent_vz * TIME_STEP;
+    for (int i = 0; i < N_ANCHOR_POINTS; i++) {
+      agent_x_i[i] = wrapf(agent_x_i[i] + raw_dx, COORD_BOUNDARY_X_NEG, COORD_BOUNDARY_X_POS);
+      agent_y_i[i] = wrapf(agent_y_i[i] + raw_dy, COORD_BOUNDARY_Y_NEG, COORD_BOUNDARY_Y_POS);
+      agent_z_i[i] = wrapf(agent_z_i[i] + raw_dz, COORD_BOUNDARY_Z_NEG, COORD_BOUNDARY_Z_POS);
+    }
+  } else {
+    // Simple clamp to domain
+    agent_x = clampf(agent_x, COORD_BOUNDARY_X_NEG, COORD_BOUNDARY_X_POS);
+    agent_y = clampf(agent_y, COORD_BOUNDARY_Y_NEG, COORD_BOUNDARY_Y_POS);
+    agent_z = clampf(agent_z, COORD_BOUNDARY_Z_NEG, COORD_BOUNDARY_Z_POS);
+
+    // Move anchor points with the same actual cell displacement (after clamp)
+    const float dx_cell = agent_x - agent_x_prev;
+    const float dy_cell = agent_y - agent_y_prev;
+    const float dz_cell = agent_z - agent_z_prev;
+    for (int i = 0; i < N_ANCHOR_POINTS; i++) {
+      agent_x_i[i] += dx_cell;
+      agent_y_i[i] += dy_cell;
+      agent_z_i[i] += dz_cell;
+    }
   }
 
   //Set agent variables

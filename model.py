@@ -27,7 +27,6 @@ from helper_module import compute_expected_boundary_pos_from_corners, getRandomV
 # Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
 # Prepare networks of different sizes and densities to test performance.
 # Test organoid calibration
-# Implement periodic boundaries for cells (only if FOCADs are not included)
 # Improve comments on agent variables
 
 start_time = time.time()
@@ -532,6 +531,9 @@ if INCLUDE_CELLS:
     _max_cell_radius = max(CELL_RADIUS) if isinstance(CELL_RADIUS, list) else CELL_RADIUS
     if INCLUDE_FOCAL_ADHESIONS and not INCLUDE_FIBRE_NETWORK: 
         print('ERROR: focal adhesions cannot be included if there is no fibre network to interact with')
+        critical_error = True
+    if PERIODIC_BOUNDARIES_FOR_CELLS and INCLUDE_FOCAL_ADHESIONS:
+        print('ERROR: PERIODIC_BOUNDARIES_FOR_CELLS and INCLUDE_FOCAL_ADHESIONS cannot both be True. Periodic wrapping would break focal adhesion connections to the fibre network.')
         critical_error = True
     if INCLUDE_FOCAL_ADHESIONS and MAX_FOCAD_ARM_LENGTH < _max_cell_radius:
         print('ERROR: MAX_FOCAD_ARM_LENGTH: {0} must be bigger than max(CELL_RADIUS): {1}, as focal adhesions are initiated at the cell surface and should be able to grow away'.format(MAX_FOCAD_ARM_LENGTH, _max_cell_radius))
