@@ -653,6 +653,7 @@ fnode_remodel_file = "fnode_remodel.cpp"
 fnode_apply_remodel_updates_file = "fnode_apply_remodel_updates.cpp"
 fnode_move_file = "fnode_move.cpp"
 fnode_focad_interaction_file = "fnode_focad_interaction.cpp"
+fnode_cell_repulsion_file = "fnode_cell_repulsion.cpp"
 
 
 model = pyflamegpu.ModelDescription("cellfoundry")
@@ -1170,6 +1171,8 @@ if INCLUDE_FIBRE_NETWORK:
     FNODE_agent.newRTCFunctionFile("fnode_move", fnode_move_file)
     if INCLUDE_FOCAL_ADHESIONS:
         FNODE_agent.newRTCFunctionFile("fnode_focad_interaction", fnode_focad_interaction_file).setMessageInput("focad_spatial_location_message")
+    if INCLUDE_CELLS and INCLUDE_CELL_FNODE_REPULSION:
+        FNODE_agent.newRTCFunctionFile("fnode_cell_repulsion", fnode_cell_repulsion_file).setMessageInput("cell_spatial_location_message")
 
 
 """
@@ -2174,6 +2177,7 @@ if INCLUDE_CELLS and INCLUDE_CELL_CELL_INTERACTION:
     model.newLayer("L7_CELL_Cell_Interaction").addAgentFunction("CELL", "cell_cell_interaction")
 if INCLUDE_CELLS and INCLUDE_FIBRE_NETWORK and INCLUDE_CELL_FNODE_REPULSION:
     model.newLayer("L7_CELL_FNODE_Repulsion").addAgentFunction("CELL", "cell_fnode_repulsion")
+    model.newLayer("L7_FNODE_Cell_Repulsion").addAgentFunction("FNODE", "fnode_cell_repulsion")
 
 # L8_Agent_Movement
 if INCLUDE_CELLS:
