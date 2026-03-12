@@ -399,7 +399,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
 
   // Boundary handling: periodic wrapping or simple clamping
   const unsigned int PERIODIC_BOUNDARIES_FOR_CELLS = FLAMEGPU->environment.getProperty<int>("PERIODIC_BOUNDARIES_FOR_CELLS");
-  const unsigned int INCLUDE_FOCAL_ADHESIONS    = FLAMEGPU->environment.getProperty<int>("INCLUDE_INCLUDE_FOCAL_ADHESIONSHESIONS");
+  const unsigned int INCLUDE_FOCAL_ADHESIONS    = FLAMEGPU->environment.getProperty<int>("INCLUDE_FOCAL_ADHESIONS");
 
   if (PERIODIC_BOUNDARIES_FOR_CELLS == 1 && INCLUDE_FOCAL_ADHESIONS == 0) {
     // Periodic wrapping for cell position
