@@ -28,6 +28,11 @@ import numpy as np
 import pandas as pd
 
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_RESULTS_DIR = SCRIPT_DIR.parent / "result_files"
+DEFAULT_OUTPUT_DIR = SCRIPT_DIR / "results"
+
+
 class DummyModelParameterConfig:
     pass
 
@@ -47,17 +52,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--pickle",
-        default="../result_files/output_data_0.pickle",
+        default=str(DEFAULT_RESULTS_DIR / "output_data_0.pickle"),
         help="Path to simulation pickle file (used when --source pickle)",
     )
     parser.add_argument(
         "--indir",
-        default="../result_files",
+        default=str(DEFAULT_RESULTS_DIR),
         help="Directory containing focad_tXXXX.vtk files (used when --source vtk)",
     )
     parser.add_argument(
         "--outdir",
-        default="results",
+        default=str(DEFAULT_OUTPUT_DIR),
         help="Directory where CSV summaries and plots will be saved",
     )
     parser.add_argument(

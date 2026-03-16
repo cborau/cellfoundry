@@ -22,6 +22,11 @@ import numpy as np
 import pandas as pd
 
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_RESULTS_DIR = SCRIPT_DIR.parent / "result_files"
+DEFAULT_OUTPUT_DIR = SCRIPT_DIR / "results"
+
+
 CAUSE_LABELS = {
     -1: "none",
     0: "hypoxia",
@@ -46,10 +51,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate CELL population/death reports from pickle or VTK files")
     parser.add_argument("--source", choices=["pickle", "vtk"], default="pickle",
                         help="Data source: 'pickle' (default) or 'vtk'")
-    parser.add_argument("--pickle", default="../result_files/output_data_0.pickle",
+    parser.add_argument("--pickle", default=str(DEFAULT_RESULTS_DIR / "output_data_0.pickle"),
                         help="Path to simulation pickle file (used when --source pickle)")
-    parser.add_argument("--indir", default="../result_files", help="Directory containing cells_tXXXX.vtk (used when --source vtk)")
-    parser.add_argument("--outdir", default="results", help="Directory for CSV/plots")
+    parser.add_argument("--indir", default=str(DEFAULT_RESULTS_DIR), help="Directory containing cells_tXXXX.vtk (used when --source vtk)")
+    parser.add_argument("--outdir", default=str(DEFAULT_OUTPUT_DIR), help="Directory for CSV/plots")
     parser.add_argument("--tag", default="latest", help="Tag suffix for output filenames")
     parser.add_argument("--show", action="store_true", help="Display figures interactively")
     return parser.parse_args()

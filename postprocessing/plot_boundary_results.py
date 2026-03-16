@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Plot boundary results from pickle file saved during simulation.
 
@@ -10,14 +9,24 @@ Usage:
 import argparse
 import pickle
 import pathlib
+import sys
+
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
+DEFAULT_PICKLE_PATH = PROJECT_ROOT / "result_files" / "output_data_0.pickle"
+DEFAULT_OUTPUT_DIR = SCRIPT_DIR / "results"
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from helper_module import ModelParameterConfig
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Plot boundary results from pickle file")
-    parser.add_argument("--pickle", default="../result_files/output_data_0.pickle",
+    parser.add_argument("--pickle", default=str(DEFAULT_PICKLE_PATH),
                         help="Path to simulation pickle file")
-    parser.add_argument("--outdir", default="results",
+    parser.add_argument("--outdir", default=str(DEFAULT_OUTPUT_DIR),
                         help="Directory for output plots")
     # Keep backward compat: positional pickle path
     parser.add_argument("pickle_positional", nargs="?", default=None,

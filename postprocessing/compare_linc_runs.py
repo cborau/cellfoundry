@@ -23,9 +23,13 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_OUTPUT_DIR = SCRIPT_DIR / "results"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Compare LINC OFF vs ON FA outputs")
-    parser.add_argument("--outdir", default="results", help="Folder containing tagged CSV outputs")
+    parser.add_argument("--outdir", default=str(DEFAULT_OUTPUT_DIR), help="Folder containing tagged CSV outputs")
     parser.add_argument("--off-tag", default="linc_off", help="Tag suffix for OFF run")
     parser.add_argument("--on-tag", default="linc_on", help="Tag suffix for ON run")
     parser.add_argument("--show", action="store_true", help="Show plots interactively")

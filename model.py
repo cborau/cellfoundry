@@ -42,8 +42,8 @@ DEBUG_PRINTING = False
 PAUSE_EVERY_STEP = False  # If True, the visualization stops every step until P is pressed
 SAVE_PICKLE = True  # If True, dumps model configuration into a pickle file for post-processing
 SHOW_PLOTS = False  # Show plots at the end of the simulation
-SAVE_DATA_TO_FILE = False  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
-SAVE_EVERY_N_STEPS = 1 # Affects both the .vtk files and the Dataframes storing boundary data
+SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
+SAVE_EVERY_N_STEPS = 1000 # Affects both the .vtk files and the Dataframes storing boundary data
 
 CURR_PATH = pathlib.Path(__file__).resolve().parent
 RES_PATH = CURR_PATH / 'result_files'
@@ -60,8 +60,8 @@ N = 21
 
 # Time simulation parameters
 # ----------------------------------------------------------------------
-TIME_STEP = 0.1 # s. WARNING: diffusion and cell migration events might need different scales
-STEPS = 50
+TIME_STEP = 0.01 # s. WARNING: diffusion and cell migration events might need different scales
+STEPS = 50000
 
 # +====================================================================+
 # | BOUNDARY CONDITIONS                                                |
@@ -77,7 +77,7 @@ ECM_ETA = 2.0  # [nN·s/µm] Effective drag for overdamped FNODE motion (calibra
 BOUNDARY_COORDS = [500.0, -500.0, 500.0, -500.0, 500.0, -500.0]# microdevice dimensions in um
 #BOUNDARY_COORDS = [coord / 1000.0 for coord in BOUNDARY_COORDS] # in mm
 BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
-BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[um/s]
+BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[um/s]
 
 POISSON_DIRS = [0, 1]  # 0: xdir, 1:ydir, 2:zdir. poisson_ratio ~= -incL(dir1)/incL(dir2) dir2 is the direction in which the load is applied
 ALLOW_BOUNDARY_ELASTIC_MOVEMENT = [0, 0, 0, 0, 0, 0]  # [bool]
@@ -86,9 +86,9 @@ BOUNDARY_STIFFNESS_VALUE = 10.0  # nN/um
 BOUNDARY_DUMPING_VALUE = 5.0
 BOUNDARY_STIFFNESS = [BOUNDARY_STIFFNESS_VALUE * x for x in RELATIVE_BOUNDARY_STIFFNESS]
 BOUNDARY_DUMPING = [BOUNDARY_DUMPING_VALUE * x for x in RELATIVE_BOUNDARY_STIFFNESS]
-#CLAMP_AGENT_TOUCHING_BOUNDARY = [0, 0, 1, 1, 0, 0]# +X,-X,+Y,-Y,+Z,-Z [bool] - shear assay
-CLAMP_AGENT_TOUCHING_BOUNDARY = [1, 1, 1, 1, 1, 1]# +X,-X,+Y,-Y,+Z,-Z [bool]
-ALLOW_AGENT_SLIDING = [1, 1, 1, 1, 1, 1]# +X,-X,+Y,-Y,+Z,-Z [bool]
+CLAMP_AGENT_TOUCHING_BOUNDARY = [0, 0, 1, 1, 0, 0]# +X,-X,+Y,-Y,+Z,-Z [bool] - shear assay
+#CLAMP_AGENT_TOUCHING_BOUNDARY = [1, 1, 1, 1, 1, 1]# +X,-X,+Y,-Y,+Z,-Z [bool]
+ALLOW_AGENT_SLIDING = [0, 0, 0, 0, 0, 0]# +X,-X,+Y,-Y,+Z,-Z [bool]
 
 if any(rate != 0.0 for rate in BOUNDARY_DISP_RATES_PARALLEL) or any(rate != 0.0 for rate in BOUNDARY_DISP_RATES):
     MOVING_BOUNDARIES = True
@@ -161,16 +161,16 @@ NETWORK_FILE = 'network_medium_density.pkl'  # path to the .pkl file with node_c
 MAX_CONNECTIVITY = 8 # must match hard-coded C++ values
 # NOTE: These are calibrated model parameters (effective segment-level mechanics), not universal material constants.
 # They depend on collagen type/concentration, crosslinking, architecture and coarse-graining choices.
-FIBRE_SEGMENT_K_ELAST = 0.5  # [nN/um] Effective fibre-segment stiffness (baseline for tuning)
+FIBRE_SEGMENT_K_ELAST = 50.5  # [nN/um] Effective fibre-segment stiffness (baseline for tuning)
 FIBRE_SEGMENT_D_DUMPING = 0.2  # [nN*s/um] Effective fibre-segment damping (baseline for tuning)
-FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE = 15 # WARNING: must match the value used in network generation
+FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE = 45 # WARNING: must match the value used in network generation
 FIBRE_NODE_BOUNDARY_INTERACTION_RADIUS = 0.05
 FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE = 0.0
 MAX_SEARCH_RADIUS_FNODES = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / 10.0 # must me smaller than FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
 FIBRE_NODE_REPULSION_K = 0.2 * FIBRE_SEGMENT_K_ELAST  # [nN/um] Short-range FNODE-FNODE exclusion stiffness (kept below segment stiffness)
 # WARNING: THESE VARIABLES SIZE DEPENDS ON N_CELL_TYPES (DEFINED BELOW IN THE CELL PARAMETERS SECTION)
 # FNODE remodeling (degradation/deposition + birth/death)
-INCLUDE_NETWORK_REMODELING = True
+INCLUDE_NETWORK_REMODELING = False
 FNODE_DEGRADATION_RATE = [5.0e-4, 5.0e-4, 5.0e-4]  # [1/s] per-neighbor degradation contribution (per cell-type)
 FNODE_DEPOSITION_RATE = [2.0e-4, 2.0e-4, 2.0e-4]  # [1/s] baseline repair/deposition (per cell-type)
 FNODE_CELL_DEGRADATION_RADIUS = 0.75 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE  # [um] cutoff radius (scalar)
@@ -190,7 +190,7 @@ FNODE_BIRTH_REFRACTORY = [20.0, 20.0, 20.0]  # [s]
 # +====================================================================+
 # | DIFFUSION PARAMETERS                                               |
 # +====================================================================+
-INCLUDE_DIFFUSION = True
+INCLUDE_DIFFUSION = False
 N_SPECIES = 2  # number of diffusing species.WARNING: make sure that the value coincides with the one declared in TODO
 DIFFUSION_COEFF_MULTI = [300.0, 300.0]  # diffusion coefficient in [um^2/s] per specie
 BOUNDARY_CONC_INIT_MULTI = [[50.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -215,12 +215,12 @@ HETEROGENEOUS_DIFFUSION = False  # if True, diffusion coefficient is multiplied 
 # --------------------------------------------------------------------------
 N_CELL_TYPES = 3
 
-INCLUDE_CELLS = True
+INCLUDE_CELLS = False
 INCLUDE_CELL_CELL_INTERACTION = False # TODO: implement cell-cell repulsion and adhesion
 INCLUDE_CELL_CYCLE = False # If True, cells go through a simplified cell cycle with G1, S, G2 and M phases, which can affect their behavior. Also includes birth/death dynamics (WARNING: USER-DEFINED in cell_cycle.cpp).
 DEAD_CELLS_DISAPPEAR = False  # If True, dead CELL agents are removed; if False, they remain inert with dead=1.
 PERIODIC_BOUNDARIES_FOR_CELLS = False
-INCLUDE_CELL_FNODE_REPULSION = True
+INCLUDE_CELL_FNODE_REPULSION = False
 N_CELLS = 1
 
 # Per-cell-type mechanical & morphological properties
@@ -312,7 +312,7 @@ else:
 # +====================================================================+
 # | FOCAL ADHESION PARAMETERS  (units: um, s, nN)                      |
 # +====================================================================+
-INCLUDE_FOCAL_ADHESIONS = True
+INCLUDE_FOCAL_ADHESIONS = False
 INIT_N_FOCAD_PER_CELL = 10 # initial number of focal adhesions per cell. 
 N_ANCHOR_POINTS = 50 # number of anchor points to which focal adhesions can attach on the nucleus surface. Their positions change with nucleus deformation
 MAX_SEARCH_RADIUS_FOCAD = 3.0 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE  # TEMP(debug attach): increased to strongly favor FA-node encounters. Reasonable baseline: 1.0 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
