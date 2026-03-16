@@ -68,13 +68,57 @@ def _format_percent_detail(label: str, error: float, target: float) -> str:
     return f"{label}: {percent_error:.2f}% off"
 
 
+def _get_boundary_surface_area(bpos: pd.DataFrame, axis: int) -> float:
+    ortho_axes = [i for i in range(3) if i != axis]
+    lengths = []
+    for oa in ortho_axes:
+        pos0 = float(bpos.iloc[0, oa * 2])
+        neg0 = float(bpos.iloc[0, oa * 2 + 1])
+        lengths.append(abs(pos0 - neg0))
+    area = lengths[0] * lengths[1]
+    if area < 1e-12:
+        raise ValueError(
+            f"Cross-sectional area is ~0 (ortho lengths: {lengths}). "
+            "Check BPOS_OVER_TIME initial boundary positions."
+        )
+    return area
+
+
+def _get_attachment_count_series(results: dict, axis: int) -> tuple[pd.Series, pd.Series]:
+    counts = results.get("BOUNDARY_ATTACHMENT_COUNTS_OVER_TIME")
+    if counts is None or len(counts) == 0:
+        raise ValueError(
+            "Results must contain non-empty BOUNDARY_ATTACHMENT_COUNTS_OVER_TIME "
+            "for stress_area_mode='per_fibre_area'"
+        )
+    face_keys = [("n_bx_pos", "n_bx_neg"), ("n_by_pos", "n_by_neg"), ("n_bz_pos", "n_bz_neg")]
+    pos_col, neg_col = face_keys[axis]
+    if pos_col not in counts.columns or neg_col not in counts.columns:
+        raise ValueError(f"Attachment count columns '{pos_col}'/'{neg_col}' not found")
+    return counts[pos_col].astype(float), counts[neg_col].astype(float)
+
+
+def _get_fibre_section_area(results: dict, fibre_section_area_um2: float | None = None) -> float:
+    area = fibre_section_area_um2 if fibre_section_area_um2 is not None else results.get("FIBRE_SECTION_AREA_UM2")
+    if area is None:
+        raise ValueError(
+            "No fibre section area available. Provide kwargs['fibre_section_area_um2'] "
+            "or store FIBRE_SECTION_AREA_UM2 in the pickle."
+        )
+    area = float(area)
+    if area <= 1e-12:
+        raise ValueError(f"Invalid fibre section area: {area}")
+    return area
+
+
 # ---------------------------------------------------------------------------
 # Built-in objectives
 # ---------------------------------------------------------------------------
 
 def _extract_sim_strain_stress(
     results: dict, force_type: str = "normal", strain_axis: int = 0,
-    shear_component: int = 0,
+    shear_component: int = 0, stress_area_mode: str = "boundary_surface",
+    fibre_section_area_um2: float | None = None,
 ) -> tuple[pd.Series, pd.Series]:
     """Extract simulated strain [dimensionless] and stress [kPa] from results.
 
@@ -111,24 +155,14 @@ def _extract_sim_strain_stress(
 
     axis = strain_axis
 
-    # ------------------------------------------------------------------
-    # Compute the initial cross-sectional area of the loaded face [µm²]
-    # BPOS columns are ordered: xpos, xneg, ypos, yneg, zpos, zneg
-    # For a face with normal along axis *a*, the area is L_b0 * L_c0
-    # where b and c are the two orthogonal axes.
-    # ------------------------------------------------------------------
-    ortho_axes = [i for i in range(3) if i != axis]
-    L_ortho = []
-    for oa in ortho_axes:
-        pos0 = float(bpos.iloc[0, oa * 2])
-        neg0 = float(bpos.iloc[0, oa * 2 + 1])
-        L_ortho.append(abs(pos0 - neg0))
-    cross_section_area = L_ortho[0] * L_ortho[1]  # [µm²]
-    if cross_section_area < 1e-12:
-        raise ValueError(
-            f"Cross-sectional area is ~0 (ortho lengths: {L_ortho}). "
-            "Check BPOS_OVER_TIME initial boundary positions."
-        )
+    cross_section_area = _get_boundary_surface_area(bpos, axis)
+    count_pos = count_neg = None
+    fibre_section_area = None
+    if stress_area_mode == "per_fibre_area":
+        count_pos, count_neg = _get_attachment_count_series(results, axis)
+        fibre_section_area = _get_fibre_section_area(results, fibre_section_area_um2)
+    elif stress_area_mode != "boundary_surface":
+        raise ValueError("stress_area_mode must be 'boundary_surface' or 'per_fibre_area'")
 
     if force_type == "shear":
         bforce_shear = results.get("BFORCE_SHEAR_OVER_TIME")
@@ -140,10 +174,23 @@ def _extract_sim_strain_stress(
         axis_label = ["x", "y", "z"][axis]
         tangent_dirs = [d for d in ["x", "y", "z"] if d != axis_label]
         comp = shear_component
-        force_col = f"f{axis_label}pos_{tangent_dirs[comp]}"
-        if force_col not in bforce_shear.columns:
-            raise ValueError(f"Shear force column '{force_col}' not found in BFORCE_SHEAR_OVER_TIME")
-        sim_stress = bforce_shear[force_col] / cross_section_area  # [nN] / [µm²] = [kPa]
+        force_col_pos = f"f{axis_label}pos_{tangent_dirs[comp]}"
+        force_col_neg = f"f{axis_label}neg_{tangent_dirs[comp]}"
+        if force_col_pos not in bforce_shear.columns:
+            raise ValueError(f"Shear force column '{force_col_pos}' not found in BFORCE_SHEAR_OVER_TIME")
+        if force_col_neg not in bforce_shear.columns:
+            raise ValueError(f"Shear force column '{force_col_neg}' not found in BFORCE_SHEAR_OVER_TIME")
+        if stress_area_mode == "per_fibre_area":
+            effective_area_pos = count_pos * fibre_section_area
+            effective_area_neg = count_neg * fibre_section_area
+            safe_pos = effective_area_pos.where(effective_area_pos > 1e-12, np.nan)
+            safe_neg = effective_area_neg.where(effective_area_neg > 1e-12, np.nan)
+            stress_pos = bforce_shear[force_col_pos].abs() / safe_pos
+            stress_neg = bforce_shear[force_col_neg].abs() / safe_neg
+            sim_stress = ((stress_pos + stress_neg) / 2.0).fillna(0.0)
+        else:
+            # Average absolute reaction forces from both faces to get the shear stress
+            sim_stress = (bforce_shear[force_col_pos].abs() + bforce_shear[force_col_neg].abs()) / (2 * cross_section_area)
 
         tang_axis_idx = ["x", "y", "z"].index(tangent_dirs[comp])
         pos_col_tang = bpos.columns[tang_axis_idx * 2]
@@ -164,7 +211,12 @@ def _extract_sim_strain_stress(
         force_col = bforce.columns[axis * 2]
         L0 = bpos.iloc[0][pos_col] - bpos.iloc[0][neg_col]
         sim_strain = ((bpos[pos_col] - bpos[neg_col]) - L0) / L0
-        sim_stress = bforce[force_col] / cross_section_area  # [nN] / [µm²] = [kPa]
+        if stress_area_mode == "per_fibre_area":
+            effective_area = count_pos * fibre_section_area
+            safe_area = effective_area.where(effective_area > 1e-12, np.nan)
+            sim_stress = (bforce[force_col].abs() / safe_area).fillna(0.0)
+        else:
+            sim_stress = bforce[force_col] / cross_section_area  # [nN] / [µm²] = [kPa]
 
     return sim_strain, sim_stress
 
@@ -210,6 +262,8 @@ def stress_strain_curve_error(results: dict, reference_path: str, **kwargs) -> f
     sim_strain, sim_stress = _extract_sim_strain_stress(
         results, force_type=force_type, strain_axis=axis,
         shear_component=kwargs.get("shear_component", 0),
+        stress_area_mode=kwargs.get("stress_area_mode", "boundary_surface"),
+        fibre_section_area_um2=kwargs.get("fibre_section_area_um2"),
     )
 
     # Interpolate simulation to match reference length
@@ -273,6 +327,8 @@ def differential_modulus_error(results: dict, reference_path: str, **kwargs) -> 
     sim_strain, sim_stress = _extract_sim_strain_stress(
         results, force_type=force_type, strain_axis=axis,
         shear_component=kwargs.get("shear_component", 0),
+        stress_area_mode=kwargs.get("stress_area_mode", "boundary_surface"),
+        fibre_section_area_um2=kwargs.get("fibre_section_area_um2"),
     )
 
     # Convert to numpy

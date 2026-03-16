@@ -83,6 +83,14 @@ parameters:
     high: 0.5
     log: false
 
+  # Maximum strain-dependent stiffness multiplier (plateau / damage limit).
+  # Caps the exponential growth of getStrainKfactor to prevent unbounded forces.
+  MAX_STRAIN_K_FACTOR:
+    type: float
+    low: 2.0
+    high: 50.0
+    log: true
+
   # Fibre-node damping (viscous contribution to force)
   # FNODE_DUMPING:
   #   type: float

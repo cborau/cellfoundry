@@ -51,9 +51,10 @@ FLAMEGPU_DEVICE_FUNCTION void getMaxForceDir(float &dx, float &dy, float &dz,flo
     dz = 1.0;
   }
 }
-FLAMEGPU_DEVICE_FUNCTION float getStrainKfactor(const float strain, const float strain_s, const float d_0, const float d_s) {
+FLAMEGPU_DEVICE_FUNCTION float getStrainKfactor(const float strain, const float strain_s, const float d_0, const float d_s, const float max_factor) {
   // refer for equations: https://bio.physik.fau.de/publications/Steinwachs%20Nat%20Meth%202016.pdf
   // returns the factor multiplying the elastic constant depending on fiber strain
+  // max_factor caps the multiplier to model fibre damage / stiffening plateau
   float factor = 1.0;
   if (strain < 0.0) {
     factor = expf(strain / d_0);
@@ -64,7 +65,7 @@ FLAMEGPU_DEVICE_FUNCTION float getStrainKfactor(const float strain, const float 
   else {
     factor = expf((strain - strain_s) / d_s);
   }
-  return factor;
+  return fminf(factor, max_factor);
 }
 /**
  * fnode_fnode_bucket_interaction
@@ -156,6 +157,8 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket,
   float relative_speed = 0.0;
   // total force between agents
   float total_f = 0.0;
+  // max k_elast among the connected fibres, used for visualization of strain-stiffening
+  float max_k_elast = 0.0;
 
   int DEBUG_PRINTING = FLAMEGPU->environment.getProperty<int>("DEBUG_PRINTING");
   
@@ -195,10 +198,11 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket,
       const float CRITICAL_STRAIN = FLAMEGPU->environment.getProperty<float>("CRITICAL_STRAIN");
       const float BUCKLING_COEFF_D0 = FLAMEGPU->environment.getProperty<float>("BUCKLING_COEFF_D0");
       const float STRAIN_STIFFENING_COEFF_DS = FLAMEGPU->environment.getProperty<float>("STRAIN_STIFFENING_COEFF_DS");
+      const float MAX_STRAIN_K_FACTOR = FLAMEGPU->environment.getProperty<float>("MAX_STRAIN_K_FACTOR");
       float strain = (distance - equilibrium_distance[i]) / equilibrium_distance[i];
-      k_elast *= getStrainKfactor(strain, CRITICAL_STRAIN, BUCKLING_COEFF_D0, STRAIN_STIFFENING_COEFF_DS);
+      k_elast *= getStrainKfactor(strain, CRITICAL_STRAIN, BUCKLING_COEFF_D0, STRAIN_STIFFENING_COEFF_DS, MAX_STRAIN_K_FACTOR);
 
-      
+      max_k_elast = fmaxf(max_k_elast, k_elast);
       cos_x = (1.0 * dir_x + 0.0 * dir_y + 0.0 * dir_z) / distance;
       cos_y = (0.0 * dir_x + 1.0 * dir_y + 0.0 * dir_z) / distance;
       cos_z = (0.0 * dir_x + 0.0 * dir_y + 1.0 * dir_z) / distance;
@@ -257,7 +261,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket,
     }
   }
   
-      
+  FLAMEGPU->setVariable<float>("k_elast", max_k_elast); // for visualization of fibre strain-stiffening
   FLAMEGPU->setVariable<float>("fx", agent_fx);
   FLAMEGPU->setVariable<float>("fy", agent_fy);
   FLAMEGPU->setVariable<float>("fz", agent_fz);

@@ -28,7 +28,6 @@ FLAMEGPU_AGENT_FUNCTION(fnode_remodel, flamegpu::MessageSpatial3D, flamegpu::Mes
     FNODE_DEPOSITION_RATE[ct]  = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FNODE_DEPOSITION_RATE", ct);
   }
   const float FNODE_CELL_DEGRADATION_RADIUS = FLAMEGPU->environment.getProperty<float>("FNODE_CELL_DEGRADATION_RADIUS");
-  const float FIBRE_SEGMENT_K_ELAST = FLAMEGPU->environment.getProperty<float>("FIBRE_SEGMENT_K_ELAST");
 
   const int id = FLAMEGPU->getVariable<int>("id");
   const float agent_x = FLAMEGPU->getVariable<float>("x");

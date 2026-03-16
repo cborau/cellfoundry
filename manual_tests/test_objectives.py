@@ -11,12 +11,12 @@ Run from the repository root:
 
   Real data — shear stress-strain:
     python manual_tests/test_objectives.py --pickle result_files/output_data_0.pickle --csv optimizer/reference_data/target_shear.csv --objective shear_stress_strain --strain-axis 1 --shear-component 0
-
+    
   Real data — differential modulus:
-    python manual_tests/test_objectives.py --pickle result_files/output_data_0.pickle --csv optimizer/reference_data/target_differential_modulus.csv --objective diff_modulus
-
+    python manual_tests/test_objectives.py --pickle result_files/output_data_0.pickle --csv optimizer/reference_data/target_differential_modulus.csv --objective diff_modulus --strain-axis 1 
+  
   Real data — shear differential modulus:
-    python manual_tests/test_objectives.py --pickle result_files/output_data_0.pickle --csv optimizer/reference_data/target_differential_modulus.csv --objective shear_diff_modulus --strain-axis 0
+    python manual_tests/test_objectives.py --pickle result_files/output_data_0.pickle --csv optimizer/reference_data/target_differential_modulus.csv --objective shear_diff_modulus --strain-axis 1 --shear-component 0
 
 Without --pickle / --csv the script runs the synthetic smoke tests only.
 With --pickle and --csv it loads actual data and evaluates the chosen objective.
@@ -124,6 +124,15 @@ def _make_mock_results(n_steps: int = 50) -> dict:
         "BPOS_OVER_TIME": bpos,
         "BFORCE_OVER_TIME": bforce,
         "BFORCE_SHEAR_OVER_TIME": bforce_shear,
+        "BOUNDARY_ATTACHMENT_COUNTS_OVER_TIME": pd.DataFrame({
+            "n_bx_pos": np.full(n_steps, 20.0),
+            "n_bx_neg": np.full(n_steps, 20.0),
+            "n_by_pos": np.full(n_steps, 20.0),
+            "n_by_neg": np.full(n_steps, 20.0),
+            "n_bz_pos": np.full(n_steps, 20.0),
+            "n_bz_neg": np.full(n_steps, 20.0),
+        }),
+        "FIBRE_SECTION_AREA_UM2": 0.05,
     }
 
 
@@ -204,7 +213,7 @@ def _plot_real_data(results: dict, ref_df: pd.DataFrame, obj_name: str, kwargs: 
         Top-left : stress (or K) vs strain — sim raw, sim interpolated, ref
         Top-right: strain vs timestep index  (raw sim time-series)
         Bot-left : stress (or K) vs timestep index  (raw sim time-series)
-        Bot-right: residuals  (sim_interp − ref)
+        Bot-right: both +/- face forces vs timestep (for shear) or residuals
     """
     force_type = "shear" if "shear" in obj_name else "normal"
     axis = kwargs.get("strain_axis", 0)
@@ -213,12 +222,15 @@ def _plot_real_data(results: dict, ref_df: pd.DataFrame, obj_name: str, kwargs: 
     sim_strain, sim_stress = _extract_sim_strain_stress(
         results, force_type=force_type, strain_axis=axis,
         shear_component=shear_comp,
+        stress_area_mode=kwargs.get("stress_area_mode", "boundary_surface"),
+        fibre_section_area_um2=kwargs.get("fibre_section_area_um2"),
     )
+    sim_stress_arr = sim_stress.values.astype(float)
 
     is_diff_modulus = "diff_modulus" in obj_name
 
     if is_diff_modulus:
-        stress_arr = sim_stress.values.astype(float)
+        stress_arr = sim_stress_arr
         strain_arr = sim_strain.values.astype(float)
         d_stress = np.gradient(stress_arr)
         d_strain = np.gradient(strain_arr)
@@ -258,6 +270,7 @@ def _plot_real_data(results: dict, ref_df: pd.DataFrame, obj_name: str, kwargs: 
     print(f"  Ref  {ylabel.split('[')[0].strip()}: min={np.min(ref_y):.6g}, max={np.max(ref_y):.6g}")
 
     force_label = f"shear (comp {shear_comp})" if force_type == "shear" else "normal"
+    axis_label = "xyz"[axis]
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
     # ── Top-left: main curve (stress or K vs strain) ──────────────────────
@@ -267,7 +280,7 @@ def _plot_real_data(results: dict, ref_df: pd.DataFrame, obj_name: str, kwargs: 
     ax.plot(ref_strain, ref_y, "s--", color="tab:red", markersize=4, label="Reference")
     ax.set_xlabel("Strain [-]")
     ax.set_ylabel(ylabel)
-    ax.set_title(f"{title_suffix} — {force_label}, axis={'xyz'[axis]}")
+    ax.set_title(f"{title_suffix} — {force_label}, axis={axis_label}")
     ax.legend()
     ax.grid(True, alpha=0.3)
 
@@ -284,24 +297,53 @@ def _plot_real_data(results: dict, ref_df: pd.DataFrame, obj_name: str, kwargs: 
 
     # ── Bot-left: stress (or K) vs timestep ───────────────────────────────
     ax_sf = axes[1, 0]
-    ax_sf.plot(timesteps, sim_y, "-", color="tab:blue", label=f"Sim {ylabel.split('[')[0].strip()}")
-    ax_sf.axhline(np.min(ref_y), color="tab:red", ls="--", alpha=0.5, label=f"Ref min ({np.min(ref_y):.4g})")
-    ax_sf.axhline(np.max(ref_y), color="tab:red", ls="--", alpha=0.5, label=f"Ref max ({np.max(ref_y):.4g})")
+    ax_sf.plot(timesteps, sim_stress_arr, "-", color="tab:blue", label="Sim Stress")
+    if "stress" in ref_df.columns:
+        ref_stress = ref_df["stress"].values
+        ax_sf.axhline(np.min(ref_stress), color="tab:red", ls="--", alpha=0.5, label=f"Ref min ({np.min(ref_stress):.4g})")
+        ax_sf.axhline(np.max(ref_stress), color="tab:red", ls="--", alpha=0.5, label=f"Ref max ({np.max(ref_stress):.4g})")
     ax_sf.set_xlabel("Timestep index")
-    ax_sf.set_ylabel(ylabel)
-    ax_sf.set_title(f"Sim {ylabel.split('[')[0].strip()} over time")
+    ax_sf.set_ylabel("Stress [kPa]")
+    ax_sf.set_title("Sim stress over time")
     ax_sf.legend(fontsize=8)
     ax_sf.grid(True, alpha=0.3)
 
-    # ── Bot-right: residuals ──────────────────────────────────────────────
+    # ── Bot-right: raw forces on both +/- faces (shear) or residuals (normal)
     ax2 = axes[1, 1]
-    residual = sim_y_interp - ref_y
-    ax2.bar(np.arange(len(residual)), residual, color="tab:orange", alpha=0.7)
-    ax2.axhline(0, color="k", linewidth=0.5)
-    ax2.set_xlabel("Reference point index")
-    ax2.set_ylabel(f"Residual ({ylabel.split('[')[0].strip()})")
-    ax2.set_title("Sim − Reference residuals")
-    ax2.grid(True, alpha=0.3)
+    if force_type == "shear":
+        bforce_shear = results.get("BFORCE_SHEAR_OVER_TIME")
+        bpos = results.get("BPOS_OVER_TIME")
+        tangent_dirs = [d for d in ["x", "y", "z"] if d != axis_label]
+        tang_dir = tangent_dirs[shear_comp]
+        col_pos = f"f{axis_label}pos_{tang_dir}"
+        col_neg = f"f{axis_label}neg_{tang_dir}"
+
+        # Compute cross-sectional area for stress conversion
+        ortho_axes = [i for i in range(3) if i != axis]
+        L_ortho = []
+        for oa in ortho_axes:
+            L_ortho.append(abs(float(bpos.iloc[0, oa * 2]) - float(bpos.iloc[0, oa * 2 + 1])))
+        area = L_ortho[0] * L_ortho[1]
+
+        ts_shear = np.arange(len(bforce_shear))
+        stress_pos = bforce_shear[col_pos].values / area
+        stress_neg = bforce_shear[col_neg].values / area
+        ax2.plot(ts_shear, stress_pos, "-", color="tab:blue", label=f"+{axis_label} face ({col_pos}) [kPa]")
+        ax2.plot(ts_shear, stress_neg, "-", color="tab:green", label=f"−{axis_label} face ({col_neg}) [kPa]")
+        ax2.plot(ts_shear, (stress_pos + stress_neg) / 2, "--", color="tab:purple", alpha=0.7, label="Mean of both faces")
+        ax2.set_xlabel("Timestep index")
+        ax2.set_ylabel("Shear stress [kPa]")
+        ax2.set_title(f"Shear forces: {tang_dir}-dir on ±{axis_label} faces")
+        ax2.legend(fontsize=8)
+        ax2.grid(True, alpha=0.3)
+    else:
+        residual = sim_y_interp - ref_y
+        ax2.bar(np.arange(len(residual)), residual, color="tab:orange", alpha=0.7)
+        ax2.axhline(0, color="k", linewidth=0.5)
+        ax2.set_xlabel("Reference point index")
+        ax2.set_ylabel(f"Residual ({ylabel.split('[')[0].strip()})")
+        ax2.set_title("Sim − Reference residuals")
+        ax2.grid(True, alpha=0.3)
 
     plt.tight_layout()
     plt.show()
@@ -332,7 +374,7 @@ def run_real_data_test(args):
 
     # Show available keys
     print(f"  Pickle keys: {list(results.keys())}")
-    for key in ["BPOS_OVER_TIME", "BFORCE_OVER_TIME", "BFORCE_SHEAR_OVER_TIME"]:
+    for key in ["BPOS_OVER_TIME", "BFORCE_OVER_TIME", "BFORCE_SHEAR_OVER_TIME", "BOUNDARY_ATTACHMENT_COUNTS_OVER_TIME"]:
         val = results.get(key)
         if val is not None and hasattr(val, "shape"):
             print(f"  {key}: shape={val.shape}, columns={list(val.columns)}")
@@ -355,6 +397,9 @@ def run_real_data_test(args):
         area = L[0] * L[1]
         print(f"  Face area (axis={dims_label[axis]}) = {area:.2f} µm²")
         print(f"  → stress = force[nN] / {area:.2f}[µm²]  (1 nN/µm² = 1 kPa)")
+    if args.stress_area_mode == "per_fibre_area":
+        fibre_area = float(results.get("FIBRE_SECTION_AREA_UM2", args.fibre_section_area_um2 or 0.0))
+        print(f"  Fibre section area = {fibre_area:.4f} µm²")
 
     # Load and preview CSV
     print(f"\nLoading reference CSV: {csv_path}")
@@ -374,7 +419,10 @@ def run_real_data_test(args):
     # Build kwargs
     kwargs = {
         "strain_axis": args.strain_axis,
+        "stress_area_mode": args.stress_area_mode,
     }
+    if args.fibre_section_area_um2 is not None:
+        kwargs["fibre_section_area_um2"] = args.fibre_section_area_um2
     if "shear" in obj_name:
         kwargs["shear_component"] = args.shear_component
     if "diff_modulus" in obj_name:
@@ -432,6 +480,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--strain-weight", type=float, default=0.1,
         help="Relative weight of strain MSE term (default: 0.1).",
+    )
+    parser.add_argument(
+        "--stress-area-mode", type=str, default="boundary_surface",
+        choices=["boundary_surface", "per_fibre_area"],
+        help="Normalize force by the whole boundary surface or by engaged-fibre area.",
+    )
+    parser.add_argument(
+        "--fibre-section-area-um2", type=float, default=None,
+        help="Override fibre cross-sectional area in µm² for per_fibre_area mode.",
     )
     parser.add_argument(
         "--smooth-window", type=int, default=5,

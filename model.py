@@ -43,7 +43,7 @@ PAUSE_EVERY_STEP = False  # If True, the visualization stops every step until P 
 SAVE_PICKLE = True  # If True, dumps model configuration into a pickle file for post-processing
 SHOW_PLOTS = False  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
-SAVE_EVERY_N_STEPS = 1000 # Affects both the .vtk files and the Dataframes storing boundary data
+SAVE_EVERY_N_STEPS = 100 # Affects both the .vtk files and the Dataframes storing boundary data
 
 CURR_PATH = pathlib.Path(__file__).resolve().parent
 RES_PATH = CURR_PATH / 'result_files'
@@ -60,8 +60,8 @@ N = 21
 
 # Time simulation parameters
 # ----------------------------------------------------------------------
-TIME_STEP = 0.01 # s. WARNING: diffusion and cell migration events might need different scales
-STEPS = 50000
+TIME_STEP = 0.1 # s. WARNING: diffusion and cell migration events might need different scales
+STEPS = 5000
 
 # +====================================================================+
 # | BOUNDARY CONDITIONS                                                |
@@ -71,13 +71,13 @@ STEPS = 50000
 # ----------------------------------------------------------------------
 ECM_K_ELAST = 0.2  # [nN/um]
 ECM_D_DUMPING = 0.04  # [nN·s/um]
-ECM_ETA = 2.0  # [nN·s/µm] Effective drag for overdamped FNODE motion (calibration parameter)
+ECM_ETA = 20.0  # [nN·s/µm] Effective drag for overdamped FNODE motion (calibration parameter)
 
 #BOUNDARY_COORDS = [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]  # +X,-X,+Y,-Y,+Z,-Z
 BOUNDARY_COORDS = [500.0, -500.0, 500.0, -500.0, 500.0, -500.0]# microdevice dimensions in um
 #BOUNDARY_COORDS = [coord / 1000.0 for coord in BOUNDARY_COORDS] # in mm
-BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
-BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[um/s]
+BOUNDARY_DISP_RATES = [0.0, 0.0, 0.5, -0.5, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
+BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[um/s]
 
 POISSON_DIRS = [0, 1]  # 0: xdir, 1:ydir, 2:zdir. poisson_ratio ~= -incL(dir1)/incL(dir2) dir2 is the direction in which the load is applied
 ALLOW_BOUNDARY_ELASTIC_MOVEMENT = [0, 0, 0, 0, 0, 0]  # [bool]
@@ -142,6 +142,7 @@ MAX_EXPECTED_BOUNDARY_POS_OSCILLATORY = 0.25 * (BOUNDARY_COORDS[2] - BOUNDARY_CO
 BUCKLING_COEFF_D0 = 0.1
 STRAIN_STIFFENING_COEFF_DS = 0.25
 CRITICAL_STRAIN = 0.1
+MAX_STRAIN_K_FACTOR = 10.0  # Cap on the strain-dependent stiffness multiplier (plateau / damage limit)
 
 # Parallel disp rate values are overrun in oscillatory assays
 # ----------------------------------------------------------------------
@@ -156,14 +157,15 @@ if OSCILLATORY_SHEAR_ASSAY:
 # | FIBRE NETWORK PARAMETERS                                           |
 # +====================================================================+
 INCLUDE_FIBRE_NETWORK = True
-NETWORK_FILE = 'network_medium_density.pkl'  # path to the .pkl file with node_coords + connectivity
+NETWORK_FILE = 'network_low_density.pkl'  # path to the .pkl file with node_coords + connectivity
 
 MAX_CONNECTIVITY = 8 # must match hard-coded C++ values
 # NOTE: These are calibrated model parameters (effective segment-level mechanics), not universal material constants.
 # They depend on collagen type/concentration, crosslinking, architecture and coarse-graining choices.
-FIBRE_SEGMENT_K_ELAST = 0.5  # [nN/um] Effective fibre-segment stiffness (baseline for tuning)
-FIBRE_SEGMENT_D_DUMPING = 0.2  # [nN*s/um] Effective fibre-segment damping (baseline for tuning)
+FIBRE_SEGMENT_K_ELAST = 10.0  # [nN/um] Effective fibre-segment stiffness (baseline for tuning)
+FIBRE_SEGMENT_D_DUMPING = 2.0  # [nN*s/um] Effective fibre-segment damping (baseline for tuning)
 FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE = 45 # WARNING: must match the value used in network generation
+FIBRE_SECTION_AREA_UM2 = 0.05  # [um^2] Approximate collagen-fibre cross-section used for effective stress normalization
 FIBRE_NODE_BOUNDARY_INTERACTION_RADIUS = 0.05
 FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE = 0.0
 MAX_SEARCH_RADIUS_FNODES = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / 10.0 # must me smaller than FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
@@ -872,6 +874,7 @@ env.newPropertyFloat("ECM_ETA", ECM_ETA)
 env.newPropertyFloat("BUCKLING_COEFF_D0", BUCKLING_COEFF_D0)
 env.newPropertyFloat("STRAIN_STIFFENING_COEFF_DS", STRAIN_STIFFENING_COEFF_DS)
 env.newPropertyFloat("CRITICAL_STRAIN", CRITICAL_STRAIN)
+env.newPropertyFloat("MAX_STRAIN_K_FACTOR", MAX_STRAIN_K_FACTOR)
 
 # Other globals
 env.newPropertyFloat("PI", 3.1415)
@@ -2237,6 +2240,13 @@ if INCLUDE_FIBRE_NETWORK:
     fnode_agent_log.logStandardDevFloat("f_by_neg")
     fnode_agent_log.logStandardDevFloat("f_bz_pos")
     fnode_agent_log.logStandardDevFloat("f_bz_neg")
+    
+    fnode_agent_log.logSumUInt8("clamped_bx_pos")
+    fnode_agent_log.logSumUInt8("clamped_bx_neg")
+    fnode_agent_log.logSumUInt8("clamped_by_pos")
+    fnode_agent_log.logSumUInt8("clamped_by_neg")
+    fnode_agent_log.logSumUInt8("clamped_bz_pos")
+    fnode_agent_log.logSumUInt8("clamped_bz_neg")
 
     fnode_agent_log.logSumFloat("degradation")
     fnode_agent_log.logSumFloat("reinforcement")
@@ -2454,8 +2464,13 @@ def manageLogs(steps, is_ensemble, idx):
                                   [("fxpos_y", float), ("fxpos_z", float), ("fxneg_y", float), ("fxneg_z", float),
                                    ("fypos_x", float), ("fypos_z", float), ("fyneg_x", float), ("fyneg_z", float),
                                    ("fzpos_x", float), ("fzpos_y", float), ("fzneg_x", float), ("fzneg_y", float)])
+    BATTACH = make_dataclass(
+        "BATTACH",
+        [("n_bx_pos", float), ("n_bx_neg", float), ("n_by_pos", float), ("n_by_neg", float), ("n_bz_pos", float), ("n_bz_neg", float)],
+    )
     BFORCE_OVER_TIME = []
     BFORCE_SHEAR_OVER_TIME = []
+    BOUNDARY_ATTACHMENT_COUNTS_OVER_TIME = []
     FOCAD_METRICS_OVER_TIME = []
     FOCAD_POLARITY_METRICS_OVER_TIME = []
     FNODE_METRICS_OVER_TIME = []
@@ -2485,20 +2500,29 @@ def manageLogs(steps, is_ensemble, idx):
                 f_bz_pos_y = fnode_agents.getSumFloat("f_bz_pos_y")
                 f_bz_neg_x = fnode_agents.getSumFloat("f_bz_neg_x")
                 f_bz_neg_y = fnode_agents.getSumFloat("f_bz_neg_y")
+                n_bx_pos = fnode_agents.getSumUInt8("clamped_bx_pos")
+                n_bx_neg = fnode_agents.getSumUInt8("clamped_bx_neg")
+                n_by_pos = fnode_agents.getSumUInt8("clamped_by_pos")
+                n_by_neg = fnode_agents.getSumUInt8("clamped_by_neg")
+                n_bz_pos = fnode_agents.getSumUInt8("clamped_bz_pos")
+                n_bz_neg = fnode_agents.getSumUInt8("clamped_bz_neg")
 
                 step_bforce = pd.DataFrame([BFORCE(f_bx_pos, f_bx_neg, f_by_pos, f_by_neg, f_bz_pos, f_bz_neg)])
                 step_bforce_shear = pd.DataFrame([BFORCE_SHEAR(f_bx_pos_y, f_bx_pos_z, f_bx_neg_y, f_bx_neg_z,
                                                             f_by_pos_x, f_by_pos_z, f_by_neg_x, f_by_neg_z,
                                                             f_bz_pos_x, f_bz_pos_y, f_bz_neg_x, f_bz_neg_y)])
+                step_battach = pd.DataFrame([BATTACH(n_bx_pos, n_bx_neg, n_by_pos, n_by_neg, n_bz_pos, n_bz_neg)])
                 if counter == 0:
                     BFORCE_OVER_TIME = pd.DataFrame([BFORCE(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)])
                     BFORCE_SHEAR_OVER_TIME = pd.DataFrame(
                         [BFORCE_SHEAR(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)])
+                    BOUNDARY_ATTACHMENT_COUNTS_OVER_TIME = step_battach
                 else:
                     # BFORCE_OVER_TIME = BFORCE_OVER_TIME.append(step_bforce, ignore_index=True) # deprecated
                     BFORCE_OVER_TIME = pd.concat([BFORCE_OVER_TIME, step_bforce], ignore_index=True)
                     # BFORCE_SHEAR_OVER_TIME = BFORCE_SHEAR_OVER_TIME.append(step_bforce_shear, ignore_index=True) # deprecated
                     BFORCE_SHEAR_OVER_TIME = pd.concat([BFORCE_SHEAR_OVER_TIME, step_bforce_shear], ignore_index=True)
+                    BOUNDARY_ATTACHMENT_COUNTS_OVER_TIME = pd.concat([BOUNDARY_ATTACHMENT_COUNTS_OVER_TIME, step_battach], ignore_index=True)
 
                 # Accumulate FNODE matrix remodeling metrics
                 n_fnodes = fnode_agents.getCount()
@@ -2640,6 +2664,10 @@ def manageLogs(steps, is_ensemble, idx):
         print(BFORCE_SHEAR_OVER_TIME)
         print()
         print("============================")
+        print("BOUNDARY ATTACHMENT COUNTS OVER TIME")
+        print(BOUNDARY_ATTACHMENT_COUNTS_OVER_TIME)
+        print()
+        print("============================")
         print("POISSON RATIO OVER TIME")
         print(POISSON_RATIO_OVER_TIME)
         print()
@@ -2677,6 +2705,8 @@ def manageLogs(steps, is_ensemble, idx):
             pickle.dump({'BPOS_OVER_TIME': BPOS_OVER_TIME,
                          'BFORCE_OVER_TIME': BFORCE_OVER_TIME,
                          'BFORCE_SHEAR_OVER_TIME': BFORCE_SHEAR_OVER_TIME,
+                         'BOUNDARY_ATTACHMENT_COUNTS_OVER_TIME': BOUNDARY_ATTACHMENT_COUNTS_OVER_TIME,
+                         'FIBRE_SECTION_AREA_UM2': FIBRE_SECTION_AREA_UM2,
                          'FOCAD_METRICS_OVER_TIME': FOCAD_METRICS_OVER_TIME,
                          'FOCAD_POLARITY_METRICS_OVER_TIME': FOCAD_POLARITY_METRICS_OVER_TIME,
                          'FNODE_METRICS_OVER_TIME': FNODE_METRICS_OVER_TIME,
