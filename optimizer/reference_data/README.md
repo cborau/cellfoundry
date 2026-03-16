@@ -15,8 +15,16 @@
 #   target_cell_population_timeseries.csv — alive-cell population over time
 #                                           Used by: cell_population_error
 #
-#   target_stress_strain.csv              — engineering stress-strain curve
-#                                           Used by: stress_strain_curve_error
+#   target_stress_strain.csv              — stress-strain curve
+#                                           Columns: strain [-], stress [kPa]
+#                                           Used by: stress_strain_curve_error,
+#                                                    shear_stress_strain_curve_error
+#                                           Stress = force[nN] / face area[µm²] = kPa
+#
+#   target_differential_modulus.csv       — differential modulus K(ε) = dσ/dε vs strain
+#                                           Columns: strain [-], differential_modulus [kPa]
+#                                           Used by: differential_modulus_error,
+#                                                    shear_differential_modulus_error
 #
 #   target_focad_attached_ratio.csv       — FOCAD attached ratio over time
 #                                           Used by: focad_attached_ratio_error

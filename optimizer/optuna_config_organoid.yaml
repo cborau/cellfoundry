@@ -26,13 +26,14 @@ study:
 # --- Multiple objectives (Pareto multi-objective) -------------------------
 objectives:
   - function: organoid_size_error
+    reference: "optimizer/reference_data/target_organoid_size.csv"
     kwargs:
-      target_size: 50.0        # target radius of gyration [µm]
       metric: radius_of_gyration   # or: max_span, equivalent_sphere_radius
 
   - function: final_cell_count_error
+    reference: "optimizer/reference_data/target_cell_count.csv"
     kwargs:
-      target_cell_count: 15    # target number of alive cells at end
+      normalize: true              # average error across target rows
 
 # --- Parameters to tune ----------------------------------------------------
 parameters:

@@ -1,0 +1,120 @@
+# ============================================================================
+# CellFoundry — Differential Modulus Optimization (non-linear fibre mechanics)
+# ============================================================================
+#
+# Fits the differential modulus K(ε) = dσ/dε vs strain curve, which is the
+# representation used by many experimental works (e.g. Steinwachs et al.,
+# Nat. Methods 2016).
+#
+# Units
+# -----
+#   strain              [dimensionless]
+#   differential_modulus [kPa]  — dσ[kPa] / dε[-]
+#
+# The reference CSV must have columns: strain, differential_modulus
+# (in the units above).
+#
+# Two example objective blocks are provided below — uncomment the one that
+# matches your test:
+#   A) Normal differential modulus  (uniaxial tension / compression)
+#   B) Shear differential modulus   (oscillatory or monotonic shear)
+#
+# Usage:
+#    python -m optimizer.optimize --config optimizer/optuna_config_diff_modulus.yaml
+# ============================================================================
+
+# --- Optuna study settings ------------------------------------------------
+study:
+  name: "cellfoundry_diff_modulus"
+  n_trials: 40
+  sampler: TPE
+  seed: 42
+  direction: minimize
+  storage: "sqlite:///cellfoundry_diff_modulus.db"
+
+# --- Objective function ---------------------------------------------------
+# Option A: Normal (uniaxial) differential modulus
+objective:
+  function: differential_modulus_error
+  reference: "optimizer/reference_data/target_differential_modulus.csv"
+  kwargs:
+    force_type: "normal"        # "normal" | "shear"
+    strain_axis: 0              # 0=x, 1=y, 2=z  (axis of applied displacement)
+    strain_weight: 0.1          # weight of strain MSE relative to K(ε) MSE
+    smooth_window: 5            # Savitzky-Golay window (odd int; 0/1 = no smoothing)
+    smooth_polyorder: 2         # polynomial order for Savitzky-Golay filter
+
+# Option B: Shear differential modulus (uncomment and replace Option A above)
+# objective:
+#   function: shear_differential_modulus_error
+#   reference: "optimizer/reference_data/target_shear_differential_modulus.csv"
+#   kwargs:
+#     strain_axis: 1            # face-normal axis
+#     shear_component: 0        # tangential direction on that face (0 or 1)
+#     strain_weight: 0.1
+#     smooth_window: 7
+#     smooth_polyorder: 2
+
+# --- Parameters to optimize -----------------------------------------------
+parameters:
+  # Core elastic stiffness of each fibre segment
+  FIBRE_SEGMENT_K_ELAST:
+    type: float
+    low: 1.0
+    high: 500.0
+    log: true
+
+  # Buckling coefficient d0 — controls the exponential softening rate
+  # for compressive strains (strain < 0).  Smaller → faster softening.
+  BUCKLING_COEFF_D0:
+    type: float
+    low: 0.01
+    high: 1.0
+    log: true
+
+  # Strain-stiffening coefficient ds — controls the exponential hardening
+  # rate beyond the critical strain.  Smaller → stronger stiffening.
+  STRAIN_STIFFENING_COEFF_DS:
+    type: float
+    low: 0.01
+    high: 1.0
+    log: true
+
+  # Critical strain threshold above which stiffening kicks in
+  CRITICAL_STRAIN:
+    type: float
+    low: 0.01
+    high: 0.5
+    log: false
+
+  # Fibre-node damping (viscous contribution to force)
+  # FNODE_DUMPING:
+  #   type: float
+  #   low: 0.001
+  #   high: 1.0
+  #   log: true
+
+  # Uncomment to also explore repulsion / Poisson-ratio related parameters
+  # FIBRE_NODE_REPULSION_K:
+  #   type: float
+  #   low: 0.1
+  #   high: 100.0
+  #   log: true
+
+# --- Model execution settings ---------------------------------------------
+model:
+  result_dir: "optuna_diff_modulus_results"
+  timeout: 0
+  cleanup_trials: false
+
+  extra_overrides:
+    STEPS: 500
+    SAVE_EVERY_N_STEPS: 5
+    INCLUDE_FIBRE_NETWORK: true
+    INCLUDE_CELLS: false
+    INCLUDE_CELL_CYCLE: false
+    INCLUDE_FOCAL_ADHESIONS: false
+    VISUALISATION: false
+    SHOW_PLOTS: false
+    SAVE_DATA_TO_FILE: false
+    SAVE_PICKLE: true

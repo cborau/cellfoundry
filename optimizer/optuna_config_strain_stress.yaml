@@ -1,0 +1,116 @@
+# ============================================================================
+# CellFoundry — Strain-Stress Curve Optimization (non-linear fibre mechanics)
+# ============================================================================
+#
+# Tunes the fibre-network mechanical parameters that govern the non-linear
+# stress-strain response (Steinwachs et al., Nat. Methods 2016), including
+# the buckling / strain-stiffening coefficients and the base segment stiffness.
+#
+# Units
+# -----
+#   strain  [dimensionless]  — engineering strain (normal) or shear strain
+#   stress  [kPa]            — boundary force [nN] / face area [µm²]
+#                               (1 nN/µm² = 1 kPa)
+#
+# The reference CSV must have columns: strain, stress  (in the units above).
+#
+# Two example objective blocks are provided below — uncomment the one that
+# matches your test:
+#   A) Normal stress-strain (uniaxial tension / compression)
+#   B) Shear stress-strain (oscillatory or monotonic shear)
+#
+# Usage:
+#    python -m optimizer.optimize --config optimizer/optuna_config_strain_stress.yaml
+# ============================================================================
+
+# --- Optuna study settings ------------------------------------------------
+study:
+  name: "cellfoundry_strain_stress"
+  n_trials: 40
+  sampler: TPE
+  seed: 42
+  direction: minimize
+  storage: "sqlite:///cellfoundry_strain_stress.db"
+
+# --- Objective function ---------------------------------------------------
+# Option A: Normal (uniaxial) stress-strain curve
+objective:
+  function: stress_strain_curve_error
+  reference: "optimizer/reference_data/target_stress_strain.csv"
+  kwargs:
+    force_type: "normal"        # "normal" | "shear"
+    strain_axis: 0              # 0=x, 1=y, 2=z  (axis of applied displacement)
+    strain_weight: 0.1          # weight of strain MSE relative to stress MSE
+
+# Option B: Shear stress-strain curve (uncomment and replace Option A above)
+# objective:
+#   function: shear_stress_strain_curve_error
+#   reference: "optimizer/reference_data/target_shear_stress_strain.csv"
+#   kwargs:
+#     strain_axis: 1            # face-normal axis (e.g. 1=y-faces for shear)
+#     shear_component: 0        # which tangential direction on that face (0 or 1)
+#     strain_weight: 0.1
+
+# --- Parameters to optimize -----------------------------------------------
+parameters:
+  # Core elastic stiffness of each fibre segment
+  FIBRE_SEGMENT_K_ELAST:
+    type: float
+    low: 1.0
+    high: 500.0
+    log: true
+
+  # Buckling coefficient d0 — controls the exponential softening rate
+  # for compressive strains (strain < 0).  Smaller → faster softening.
+  BUCKLING_COEFF_D0:
+    type: float
+    low: 0.01
+    high: 1.0
+    log: true
+
+  # Strain-stiffening coefficient ds — controls the exponential hardening
+  # rate beyond the critical strain.  Smaller → stronger stiffening.
+  STRAIN_STIFFENING_COEFF_DS:
+    type: float
+    low: 0.01
+    high: 1.0
+    log: true
+
+  # Critical strain threshold above which stiffening kicks in
+  CRITICAL_STRAIN:
+    type: float
+    low: 0.01
+    high: 0.5
+    log: false
+
+  # Fibre-node damping (viscous contribution to force)
+  # FNODE_DUMPING:
+  #   type: float
+  #   low: 0.001
+  #   high: 1.0
+  #   log: true
+
+  # Uncomment to also explore Poisson-ratio related parameters
+  # FIBRE_NODE_REPULSION_K:
+  #   type: float
+  #   low: 0.1
+  #   high: 100.0
+  #   log: true
+
+# --- Model execution settings ---------------------------------------------
+model:
+  result_dir: "optuna_strain_stress_results"
+  timeout: 0
+  cleanup_trials: false
+
+  extra_overrides:
+    STEPS: 500
+    SAVE_EVERY_N_STEPS: 5
+    INCLUDE_FIBRE_NETWORK: true
+    INCLUDE_CELLS: false
+    INCLUDE_CELL_CYCLE: false
+    INCLUDE_FOCAL_ADHESIONS: false
+    VISUALISATION: false
+    SHOW_PLOTS: false
+    SAVE_DATA_TO_FILE: false
+    SAVE_PICKLE: true

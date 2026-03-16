@@ -51,6 +51,21 @@ FLAMEGPU_DEVICE_FUNCTION void getMaxForceDir(float &dx, float &dy, float &dz,flo
     dz = 1.0;
   }
 }
+FLAMEGPU_DEVICE_FUNCTION float getStrainKfactor(const float strain, const float strain_s, const float d_0, const float d_s) {
+  // refer for equations: https://bio.physik.fau.de/publications/Steinwachs%20Nat%20Meth%202016.pdf
+  // returns the factor multiplying the elastic constant depending on fiber strain
+  float factor = 1.0;
+  if (strain < 0.0) {
+    factor = expf(strain / d_0);
+  } 
+  else if(strain <= strain_s) {
+    factor = 1.0;
+  } 
+  else {
+    factor = expf((strain - strain_s) / d_s);
+  }
+  return factor;
+}
 /**
  * fnode_fnode_bucket_interaction
  *
@@ -175,6 +190,14 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket,
       } else {
         k_elast = 0.0f;
       }
+
+      // Non-linear strain-dependent stiffness (Steinwachs et al., Nat. Methods 2016)
+      const float CRITICAL_STRAIN = FLAMEGPU->environment.getProperty<float>("CRITICAL_STRAIN");
+      const float BUCKLING_COEFF_D0 = FLAMEGPU->environment.getProperty<float>("BUCKLING_COEFF_D0");
+      const float STRAIN_STIFFENING_COEFF_DS = FLAMEGPU->environment.getProperty<float>("STRAIN_STIFFENING_COEFF_DS");
+      float strain = (distance - equilibrium_distance[i]) / equilibrium_distance[i];
+      k_elast *= getStrainKfactor(strain, CRITICAL_STRAIN, BUCKLING_COEFF_D0, STRAIN_STIFFENING_COEFF_DS);
+
       
       cos_x = (1.0 * dir_x + 0.0 * dir_y + 0.0 * dir_z) / distance;
       cos_y = (0.0 * dir_x + 1.0 * dir_y + 0.0 * dir_z) / distance;

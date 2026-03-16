@@ -72,34 +72,145 @@ def _format_percent_detail(label: str, error: float, target: float) -> str:
 # Built-in objectives
 # ---------------------------------------------------------------------------
 
+def _extract_sim_strain_stress(
+    results: dict, force_type: str = "normal", strain_axis: int = 0,
+    shear_component: int = 0,
+) -> tuple[pd.Series, pd.Series]:
+    """Extract simulated strain [dimensionless] and stress [kPa] from results.
+
+    Stress is computed by dividing the boundary reaction force [nN] by the
+    cross-sectional area of the loaded face [µm²].  Since 1 nN/µm² = 1 kPa,
+    the returned stress is directly in **kPa**.
+
+    The cross-sectional area is derived from the *initial* boundary positions
+    stored in ``BPOS_OVER_TIME`` (row 0).  For a face whose normal is the
+    *strain_axis*, the area is the product of the initial lengths along the
+    two orthogonal axes.
+
+    Parameters
+    ----------
+    results : dict
+        Simulation output (from pickle).  Must contain ``BPOS_OVER_TIME``
+        and, depending on *force_type*, ``BFORCE_OVER_TIME`` or
+        ``BFORCE_SHEAR_OVER_TIME``.
+    force_type : {"normal", "shear"}
+    strain_axis : int
+        0 = x, 1 = y, 2 = z.
+    shear_component : int
+        For shear only — selects which of the two tangential force
+        directions on the chosen face (0 or 1).
+
+    Returns
+    -------
+    sim_strain : pd.Series   [dimensionless]
+    sim_stress : pd.Series   [kPa]
+    """
+    bpos = results.get("BPOS_OVER_TIME")
+    if bpos is None:
+        raise ValueError("Results must contain BPOS_OVER_TIME")
+
+    axis = strain_axis
+
+    # ------------------------------------------------------------------
+    # Compute the initial cross-sectional area of the loaded face [µm²]
+    # BPOS columns are ordered: xpos, xneg, ypos, yneg, zpos, zneg
+    # For a face with normal along axis *a*, the area is L_b0 * L_c0
+    # where b and c are the two orthogonal axes.
+    # ------------------------------------------------------------------
+    ortho_axes = [i for i in range(3) if i != axis]
+    L_ortho = []
+    for oa in ortho_axes:
+        pos0 = float(bpos.iloc[0, oa * 2])
+        neg0 = float(bpos.iloc[0, oa * 2 + 1])
+        L_ortho.append(abs(pos0 - neg0))
+    cross_section_area = L_ortho[0] * L_ortho[1]  # [µm²]
+    if cross_section_area < 1e-12:
+        raise ValueError(
+            f"Cross-sectional area is ~0 (ortho lengths: {L_ortho}). "
+            "Check BPOS_OVER_TIME initial boundary positions."
+        )
+
+    if force_type == "shear":
+        bforce_shear = results.get("BFORCE_SHEAR_OVER_TIME")
+        if bforce_shear is None or len(bforce_shear) == 0:
+            raise ValueError(
+                "Results must contain non-empty BFORCE_SHEAR_OVER_TIME for force_type='shear'"
+            )
+
+        axis_label = ["x", "y", "z"][axis]
+        tangent_dirs = [d for d in ["x", "y", "z"] if d != axis_label]
+        comp = shear_component
+        force_col = f"f{axis_label}pos_{tangent_dirs[comp]}"
+        if force_col not in bforce_shear.columns:
+            raise ValueError(f"Shear force column '{force_col}' not found in BFORCE_SHEAR_OVER_TIME")
+        sim_stress = bforce_shear[force_col] / cross_section_area  # [nN] / [µm²] = [kPa]
+
+        tang_axis_idx = ["x", "y", "z"].index(tangent_dirs[comp])
+        pos_col_tang = bpos.columns[tang_axis_idx * 2]
+        neg_col_tang = bpos.columns[tang_axis_idx * 2 + 1]
+        pos_col_norm = bpos.columns[axis * 2]
+        neg_col_norm = bpos.columns[axis * 2 + 1]
+        L0_normal = bpos.iloc[0][pos_col_norm] - bpos.iloc[0][neg_col_norm]
+        tang_disp = (bpos[pos_col_tang] - bpos[neg_col_tang]) - (
+            bpos.iloc[0][pos_col_tang] - bpos.iloc[0][neg_col_tang]
+        )
+        sim_strain = tang_disp / L0_normal if abs(L0_normal) > 1e-12 else tang_disp * 0.0
+    else:
+        bforce = results.get("BFORCE_OVER_TIME")
+        if bforce is None:
+            raise ValueError("Results must contain BFORCE_OVER_TIME")
+        pos_col = bpos.columns[axis * 2]
+        neg_col = bpos.columns[axis * 2 + 1]
+        force_col = bforce.columns[axis * 2]
+        L0 = bpos.iloc[0][pos_col] - bpos.iloc[0][neg_col]
+        sim_strain = ((bpos[pos_col] - bpos[neg_col]) - L0) / L0
+        sim_stress = bforce[force_col] / cross_section_area  # [nN] / [µm²] = [kPa]
+
+    return sim_strain, sim_stress
+
+
 def stress_strain_curve_error(results: dict, reference_path: str, **kwargs) -> float:
     """Compare the simulated stress-strain curve with a reference CSV.
 
-    The reference CSV must have columns ``strain`` and ``stress``.
-    The simulated curve is built from ``BPOS_OVER_TIME`` (strain) and
-    ``BFORCE_OVER_TIME`` (stress proxy = boundary normal force).
+    Units
+    -----
+    - **strain** [dimensionless]: engineering strain (normal) or shear strain.
+    - **stress** [kPa]: boundary reaction force [nN] / face area [µm²].
+      (1 nN/µm² = 1 kPa.)
 
-    Strain direction defaults to the first POISSON_DIRS axis; override with
+    The reference CSV must have columns ``strain`` (dimensionless) and
+    ``stress`` (kPa).
+
+    **Force type** — controlled by ``kwargs["force_type"]``:
+        - ``"normal"`` (default): uses ``BFORCE_OVER_TIME`` (boundary normal
+          force) and computes engineering strain from boundary positions.
+        - ``"shear"``: uses ``BFORCE_SHEAR_OVER_TIME`` (boundary shear force)
+          and computes shear strain from boundary positions.  For shear, the
+          *strain axis* selects the face pair whose tangential force is read,
+          and *shear_component* (0 or 1) picks which tangential direction.
+
+    **Strain direction** defaults to axis 0 (x); override with
     ``kwargs["strain_axis"]`` (0=x, 1=y, 2=z).
+
+    **Shear component** (only for ``force_type="shear"``):
+        ``kwargs["shear_component"]`` — 0 or 1, selects which of the two
+        tangential directions on the chosen face.  Default 0.
+
+    **Error weighting**: ``kwargs["strain_weight"]`` (default 0.1) controls
+    the relative weight of the strain term vs the stress term.
     """
     ref = _load_reference_csv(reference_path)
     if "strain" not in ref.columns or "stress" not in ref.columns:
         raise ValueError("Reference CSV must contain 'strain' and 'stress' columns")
 
-    bpos = results.get("BPOS_OVER_TIME")
-    bforce = results.get("BFORCE_OVER_TIME")
-    if bpos is None or bforce is None:
-        raise ValueError("Results must contain BPOS_OVER_TIME and BFORCE_OVER_TIME")
-
+    force_type = kwargs.get("force_type", "normal")
     axis = kwargs.get("strain_axis", 0)
-    pos_col = bpos.columns[axis * 2]
-    neg_col = bpos.columns[axis * 2 + 1]
-    force_col = bforce.columns[axis * 2]
+    strain_weight = float(kwargs.get("strain_weight", 0.1))
 
-    # Engineering strain
-    L0 = bpos.iloc[0][pos_col] - bpos.iloc[0][neg_col]
-    sim_strain = ((bpos[pos_col] - bpos[neg_col]) - L0) / L0
-    sim_stress = bforce[force_col]
+    sim_strain, sim_stress = _extract_sim_strain_stress(
+        results, force_type=force_type, strain_axis=axis,
+        shear_component=kwargs.get("shear_component", 0),
+    )
 
     # Interpolate simulation to match reference length
     sim_strain_interp = _interpolate_to_match(sim_strain, len(ref))
@@ -109,7 +220,98 @@ def stress_strain_curve_error(results: dict, reference_path: str, **kwargs) -> f
     stress_err = _mse(sim_stress_interp, ref["stress"].values)
 
     # Combined error (stress dominates since that's what we're fitting)
-    return float(stress_err + 0.1 * strain_err), None
+    return float(stress_err + strain_weight * strain_err), None
+
+
+def shear_stress_strain_curve_error(results: dict, reference_path: str, **kwargs) -> float:
+    """Convenience wrapper: calls ``stress_strain_curve_error`` with
+    ``force_type='shear'``.  All other kwargs are forwarded."""
+    kwargs.setdefault("force_type", "shear")
+    return stress_strain_curve_error(results, reference_path, **kwargs)
+
+
+def differential_modulus_error(results: dict, reference_path: str, **kwargs) -> float:
+    """Compare the simulated differential modulus vs strain with a reference CSV.
+
+    The *differential modulus* K(ε) = dσ/dε is the local slope of the
+    stress-strain curve.  Many experimental papers report K vs ε instead of
+    the raw σ–ε curve (e.g. Steinwachs et al., Nat. Methods 2016).
+
+    Units
+    -----
+    - **strain** [dimensionless]
+    - **differential_modulus** [kPa]:  dσ[kPa] / dε[-] = [kPa].
+
+    The reference CSV must have columns ``strain`` (dimensionless) and
+    ``differential_modulus`` (kPa).
+
+    **Force type** — same as ``stress_strain_curve_error``:
+        ``kwargs["force_type"]``: ``"normal"`` (default) or ``"shear"``.
+
+    **Strain direction**: ``kwargs["strain_axis"]`` (0=x, 1=y, 2=z).
+
+    **Shear component** (shear only): ``kwargs["shear_component"]`` (0 or 1).
+
+    **Smoothing**: ``kwargs["smooth_window"]`` (int, default 5) — Savitzky-Golay
+    window length for smoothing the numerical derivative.  Set to 0 or 1 to
+    disable smoothing.  ``kwargs["smooth_polyorder"]`` (int, default 2) sets
+    the polynomial order.
+
+    **Error weighting**: ``kwargs["strain_weight"]`` (default 0.1) — relative
+    weight of the strain-alignment MSE term.
+    """
+    ref = _load_reference_csv(reference_path)
+    if "strain" not in ref.columns or "differential_modulus" not in ref.columns:
+        raise ValueError(
+            "Reference CSV must contain 'strain' and 'differential_modulus' columns"
+        )
+
+    force_type = kwargs.get("force_type", "normal")
+    axis = kwargs.get("strain_axis", 0)
+    strain_weight = float(kwargs.get("strain_weight", 0.1))
+
+    sim_strain, sim_stress = _extract_sim_strain_stress(
+        results, force_type=force_type, strain_axis=axis,
+        shear_component=kwargs.get("shear_component", 0),
+    )
+
+    # Convert to numpy
+    strain_arr = sim_strain.values.astype(float)
+    stress_arr = sim_stress.values.astype(float)
+
+    # Numerical derivative  dσ/dε  (central differences where possible)
+    d_stress = np.gradient(stress_arr)
+    d_strain = np.gradient(strain_arr)
+    # Avoid division by zero
+    safe_mask = np.abs(d_strain) > 1e-15
+    sim_K = np.zeros_like(stress_arr)
+    sim_K[safe_mask] = d_stress[safe_mask] / d_strain[safe_mask]
+
+    # Optional Savitzky-Golay smoothing
+    smooth_window = int(kwargs.get("smooth_window", 5))
+    smooth_polyorder = int(kwargs.get("smooth_polyorder", 2))
+    if smooth_window > 2 and len(sim_K) >= smooth_window:
+        from scipy.signal import savgol_filter
+        # Window must be odd
+        if smooth_window % 2 == 0:
+            smooth_window += 1
+        sim_K = savgol_filter(sim_K, smooth_window, min(smooth_polyorder, smooth_window - 1))
+
+    # Interpolate to match reference length
+    sim_strain_interp = _interpolate_to_match(pd.Series(strain_arr), len(ref))
+    sim_K_interp = _interpolate_to_match(pd.Series(sim_K), len(ref))
+
+    strain_err = _mse(sim_strain_interp, ref["strain"].values)
+    K_err = _mse(sim_K_interp, ref["differential_modulus"].values)
+
+    return float(K_err + strain_weight * strain_err), None
+
+
+def shear_differential_modulus_error(results: dict, reference_path: str, **kwargs) -> float:
+    """Convenience wrapper: calls ``differential_modulus_error`` with
+    ``force_type='shear'``.  All other kwargs are forwarded."""
+    kwargs.setdefault("force_type", "shear")
+    return differential_modulus_error(results, reference_path, **kwargs)
 
 
 def boundary_force_curve_error(results: dict, reference_path: str, **kwargs) -> float:
@@ -550,6 +752,9 @@ def organoid_size_error(results: dict, reference_path: str = None, **kwargs) -> 
 
 OBJECTIVE_REGISTRY = {
     "stress_strain_curve_error": stress_strain_curve_error,
+    "shear_stress_strain_curve_error": shear_stress_strain_curve_error,
+    "differential_modulus_error": differential_modulus_error,
+    "shear_differential_modulus_error": shear_differential_modulus_error,
     "boundary_force_curve_error": boundary_force_curve_error,
     "cell_population_error": cell_population_error,
     "focad_attached_ratio_error": focad_attached_ratio_error,
