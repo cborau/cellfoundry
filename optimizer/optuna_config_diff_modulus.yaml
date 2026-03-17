@@ -38,7 +38,7 @@ objective:
   reference: "optimizer/reference_data/target_differential_modulus.csv"
   kwargs:
     force_type: "normal"        # "normal" | "shear"
-    strain_axis: 0              # 0=x, 1=y, 2=z  (axis of applied displacement)
+    strain_axis: 1              # 0=x, 1=y, 2=z  (axis of applied displacement)
     strain_weight: 0.0          # weight of strain MSE relative to K(ε) MSE
     smooth_window: 5            # Savitzky-Golay window (odd int; 0/1 = no smoothing)
     smooth_polyorder: 2         # polynomial order for Savitzky-Golay filter
@@ -108,8 +108,8 @@ model:
   cleanup_trials: false
 
   extra_overrides:
-    STEPS: 100000
-    SAVE_EVERY_N_STEPS: 2000
+    STEPS: 50000
+    SAVE_EVERY_N_STEPS: 1000
     INCLUDE_FIBRE_NETWORK: true
     INCLUDE_CELLS: false
     INCLUDE_CELL_CYCLE: false

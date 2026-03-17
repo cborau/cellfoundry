@@ -1917,6 +1917,7 @@ class ModelParameterConfig:
         buckling_coeff_d0: float = None,
         strain_stiffening_coeff_ds: float = None,
         critical_strain: float = None,
+        max_strain_k_factor: float = None,
         # Fibre network
         include_fibre_network: bool = None,
         max_connectivity: int = None,
@@ -2126,6 +2127,7 @@ class ModelParameterConfig:
         self.BUCKLING_COEFF_D0 = buckling_coeff_d0
         self.STRAIN_STIFFENING_COEFF_DS = strain_stiffening_coeff_ds
         self.CRITICAL_STRAIN = critical_strain
+        self.MAX_STRAIN_K_FACTOR = max_strain_k_factor
         self.INCLUDE_FIBRE_NETWORK = include_fibre_network
         self.MAX_CONNECTIVITY = max_connectivity
         self.FIBRE_SEGMENT_K_ELAST = fibre_segment_k_elast
@@ -2675,6 +2677,7 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         buckling_coeff_d0=ns.get("BUCKLING_COEFF_D0"),
         strain_stiffening_coeff_ds=ns.get("STRAIN_STIFFENING_COEFF_DS"),
         critical_strain=ns.get("CRITICAL_STRAIN"),
+        max_strain_k_factor=ns.get("MAX_STRAIN_K_FACTOR"),
         include_fibre_network=ns.get("INCLUDE_FIBRE_NETWORK"),
         max_connectivity=ns.get("MAX_CONNECTIVITY"),
         fibre_segment_k_elast=ns.get("FIBRE_SEGMENT_K_ELAST"),

@@ -482,7 +482,7 @@ if __name__ == "__main__":
         help="Relative weight of strain MSE term (default: 0.0).",
     )
     parser.add_argument(
-        "--stress-area-mode", type=str, default="per_fibre_area",
+        "--stress-area-mode", type=str, default="boundary_surface",
         choices=["boundary_surface", "per_fibre_area"],
         help="Normalize force by the whole boundary surface or by engaged-fibre area.",
     )

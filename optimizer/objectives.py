@@ -111,6 +111,44 @@ def _get_fibre_section_area(results: dict, fibre_section_area_um2: float | None 
     return area
 
 
+def _raise_if_axis_selection_has_no_signal(
+    sim_strain: pd.Series,
+    sim_stress: pd.Series,
+    ref: pd.DataFrame,
+    force_type: str,
+    strain_axis: int,
+) -> None:
+    """Fail fast when the chosen force/axis pair yields a flat zero signal.
+
+    This usually indicates a misconfigured objective, e.g. reading the x-axis
+    while the assay is actually loading the y-axis.
+    """
+    sim_strain_arr = np.asarray(sim_strain, dtype=float)
+    sim_stress_arr = np.asarray(sim_stress, dtype=float)
+
+    max_abs_sim_strain = float(np.max(np.abs(sim_strain_arr))) if sim_strain_arr.size else 0.0
+    max_abs_sim_stress = float(np.max(np.abs(sim_stress_arr))) if sim_stress_arr.size else 0.0
+    max_abs_ref_strain = float(np.max(np.abs(ref["strain"].to_numpy(dtype=float)))) if "strain" in ref.columns and len(ref) else 0.0
+
+    ref_cols = [col for col in ("stress", "differential_modulus") if col in ref.columns]
+    max_abs_ref_response = 0.0
+    if ref_cols and len(ref):
+        ref_response = ref[ref_cols[0]].to_numpy(dtype=float)
+        max_abs_ref_response = float(np.max(np.abs(ref_response)))
+
+    if (
+        max_abs_sim_strain <= 1e-12
+        and max_abs_sim_stress <= 1e-12
+        and (max_abs_ref_strain > 1e-12 or max_abs_ref_response > 1e-12)
+    ):
+        raise ValueError(
+            "Selected objective signal is identically zero. "
+            f"force_type='{force_type}', strain_axis={strain_axis}. "
+            "This usually means the objective is reading the wrong loaded axis "
+            "or force type for this assay."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Built-in objectives
 # ---------------------------------------------------------------------------
@@ -320,6 +358,7 @@ def stress_strain_curve_error(results: dict, reference_path: str, **kwargs) -> f
         stress_area_mode=kwargs.get("stress_area_mode", "boundary_surface"),
         fibre_section_area_um2=kwargs.get("fibre_section_area_um2"),
     )
+    _raise_if_axis_selection_has_no_signal(sim_strain, sim_stress, ref, force_type, axis)
 
     # Interpolate simulation to match reference length
     sim_strain_interp = _interpolate_to_match(sim_strain, len(ref))
@@ -385,6 +424,7 @@ def differential_modulus_error(results: dict, reference_path: str, **kwargs) -> 
         stress_area_mode=kwargs.get("stress_area_mode", "boundary_surface"),
         fibre_section_area_um2=kwargs.get("fibre_section_area_um2"),
     )
+    _raise_if_axis_selection_has_no_signal(sim_strain, sim_stress, ref, force_type, axis)
 
     # Convert to numpy
     strain_arr = sim_strain.values.astype(float)
