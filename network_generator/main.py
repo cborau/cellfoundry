@@ -180,7 +180,7 @@ if __name__ == "__main__":
     # EDGE_LENGTH controls the target segment length when splitting long fibers.
     # Units must match l_fiber and lx/ly/lz.
     EDGE_LENGTH = 45.0
-    file_name = 'network_low_density'
+    file_name = 'network_high_density'
     file_path = os.path.abspath(file_name + '.pkl')
 
     # ENFORCE_BOUNDS keeps optimization moves inside the initial box.
@@ -214,15 +214,24 @@ if __name__ == "__main__":
     N_OPTIMIZE = 50
     N_BRANCHING_OPTIMIZE = 20
 
-    if os.path.exists(file_name):
+    if os.path.exists(file_name + '.pkl'):
         print(f'Loading network from {file_path}')
         # Load from the pickle file
-        with open(file_name, 'rb') as f:
+        with open(file_name + '.pkl', 'rb') as f:
             data = pickle.load(f)
             # nodes: (N, 3) float array, connectivity: {node_index: [neighbors...]}
             nodes = data['node_coords']
             connectivity = data['connectivity']
             nodes, connectivity = merge_duplicate_nodes(nodes, connectivity)
+
+        results = get_valency_and_pore_size(
+            nodes,
+            connectivity,
+            fiber_radius=0.12,          # adjust to your fibre thickness
+            num_random_points=20000,    # better statistics
+            k_candidates=32,            # as discussed
+            random_seed=42,             # reproducibility
+        )
     else: 
         # nodes: (N, 3) float array, fibers: (M, 2) int array, bounds: [(xmin,xmax), ...]
         nodes, fibers, bounds = generate_network(

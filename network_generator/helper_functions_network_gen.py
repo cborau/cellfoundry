@@ -1,6 +1,264 @@
+from __future__ import annotations
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial import distance
+from scipy.spatial import cKDTree
+
+
+def build_unique_segments(nodes, connectivity):
+    """
+    Build unique fibre segments from node connectivity.
+
+    Parameters
+    ----------
+    nodes : (N, 3) ndarray
+        Node coordinates.
+    connectivity : dict[int, list[int]]
+        Connectivity dictionary with neighbor indices and -1 for empty slots.
+
+    Returns
+    -------
+    seg_start : (M, 3) ndarray
+        Start coordinates of unique segments.
+    seg_end : (M, 3) ndarray
+        End coordinates of unique segments.
+    seg_pairs : list[tuple[int, int]]
+        Node-index pairs defining each unique segment.
+    """
+    seg_pairs = []
+
+    for i, neighs in connectivity.items():
+        for j in neighs:
+            if j == -1:
+                continue
+            if j > i:
+                seg_pairs.append((i, j))
+
+    if not seg_pairs:
+        return (
+            np.empty((0, 3), dtype=float),
+            np.empty((0, 3), dtype=float),
+            [],
+        )
+
+    seg_start = np.array([nodes[i] for i, j in seg_pairs], dtype=float)
+    seg_end = np.array([nodes[j] for i, j in seg_pairs], dtype=float)
+
+    return seg_start, seg_end, seg_pairs
+
+
+def point_to_segments_distance(point, seg_start, seg_end):
+    """
+    Exact distance from one point to many 3D line segments.
+
+    Parameters
+    ----------
+    point : (3,) ndarray
+        Query point.
+    seg_start : (M, 3) ndarray
+        Segment start coordinates.
+    seg_end : (M, 3) ndarray
+        Segment end coordinates.
+
+    Returns
+    -------
+    distances : (M,) ndarray
+        Exact Euclidean distance from point to each segment.
+    """
+    ab = seg_end - seg_start
+    ap = point[None, :] - seg_start
+
+    ab_len_sq = np.sum(ab * ab, axis=1)
+
+    valid = ab_len_sq > 0.0
+    t = np.zeros(len(seg_start), dtype=float)
+    t[valid] = np.sum(ap[valid] * ab[valid], axis=1) / ab_len_sq[valid]
+    t = np.clip(t, 0.0, 1.0)
+
+    closest = seg_start + t[:, None] * ab
+    distances = np.linalg.norm(point[None, :] - closest, axis=1)
+
+    if np.any(~valid):
+        distances[~valid] = np.linalg.norm(point[None, :] - seg_start[~valid], axis=1)
+
+    return distances
+
+
+def get_valency_and_pore_size(
+    nodes,
+    connectivity,
+    max_connectivity=8,
+    num_random_points=10000,
+    k_candidates=32,
+    fiber_radius=0.0,
+    random_seed=None,
+    make_plots=True,
+):
+    """
+    Compute node valency and estimate pore diameters in a fibre network.
+
+    Pore diameter is estimated from random sample points as:
+        pore_diameter = 2 * max(distance_to_nearest_segment - fiber_radius, 0)
+
+    Candidate nearest segments are selected using a KD-tree built on segment
+    midpoints, then exact point-to-segment distances are computed only for
+    those candidates.
+
+    Parameters
+    ----------
+    nodes : (N, 3) ndarray
+        Node coordinates.
+    connectivity : dict[int, list[int]]
+        Connectivity dictionary. Each entry contains node neighbors, with -1
+        indicating unused slots.
+    max_connectivity : int, optional
+        Maximum allowed node connectivity, only used for plotting.
+    num_random_points : int, optional
+        Number of Monte Carlo sample points.
+    k_candidates : int, optional
+        Number of nearest segment midpoints used for exact refinement.
+    fiber_radius : float, optional
+        Fibre radius. This is subtracted from the point-to-segment distance
+        before converting to pore diameter.
+    random_seed : int or None, optional
+        Random seed for reproducibility.
+    make_plots : bool, optional
+        Whether to display diagnostic plots.
+
+    Returns
+    -------
+    results : dict
+        Dictionary with valency, pore diameters, statistics, and auxiliary data.
+    """
+    rng = np.random.default_rng(random_seed)
+
+    # Node valency
+    node_valency = np.array(
+        [sum(1 for conn in neighs if conn != -1) for neighs in connectivity.values()],
+        dtype=int,
+    )
+
+    # Build unique fibre segments
+    seg_start, seg_end, seg_pairs = build_unique_segments(nodes, connectivity)
+    if len(seg_pairs) == 0:
+        raise ValueError("No valid fibre segments found in connectivity.")
+
+    # Segment midpoint KD-tree
+    seg_mid = 0.5 * (seg_start + seg_end)
+    tree = cKDTree(seg_mid)
+
+    # Random sample points in bounding box
+    min_coords = np.min(nodes, axis=0)
+    max_coords = np.max(nodes, axis=0)
+    random_points = min_coords + rng.random((num_random_points, 3)) * (max_coords - min_coords)
+
+    # Candidate segment lookup
+    k_eff = min(k_candidates, len(seg_pairs))
+    _, candidate_idx = tree.query(random_points, k=k_eff)
+
+    if k_eff == 1:
+        candidate_idx = candidate_idx[:, None]
+
+    # Exact nearest-segment distance
+    nearest_segment_distance = np.zeros(num_random_points, dtype=float)
+
+    for i in range(num_random_points):
+        idx = candidate_idx[i]
+        dists = point_to_segments_distance(
+            random_points[i],
+            seg_start[idx],
+            seg_end[idx],
+        )
+        nearest_segment_distance[i] = np.min(dists)
+
+    # Convert centerline distance to free pore radius
+    pore_radius = np.maximum(nearest_segment_distance - fiber_radius, 0.0)
+
+    # Keep only spheres fully inside the bounding box
+    valid_mask = np.all(random_points - pore_radius[:, None] >= min_coords, axis=1) & \
+                 np.all(random_points + pore_radius[:, None] <= max_coords, axis=1)
+
+    valid_random_points = random_points[valid_mask]
+    pore_radius = pore_radius[valid_mask]
+    pore_diameter = 2.0 * pore_radius
+
+    results = {
+        "node_valency": node_valency,
+        "pore_radius": pore_radius,
+        "pore_diameter": pore_diameter,
+        "average_pore_diameter": float(np.mean(pore_diameter)) if len(pore_diameter) > 0 else np.nan,
+        "median_pore_diameter": float(np.median(pore_diameter)) if len(pore_diameter) > 0 else np.nan,
+        "min_pore_diameter": float(np.min(pore_diameter)) if len(pore_diameter) > 0 else np.nan,
+        "max_pore_diameter": float(np.max(pore_diameter)) if len(pore_diameter) > 0 else np.nan,
+        "std_pore_diameter": float(np.std(pore_diameter)) if len(pore_diameter) > 0 else np.nan,
+        "random_points_valid": valid_random_points,
+        "segment_pairs": seg_pairs,
+        "num_segments": len(seg_pairs),
+        "fiber_radius": fiber_radius,
+        "k_candidates": k_eff,
+    }
+
+    print(f"Number of nodes: {len(nodes)}")
+    print(f"Number of segments: {len(seg_pairs)}")
+    print(f"Number of valid pore samples: {len(pore_diameter)}")
+    print(f"Fiber radius: {fiber_radius:.6g}")
+    print(f"k_candidates: {k_eff}")
+    print(f"Average pore diameter: {results['average_pore_diameter']:.6g}")
+    print(f"Median pore diameter: {results['median_pore_diameter']:.6g}")
+    print(f"Std pore diameter: {results['std_pore_diameter']:.6g}")
+    print(f"Min pore diameter: {results['min_pore_diameter']:.6g}")
+    print(f"Max pore diameter: {results['max_pore_diameter']:.6g}")
+
+    if make_plots:
+        fig, axs = plt.subplots(2, 2, figsize=(12, 10))
+
+        # Valency histogram
+        axs[0, 0].hist(
+            node_valency,
+            bins=range(0, max_connectivity + 2),
+            align="left",
+            edgecolor="black",
+        )
+        axs[0, 0].set_xlabel("Node valency")
+        axs[0, 0].set_ylabel("Frequency")
+        axs[0, 0].set_title("Node valency histogram")
+        axs[0, 0].set_xticks(range(0, max_connectivity + 1))
+        axs[0, 0].grid(True)
+
+        # Pore diameter histogram
+        axs[0, 1].hist(pore_diameter, bins=100, edgecolor="black")
+        axs[0, 1].set_xlabel("Pore diameter")
+        axs[0, 1].set_ylabel("Frequency")
+        axs[0, 1].set_title("Pore diameter histogram")
+        axs[0, 1].grid(True)
+
+        # Pore diameter boxplot
+        axs[1, 0].boxplot(pore_diameter, vert=True)
+        axs[1, 0].set_ylabel("Pore diameter")
+        axs[1, 0].set_title("Pore diameter boxplot")
+        axs[1, 0].grid(True)
+
+        # Spatial scatter of valid sample points colored by pore diameter
+        if len(valid_random_points) > 0:
+            scatter = axs[1, 1].scatter(
+                valid_random_points[:, 0],
+                valid_random_points[:, 1],
+                c=pore_diameter,
+                s=8,
+            )
+            axs[1, 1].set_xlabel("x")
+            axs[1, 1].set_ylabel("y")
+            axs[1, 1].set_title("Valid sample points colored by pore diameter\n(x-y projection)")
+            axs[1, 1].grid(True)
+            fig.colorbar(scatter, ax=axs[1, 1], label="Pore diameter")
+        else:
+            axs[1, 1].set_title("No valid pore samples")
+            axs[1, 1].grid(True)
+
+        plt.tight_layout()
+        plt.show()
+
+    return results
 
 
 def check_duplicates(nodes, edges, label, edge_kind="fibers"):
@@ -472,7 +730,7 @@ def save_network_to_vtk(filename, nodes, connectivity, scalar_vars=None, vector_
                 for value in var_values:
                     f.write(f"{value[0]} {value[1]} {value[2]}\n")
 
-def get_valency_and_pore_size(nodes, connectivity, MAX_CONNECTIVITY = 8):
+def get_valency_and_pore_size_old(nodes, connectivity, MAX_CONNECTIVITY = 8):
         # Calculate node valency
     node_valency = [sum(1 for conn in value if conn != -1) for value in connectivity.values()]
 
