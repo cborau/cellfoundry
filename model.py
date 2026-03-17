@@ -158,6 +158,7 @@ if OSCILLATORY_SHEAR_ASSAY:
 # +====================================================================+
 INCLUDE_FIBRE_NETWORK = True
 NETWORK_FILE = 'network_low_density.pkl'  # path to the .pkl file with node_coords + connectivity
+ALLOW_IRREGULAR_NETWORK = True  # default: False, meaning that all boundaries must have network nodes attached (e.g. a network going from -y to y and touching the other boundaries should have this variable set to True)
 
 MAX_CONNECTIVITY = 8 # must match hard-coded C++ values
 # NOTE: These are calibrated model parameters (effective segment-level mechanics), not universal material constants.
@@ -479,6 +480,7 @@ if INCLUDE_FIBRE_NETWORK:
         boundary_coords=BOUNDARY_COORDS,
         epsilon=EPSILON,
         fibre_segment_equilibrium_distance=FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE,
+        allow_warning_on_mismatch=ALLOW_IRREGULAR_NETWORK
     )
     if fibre_critical_error:
         critical_error = True
@@ -924,7 +926,7 @@ if INCLUDE_FIBRE_NETWORK:
     # Set the range and bounds.
     # setBounds(min, max) where min and max are the min and max ids of the message buckets. This is independent of the number of agents (there can be more agents than buckets and vice versa).
     # Here, we assign one bucket per fibre node so that each fibre node can be found in its own bucket when searching for neighbours.
-    max_expected_fnodes = N_NODES
+    max_expected_fnodes = N_NODES + 1
     if INCLUDE_CELLS and INCLUDE_NETWORK_REMODELING:
         max_expected_fnodes += MAX_EXPECTED_N_CELLS * STEPS
     FNODE_bucket_location_message.setBounds(8 + 1, 8 + max_expected_fnodes) # +8 because domain corners have idx from 1 to 8. WARNING: make sure to initialize fibre nodes starting from index 9

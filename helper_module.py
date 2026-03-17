@@ -71,6 +71,7 @@ def load_fibre_network(
     boundary_coords,
     epsilon,
     fibre_segment_equilibrium_distance,
+    allow_warning_on_mismatch=False, # for special cases like single-fibre network tests
 ):
     critical_error = False
     nodes = None
@@ -150,7 +151,7 @@ def load_fibre_network(
     if has_z_pos and has_z_neg:
         axes_with_both_faces += 1
 
-    if axes_with_both_faces < 2:
+    if axes_with_both_faces < 2 and not allow_warning_on_mismatch:
         print(msg_wrong_network_dimensions)
         critical_error = True
 
@@ -790,6 +791,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
         reinforcement = list()
         secreted = list()
         linked_nodes_all = list()
+        k_elast = list()
 
         av = agent.getPopulationData()
         for ai in av:
@@ -806,7 +808,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             reinforcement.append(ai.getVariableFloat("reinforcement"))
             secreted.append(ai.getVariableInt("secreted"))
             linked_nodes_all.append(ai.getVariableArrayFloat("linked_nodes"))
-
+            k_elast.append(ai.getVariableFloat("k_elast"))
         if len(ids) > 0:
             min_id = min(ids)
             ids = [fid - min_id for fid in ids if fid > 0]
@@ -949,6 +951,13 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
                 file.write("0 \n")
             for _ in range(8):
                 file.write("1 \n")
+
+            file.write("SCALARS k_elast float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for k_ai in k_elast:
+                file.write("{:.4f} \n".format(k_ai))
+            for _ in range(8):
+                file.write("0.0 \n")
 
             file.write("SCALARS elastic_energy float 1\n")
             file.write("LOOKUP_TABLE default\n")

@@ -478,11 +478,11 @@ if __name__ == "__main__":
         help="Shear tangential component: 0 or 1 (default: 0).",
     )
     parser.add_argument(
-        "--strain-weight", type=float, default=0.1,
-        help="Relative weight of strain MSE term (default: 0.1).",
+        "--strain-weight", type=float, default=0.0,
+        help="Relative weight of strain MSE term (default: 0.0).",
     )
     parser.add_argument(
-        "--stress-area-mode", type=str, default="boundary_surface",
+        "--stress-area-mode", type=str, default="per_fibre_area",
         choices=["boundary_surface", "per_fibre_area"],
         help="Normalize force by the whole boundary surface or by engaged-fibre area.",
     )

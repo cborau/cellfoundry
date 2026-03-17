@@ -116,38 +116,68 @@ def _get_fibre_section_area(results: dict, fibre_section_area_um2: float | None 
 # ---------------------------------------------------------------------------
 
 def _extract_sim_strain_stress(
-    results: dict, force_type: str = "normal", strain_axis: int = 0,
-    shear_component: int = 0, stress_area_mode: str = "boundary_surface",
+    results: dict,
+    force_type: str = "normal",
+    strain_axis: int = 0,
+    shear_component: int = 0,
+    stress_area_mode: str = "boundary_surface",
     fibre_section_area_um2: float | None = None,
 ) -> tuple[pd.Series, pd.Series]:
     """Extract simulated strain [dimensionless] and stress [kPa] from results.
 
-    Stress is computed by dividing the boundary reaction force [nN] by the
-    cross-sectional area of the loaded face [µm²].  Since 1 nN/µm² = 1 kPa,
-    the returned stress is directly in **kPa**.
+    Stress is computed by dividing a boundary reaction force [nN] by an area [µm²].
+    Since 1 nN/µm² = 1 kPa, the returned stress is directly in **kPa**.
 
-    The cross-sectional area is derived from the *initial* boundary positions
-    stored in ``BPOS_OVER_TIME`` (row 0).  For a face whose normal is the
-    *strain_axis*, the area is the product of the initial lengths along the
-    two orthogonal axes.
+    Two area normalization modes are supported:
+
+    1. ``"boundary_surface"``
+       Stress is normalized by the geometric surface area of the loaded boundary,
+       computed from the *initial* boundary positions stored in
+       ``BPOS_OVER_TIME`` (row 0). For a face whose normal is ``strain_axis``,
+       this area is the product of the initial lengths along the two orthogonal
+       axes.
+
+    2. ``"per_fibre_area"``
+       Stress is normalized by the total attached fibre cross-sectional area at
+       each boundary, i.e. number of attached fibres multiplied by the fibre
+       cross-sectional area. In this mode, the effective area may vary over time
+       as boundary attachments change.
+
+    For both normal and shear loading, stress is computed using the reaction
+    forces from the two opposite boundaries normal to ``strain_axis``. The final
+    stress is obtained from the average of their absolute values, which makes the
+    measure symmetric and avoids sign-convention issues.
 
     Parameters
     ----------
     results : dict
-        Simulation output (from pickle).  Must contain ``BPOS_OVER_TIME``
-        and, depending on *force_type*, ``BFORCE_OVER_TIME`` or
+        Simulation output (from pickle). Must contain ``BPOS_OVER_TIME`` and,
+        depending on ``force_type``, either ``BFORCE_OVER_TIME`` or
         ``BFORCE_SHEAR_OVER_TIME``.
     force_type : {"normal", "shear"}
+        Type of stress to extract.
     strain_axis : int
+        Axis normal to the loaded boundary pair:
         0 = x, 1 = y, 2 = z.
     shear_component : int
-        For shear only — selects which of the two tangential force
-        directions on the chosen face (0 or 1).
+        For shear only. Selects which of the two tangential directions on the
+        chosen face is used:
+        0 = first tangential direction, 1 = second tangential direction.
+    stress_area_mode : {"boundary_surface", "per_fibre_area"}
+        Area normalization mode. Use ``"boundary_surface"`` to divide by the
+        geometric boundary area, or ``"per_fibre_area"`` to divide by the total
+        attached fibre cross-sectional area.
+    fibre_section_area_um2 : float | None
+        Fibre cross-sectional area in µm². Only used when
+        ``stress_area_mode="per_fibre_area"``. If ``None``, the value is
+        obtained through ``_get_fibre_section_area(...)``.
 
     Returns
     -------
-    sim_strain : pd.Series   [dimensionless]
-    sim_stress : pd.Series   [kPa]
+    sim_strain : pd.Series
+        Simulated strain [dimensionless].
+    sim_stress : pd.Series
+        Simulated stress [kPa].
     """
     bpos = results.get("BPOS_OVER_TIME")
     if bpos is None:
@@ -174,49 +204,74 @@ def _extract_sim_strain_stress(
         axis_label = ["x", "y", "z"][axis]
         tangent_dirs = [d for d in ["x", "y", "z"] if d != axis_label]
         comp = shear_component
+
+        if comp not in (0, 1):
+            raise ValueError("shear_component must be 0 or 1")
+
         force_col_pos = f"f{axis_label}pos_{tangent_dirs[comp]}"
         force_col_neg = f"f{axis_label}neg_{tangent_dirs[comp]}"
+
         if force_col_pos not in bforce_shear.columns:
-            raise ValueError(f"Shear force column '{force_col_pos}' not found in BFORCE_SHEAR_OVER_TIME")
+            raise ValueError(
+                f"Shear force column '{force_col_pos}' not found in BFORCE_SHEAR_OVER_TIME"
+            )
         if force_col_neg not in bforce_shear.columns:
-            raise ValueError(f"Shear force column '{force_col_neg}' not found in BFORCE_SHEAR_OVER_TIME")
+            raise ValueError(
+                f"Shear force column '{force_col_neg}' not found in BFORCE_SHEAR_OVER_TIME"
+            )
+
         if stress_area_mode == "per_fibre_area":
             effective_area_pos = count_pos * fibre_section_area
             effective_area_neg = count_neg * fibre_section_area
             safe_pos = effective_area_pos.where(effective_area_pos > 1e-12, np.nan)
             safe_neg = effective_area_neg.where(effective_area_neg > 1e-12, np.nan)
+
             stress_pos = bforce_shear[force_col_pos].abs() / safe_pos
             stress_neg = bforce_shear[force_col_neg].abs() / safe_neg
             sim_stress = ((stress_pos + stress_neg) / 2.0).fillna(0.0)
         else:
-            # Average absolute reaction forces from both faces to get the shear stress
-            sim_stress = (bforce_shear[force_col_pos].abs() + bforce_shear[force_col_neg].abs()) / (2 * cross_section_area)
+            sim_stress = (
+                bforce_shear[force_col_pos].abs() + bforce_shear[force_col_neg].abs()
+            ) / (2.0 * cross_section_area)
 
         tang_axis_idx = ["x", "y", "z"].index(tangent_dirs[comp])
         pos_col_tang = bpos.columns[tang_axis_idx * 2]
         neg_col_tang = bpos.columns[tang_axis_idx * 2 + 1]
         pos_col_norm = bpos.columns[axis * 2]
         neg_col_norm = bpos.columns[axis * 2 + 1]
+
         L0_normal = bpos.iloc[0][pos_col_norm] - bpos.iloc[0][neg_col_norm]
         tang_disp = (bpos[pos_col_tang] - bpos[neg_col_tang]) - (
             bpos.iloc[0][pos_col_tang] - bpos.iloc[0][neg_col_tang]
         )
         sim_strain = tang_disp / L0_normal if abs(L0_normal) > 1e-12 else tang_disp * 0.0
+
     else:
         bforce = results.get("BFORCE_OVER_TIME")
         if bforce is None:
             raise ValueError("Results must contain BFORCE_OVER_TIME")
+
         pos_col = bpos.columns[axis * 2]
         neg_col = bpos.columns[axis * 2 + 1]
-        force_col = bforce.columns[axis * 2]
+        force_col_pos = bforce.columns[axis * 2]
+        force_col_neg = bforce.columns[axis * 2 + 1]
+
         L0 = bpos.iloc[0][pos_col] - bpos.iloc[0][neg_col]
         sim_strain = ((bpos[pos_col] - bpos[neg_col]) - L0) / L0
+
         if stress_area_mode == "per_fibre_area":
-            effective_area = count_pos * fibre_section_area
-            safe_area = effective_area.where(effective_area > 1e-12, np.nan)
-            sim_stress = (bforce[force_col].abs() / safe_area).fillna(0.0)
+            effective_area_pos = count_pos * fibre_section_area
+            effective_area_neg = count_neg * fibre_section_area
+            safe_pos = effective_area_pos.where(effective_area_pos > 1e-12, np.nan)
+            safe_neg = effective_area_neg.where(effective_area_neg > 1e-12, np.nan)
+
+            stress_pos = bforce[force_col_pos].abs() / safe_pos
+            stress_neg = bforce[force_col_neg].abs() / safe_neg
+            sim_stress = ((stress_pos + stress_neg) / 2.0).fillna(0.0)
         else:
-            sim_stress = bforce[force_col] / cross_section_area  # [nN] / [µm²] = [kPa]
+            sim_stress = (
+                bforce[force_col_pos].abs() + bforce[force_col_neg].abs()
+            ) / (2.0 * cross_section_area)
 
     return sim_strain, sim_stress
 
@@ -322,7 +377,7 @@ def differential_modulus_error(results: dict, reference_path: str, **kwargs) -> 
 
     force_type = kwargs.get("force_type", "normal")
     axis = kwargs.get("strain_axis", 0)
-    strain_weight = float(kwargs.get("strain_weight", 0.1))
+    strain_weight = float(kwargs.get("strain_weight", 0.0))
 
     sim_strain, sim_stress = _extract_sim_strain_stress(
         results, force_type=force_type, strain_axis=axis,
