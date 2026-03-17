@@ -3,8 +3,7 @@
 # ============================================================================
 #
 # Fits the differential modulus K(ε) = dσ/dε vs strain curve, which is the
-# representation used by many experimental works (e.g. Steinwachs et al.,
-# Nat. Methods 2016).
+# representation used by many experimental works.
 #
 # Units
 # -----
@@ -40,7 +39,7 @@ objective:
   kwargs:
     force_type: "normal"        # "normal" | "shear"
     strain_axis: 0              # 0=x, 1=y, 2=z  (axis of applied displacement)
-    strain_weight: 0.1          # weight of strain MSE relative to K(ε) MSE
+    strain_weight: 0.0          # weight of strain MSE relative to K(ε) MSE
     smooth_window: 5            # Savitzky-Golay window (odd int; 0/1 = no smoothing)
     smooth_polyorder: 2         # polynomial order for Savitzky-Golay filter
 
@@ -95,19 +94,12 @@ parameters:
     high: 50.0
     log: true
 
-  # Fibre-node damping (viscous contribution to force)
-  # FNODE_DUMPING:
-  #   type: float
-  #   low: 0.001
-  #   high: 1.0
-  #   log: true
-
-  # Uncomment to also explore repulsion / Poisson-ratio related parameters
-  # FIBRE_NODE_REPULSION_K:
-  #   type: float
-  #   low: 0.1
-  #   high: 100.0
-  #   log: true
+  # CELL_RADIUS:
+  #   type: array_float
+  #   elements:
+  #     0: {low: 6.0, high: 12.0}
+  #     1: {low: 6.0, high: 12.0}
+  #     2: {low: 6.0, high: 12.0}
 
 # --- Model execution settings ---------------------------------------------
 model:
@@ -116,8 +108,8 @@ model:
   cleanup_trials: false
 
   extra_overrides:
-    STEPS: 500
-    SAVE_EVERY_N_STEPS: 5
+    STEPS: 100000
+    SAVE_EVERY_N_STEPS: 2000
     INCLUDE_FIBRE_NETWORK: true
     INCLUDE_CELLS: false
     INCLUDE_CELL_CYCLE: false
