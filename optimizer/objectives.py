@@ -52,6 +52,100 @@ def _interpolate_to_match(series: pd.Series, target_len: int) -> np.ndarray:
     return np.interp(x_new, x_old, series.values)
 
 
+def _prepare_curve_for_interpolation(
+    source_x: pd.Series | np.ndarray,
+    source_y: pd.Series | np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    source_x_arr = np.asarray(source_x, dtype=float)
+    source_y_arr = np.asarray(source_y, dtype=float)
+
+    if source_x_arr.shape != source_y_arr.shape:
+        raise ValueError("source_x and source_y must have the same shape")
+    if source_x_arr.ndim != 1:
+        raise ValueError("source_x and source_y must be 1-D")
+
+    finite_mask = np.isfinite(source_x_arr) & np.isfinite(source_y_arr)
+    source_x_arr = source_x_arr[finite_mask]
+    source_y_arr = source_y_arr[finite_mask]
+    if source_x_arr.size == 0:
+        raise ValueError("No finite points available for interpolation")
+
+    order = np.argsort(source_x_arr, kind="stable")
+    source_x_sorted = source_x_arr[order]
+    source_y_sorted = source_y_arr[order]
+
+    unique_x, inverse = np.unique(source_x_sorted, return_inverse=True)
+    if unique_x.size != source_x_sorted.size:
+        y_sum = np.zeros_like(unique_x)
+        y_count = np.zeros_like(unique_x)
+        np.add.at(y_sum, inverse, source_y_sorted)
+        np.add.at(y_count, inverse, 1.0)
+        source_y_sorted = y_sum / y_count
+        source_x_sorted = unique_x
+
+    return source_x_sorted, source_y_sorted
+
+
+def _interpolate_response_to_reference_x(
+    source_x: pd.Series | np.ndarray,
+    source_y: pd.Series | np.ndarray,
+    target_x: pd.Series | np.ndarray,
+) -> np.ndarray:
+    prepared_x, prepared_y = _prepare_curve_for_interpolation(source_x, source_y)
+    target_x_arr = np.asarray(target_x, dtype=float)
+
+    interp = np.full_like(target_x_arr, np.nan, dtype=float)
+    finite_target = np.isfinite(target_x_arr)
+    overlap_mask = (
+        finite_target
+        & (target_x_arr >= prepared_x[0])
+        & (target_x_arr <= prepared_x[-1])
+    )
+    if np.any(overlap_mask):
+        interp[overlap_mask] = np.interp(target_x_arr[overlap_mask], prepared_x, prepared_y)
+    return interp
+
+
+def _compute_reference_grid_coverage_error(
+    source_x: pd.Series | np.ndarray,
+    target_x: pd.Series | np.ndarray,
+) -> float:
+    prepared_x, _ = _prepare_curve_for_interpolation(source_x, source_x)
+    target_x_arr = np.asarray(target_x, dtype=float)
+    finite_target = target_x_arr[np.isfinite(target_x_arr)]
+    if finite_target.size == 0:
+        return 0.0
+
+    below = np.clip(prepared_x[0] - finite_target, 0.0, None)
+    above = np.clip(finite_target - prepared_x[-1], 0.0, None)
+    return float(np.mean((below + above) ** 2))
+
+
+def _filter_simulation_from_min_strain(
+    strain: pd.Series | np.ndarray,
+    *series: pd.Series | np.ndarray,
+    min_sim_strain: float | None = None,
+) -> tuple[np.ndarray, ...]:
+    strain_arr = np.asarray(strain, dtype=float)
+    mask = np.isfinite(strain_arr)
+    if min_sim_strain is not None:
+        mask &= strain_arr >= float(min_sim_strain)
+
+    filtered = [strain_arr[mask]]
+    for values in series:
+        values_arr = np.asarray(values, dtype=float)
+        if values_arr.shape != strain_arr.shape:
+            raise ValueError("Simulation series must match the strain shape")
+        filtered.append(values_arr[mask])
+
+    if filtered[0].size == 0:
+        raise ValueError(
+            "No simulation points remain after applying the minimum strain cutoff"
+        )
+
+    return tuple(filtered)
+
+
 def _format_percent_text(error: float, target: float, label: str = "target") -> str:
     abs_target = abs(float(target))
     if abs_target <= 1e-12:
@@ -406,6 +500,9 @@ def stress_strain_curve_error(results: dict, reference_path: str, **kwargs) -> f
 
     **Error weighting**: ``kwargs["strain_weight"]`` (default 0.1) controls
     the relative weight of the strain term vs the stress term.
+
+    **Initial stabilization cutoff**: ``kwargs["min_sim_strain"]`` ignores
+    simulation samples below this strain before computing the error.
     """
     ref = _load_reference_csv(reference_path)
     if "strain" not in ref.columns or "stress" not in ref.columns:
@@ -421,14 +518,24 @@ def stress_strain_curve_error(results: dict, reference_path: str, **kwargs) -> f
         stress_area_mode=kwargs.get("stress_area_mode", "boundary_surface"),
         fibre_section_area_um2=kwargs.get("fibre_section_area_um2"),
     )
+    sim_strain_arr, sim_stress_arr = _filter_simulation_from_min_strain(
+        sim_strain,
+        sim_stress,
+        min_sim_strain=kwargs.get("min_sim_strain"),
+    )
+    sim_strain = pd.Series(sim_strain_arr)
+    sim_stress = pd.Series(sim_stress_arr)
     _raise_if_axis_selection_has_no_signal(sim_strain, sim_stress, ref, force_type, axis)
 
-    # Interpolate simulation to match reference length
-    sim_strain_interp = _interpolate_to_match(sim_strain, len(ref))
-    sim_stress_interp = _interpolate_to_match(sim_stress, len(ref))
+    ref_strain = ref["strain"].to_numpy(dtype=float)
+    ref_stress = ref["stress"].to_numpy(dtype=float)
+    sim_stress_interp = _interpolate_response_to_reference_x(sim_strain, sim_stress, ref_strain)
+    overlap_mask = np.isfinite(sim_stress_interp)
+    if not np.any(overlap_mask):
+        raise ValueError("Simulation and reference strain ranges do not overlap")
 
-    strain_err = _mse(sim_strain_interp, ref["strain"].values)
-    stress_err = _mse(sim_stress_interp, ref["stress"].values)
+    strain_err = _compute_reference_grid_coverage_error(sim_strain, ref_strain)
+    stress_err = _mse(sim_stress_interp[overlap_mask], ref_stress[overlap_mask])
 
     # Combined error (stress dominates since that's what we're fitting)
     return float(stress_err + strain_weight * strain_err), None
@@ -470,6 +577,9 @@ def differential_modulus_error(results: dict, reference_path: str, **kwargs) -> 
 
     **Error weighting**: ``kwargs["strain_weight"]`` (default 0.1) — relative
     weight of the strain-alignment MSE term.
+
+    **Initial stabilization cutoff**: ``kwargs["min_sim_strain"]`` ignores
+    simulation samples below this strain before computing the modulus and error.
     """
     ref = _load_reference_csv(reference_path)
     if "strain" not in ref.columns or "differential_modulus" not in ref.columns:
@@ -487,6 +597,13 @@ def differential_modulus_error(results: dict, reference_path: str, **kwargs) -> 
         stress_area_mode=kwargs.get("stress_area_mode", "boundary_surface"),
         fibre_section_area_um2=kwargs.get("fibre_section_area_um2"),
     )
+    sim_strain_arr, sim_stress_arr = _filter_simulation_from_min_strain(
+        sim_strain,
+        sim_stress,
+        min_sim_strain=kwargs.get("min_sim_strain"),
+    )
+    sim_strain = pd.Series(sim_strain_arr)
+    sim_stress = pd.Series(sim_stress_arr)
     _raise_if_axis_selection_has_no_signal(sim_strain, sim_stress, ref, force_type, axis)
 
     strain_arr = sim_strain.values.astype(float)
@@ -499,12 +616,15 @@ def differential_modulus_error(results: dict, reference_path: str, **kwargs) -> 
         smooth_polyorder=smooth_polyorder,
     )
 
-    # Interpolate to match reference length
-    sim_strain_interp = _interpolate_to_match(pd.Series(strain_arr), len(ref))
-    sim_K_interp = _interpolate_to_match(pd.Series(sim_K), len(ref))
+    ref_strain = ref["strain"].to_numpy(dtype=float)
+    ref_K = ref["differential_modulus"].to_numpy(dtype=float)
+    sim_K_interp = _interpolate_response_to_reference_x(strain_arr, sim_K, ref_strain)
+    overlap_mask = np.isfinite(sim_K_interp)
+    if not np.any(overlap_mask):
+        raise ValueError("Simulation and reference strain ranges do not overlap")
 
-    strain_err = _mse(sim_strain_interp, ref["strain"].values)
-    K_err = _mse(sim_K_interp, ref["differential_modulus"].values)
+    strain_err = _compute_reference_grid_coverage_error(strain_arr, ref_strain)
+    K_err = _mse(sim_K_interp[overlap_mask], ref_K[overlap_mask])
 
     return float(K_err + strain_weight * strain_err), None
 

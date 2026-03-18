@@ -44,7 +44,8 @@ from optimizer.objectives import (
     shear_differential_modulus_error,
     _compute_differential_modulus,
     _extract_sim_strain_stress,
-    _interpolate_to_match,
+    _filter_simulation_from_min_strain,
+    _interpolate_response_to_reference_x,
     OBJECTIVE_REGISTRY,
 )
 
@@ -226,7 +227,13 @@ def _plot_real_data(results: dict, ref_df: pd.DataFrame, obj_name: str, kwargs: 
         stress_area_mode=kwargs.get("stress_area_mode", "boundary_surface"),
         fibre_section_area_um2=kwargs.get("fibre_section_area_um2"),
     )
-    sim_stress_arr = sim_stress.values.astype(float)
+    sim_strain_arr, sim_stress_arr = _filter_simulation_from_min_strain(
+        sim_strain,
+        sim_stress,
+        min_sim_strain=kwargs.get("min_sim_strain"),
+    )
+    sim_strain = pd.Series(sim_strain_arr)
+    sim_stress = pd.Series(sim_stress_arr)
 
     is_diff_modulus = "diff_modulus" in obj_name
 
@@ -241,20 +248,22 @@ def _plot_real_data(results: dict, ref_df: pd.DataFrame, obj_name: str, kwargs: 
         )
 
         sim_y = sim_K
-        sim_y_interp = _interpolate_to_match(pd.Series(sim_K), len(ref_df))
         ref_y = ref_df["differential_modulus"].values
         ylabel = "Diff. modulus K(ε) [kPa]"
         title_suffix = "Differential Modulus"
     else:
         sim_y = sim_stress.values
-        sim_y_interp = _interpolate_to_match(sim_stress, len(ref_df))
         ref_y = ref_df["stress"].values
         ylabel = "Stress [kPa]"
         title_suffix = "Stress-Strain"
 
     sim_strain_arr = sim_strain.values
-    sim_strain_interp = _interpolate_to_match(sim_strain, len(ref_df))
-    ref_strain = ref_df["strain"].values
+    ref_strain = ref_df["strain"].values.astype(float)
+    sim_y_interp = _interpolate_response_to_reference_x(sim_strain_arr, sim_y, ref_strain)
+    interp_mask = np.isfinite(sim_y_interp)
+    sim_strain_interp = ref_strain[interp_mask]
+    sim_y_interp = sim_y_interp[interp_mask]
+    ref_y_overlap = ref_y[interp_mask]
     timesteps = np.arange(len(sim_strain_arr))
 
     # Print diagnostic ranges
@@ -272,6 +281,9 @@ def _plot_real_data(results: dict, ref_df: pd.DataFrame, obj_name: str, kwargs: 
     ax.plot(sim_strain_arr, sim_y, "-", color="tab:blue", alpha=0.4, linewidth=1, label="Sim (raw)")
     ax.plot(sim_strain_interp, sim_y_interp, "o-", color="tab:blue", markersize=3, label="Sim (interp)")
     ax.plot(ref_strain, ref_y, "s--", color="tab:red", markersize=4, label="Reference")
+    min_sim_strain = kwargs.get("min_sim_strain")
+    if min_sim_strain is not None:
+        ax.axvline(float(min_sim_strain), color="tab:gray", ls=":", alpha=0.8, label=f"Cutoff ({float(min_sim_strain):.4g})")
     ax.set_xlabel("Strain [-]")
     ax.set_ylabel(ylabel)
     ax.set_title(f"{title_suffix} — {force_label}, axis={axis_label}")
@@ -281,6 +293,8 @@ def _plot_real_data(results: dict, ref_df: pd.DataFrame, obj_name: str, kwargs: 
     # ── Top-right: strain vs timestep ─────────────────────────────────────
     ax_ts = axes[0, 1]
     ax_ts.plot(timesteps, sim_strain_arr, "-", color="tab:blue", label="Sim strain")
+    if min_sim_strain is not None:
+        ax_ts.axhline(float(min_sim_strain), color="tab:gray", ls=":", alpha=0.8, label=f"Cutoff ({float(min_sim_strain):.4g})")
     ax_ts.axhline(ref_strain[0], color="tab:red", ls="--", alpha=0.5, label=f"Ref strain min ({ref_strain[0]:.4g})")
     ax_ts.axhline(ref_strain[-1], color="tab:red", ls="--", alpha=0.5, label=f"Ref strain max ({ref_strain[-1]:.4g})")
     ax_ts.set_xlabel("Timestep index")
@@ -331,7 +345,7 @@ def _plot_real_data(results: dict, ref_df: pd.DataFrame, obj_name: str, kwargs: 
         ax2.legend(fontsize=8)
         ax2.grid(True, alpha=0.3)
     else:
-        residual = sim_y_interp - ref_y
+        residual = sim_y_interp - ref_y_overlap
         ax2.bar(np.arange(len(residual)), residual, color="tab:orange", alpha=0.7)
         ax2.axhline(0, color="k", linewidth=0.5)
         ax2.set_xlabel("Reference point index")
@@ -415,6 +429,8 @@ def run_real_data_test(args):
         "strain_axis": args.strain_axis,
         "stress_area_mode": args.stress_area_mode,
     }
+    if args.min_sim_strain is not None:
+        kwargs["min_sim_strain"] = args.min_sim_strain
     if args.fibre_section_area_um2 is not None:
         kwargs["fibre_section_area_um2"] = args.fibre_section_area_um2
     if "shear" in obj_name:
@@ -491,6 +507,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--smooth-polyorder", type=int, default=2,
         help="Savitzky-Golay polynomial order (default: 2).",
+    )
+    parser.add_argument(
+        "--min-sim-strain", type=float, default=None,
+        help="Ignore simulation samples below this strain before scoring and plotting.",
     )
     args = parser.parse_args()
 

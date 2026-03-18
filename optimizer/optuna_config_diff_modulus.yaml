@@ -25,7 +25,7 @@
 # --- Optuna study settings ------------------------------------------------
 study:
   name: "cellfoundry_diff_modulus"
-  n_trials: 100
+  n_trials: 200
   sampler: TPE
   seed: 42
   direction: minimize
@@ -43,6 +43,7 @@ objective:
     smooth_window: 5            # Savitzky-Golay window (odd int; 0/1 = no smoothing)
     smooth_polyorder: 2         # polynomial order for Savitzky-Golay filter
     stress_area_mode: "per_fibre_area"
+    min_sim_strain: 0.015
 
 # Option B: Shear differential modulus (uncomment and replace Option A above)
 # objective:
