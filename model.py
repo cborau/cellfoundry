@@ -39,11 +39,12 @@ ENSEMBLE = False
 ENSEMBLE_RUNS = 0
 VISUALISATION = False  # Change to false if pyflamegpu has not been built with visualisation support
 DEBUG_PRINTING = False
+ABORT_ON_UNSTABLE_FNODE_MOVE = False  # If True, abort when any FNODE moves farther than one segment rest length in a single step.
 PAUSE_EVERY_STEP = False  # If True, the visualization stops every step until P is pressed
 SAVE_PICKLE = True  # If True, dumps model configuration into a pickle file for post-processing
 SHOW_PLOTS = False  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
-SAVE_EVERY_N_STEPS = 1000 # Affects both the .vtk files and the Dataframes storing boundary data
+SAVE_EVERY_N_STEPS = 100 # Affects both the .vtk files and the Dataframes storing boundary data
 
 CURR_PATH = pathlib.Path(__file__).resolve().parent
 RES_PATH = CURR_PATH / 'result_files'
@@ -60,8 +61,8 @@ N = 21
 
 # Time simulation parameters
 # ----------------------------------------------------------------------
-TIME_STEP = 0.1 # s. WARNING: diffusion and cell migration events might need different scales
-STEPS = 50000
+TIME_STEP = 1.0 # s. WARNING: diffusion and cell migration events might need different scales
+STEPS = 5000
 
 # +====================================================================+
 # | BOUNDARY CONDITIONS                                                |
@@ -142,7 +143,7 @@ MAX_EXPECTED_BOUNDARY_POS_OSCILLATORY = 0.25 * (BOUNDARY_COORDS[2] - BOUNDARY_CO
 BUCKLING_COEFF_D0 = 0.1
 STRAIN_STIFFENING_COEFF_DS = 0.25
 CRITICAL_STRAIN = 0.1
-MAX_STRAIN_K_FACTOR = 10.0  # Cap on the strain-dependent stiffness multiplier (plateau / damage limit)
+MAX_STRAIN_K_FACTOR = 100.0  # Cap on the strain-dependent stiffness multiplier (plateau / damage limit)
 
 # Parallel disp rate values are overrun in oscillatory assays
 # ----------------------------------------------------------------------
@@ -163,14 +164,14 @@ ALLOW_IRREGULAR_NETWORK = True  # default: False, meaning that all boundaries mu
 MAX_CONNECTIVITY = 8 # must match hard-coded C++ values
 # NOTE: These are calibrated model parameters (effective segment-level mechanics), not universal material constants.
 # They depend on collagen type/concentration, crosslinking, architecture and coarse-graining choices.
-FIBRE_SEGMENT_K_ELAST = 10.0  # [nN/um] Effective fibre-segment stiffness (baseline for tuning)
-FIBRE_SEGMENT_D_DUMPING = 2.0  # [nN*s/um] Effective fibre-segment damping (baseline for tuning)
+FIBRE_SEGMENT_K_ELAST = 2.0  # [nN/um] Effective fibre-segment stiffness (baseline for tuning)
+FIBRE_SEGMENT_D_DUMPING = 0.0  # [nN*s/um] Effective fibre-segment damping (baseline for tuning)
 FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE = 45 # WARNING: must match the value used in network generation
 FIBRE_SECTION_AREA_UM2 = 0.05  # [um^2] Approximate collagen-fibre cross-section used for effective stress normalization
 FIBRE_NODE_BOUNDARY_INTERACTION_RADIUS = 0.05
 FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE = 0.0
-MAX_SEARCH_RADIUS_FNODES = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / 10.0 # must me smaller than FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
-FIBRE_NODE_REPULSION_K = 0.2 * FIBRE_SEGMENT_K_ELAST  # [nN/um] Short-range FNODE-FNODE exclusion stiffness (kept below segment stiffness)
+MAX_SEARCH_RADIUS_FNODES = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / 100.0 # must me smaller than FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
+FIBRE_NODE_REPULSION_K = 0.0 * FIBRE_SEGMENT_K_ELAST  # [nN/um] Short-range FNODE-FNODE exclusion stiffness (kept below segment stiffness)
 # WARNING: THESE VARIABLES SIZE DEPENDS ON N_CELL_TYPES (DEFINED BELOW IN THE CELL PARAMETERS SECTION)
 # FNODE remodeling (degradation/deposition + birth/death)
 INCLUDE_NETWORK_REMODELING = False
@@ -884,6 +885,7 @@ env.newPropertyUInt("DEBUG_PRINTING", DEBUG_PRINTING)
 env.newPropertyUInt("DEBUG_DIFFUSION", False)
 env.newPropertyFloat("EPSILON", EPSILON)
 env.newPropertyUInt("MOVING_BOUNDARIES", MOVING_BOUNDARIES)
+env.newPropertyUInt("ABORT_ON_UNSTABLE_FNODE_MOVE", ABORT_ON_UNSTABLE_FNODE_MOVE)
 
 # ++==================================================================++
 # ++ Messages                                                          |
@@ -1161,6 +1163,7 @@ if INCLUDE_FIBRE_NETWORK:
     FNODE_agent.newVariableUInt8("clamped_by_neg")
     FNODE_agent.newVariableUInt8("clamped_bz_pos")
     FNODE_agent.newVariableUInt8("clamped_bz_neg")
+    FNODE_agent.newVariableUInt8("unstable_move", 0)
 
     FNODE_agent.newRTCFunctionFile("fnode_spatial_location_data", fnode_spatial_location_data_file).setMessageOutput("fnode_spatial_location_message")
     FNODE_agent.newRTCFunctionFile("fnode_bucket_location_data", fnode_bucket_location_data_file).setMessageOutput("fnode_bucket_location_message")
@@ -2007,7 +2010,7 @@ class SaveDataToFile(pyflamegpu.HostFunction):
             include_fibre_network=INCLUDE_FIBRE_NETWORK,
             n_nodes=N_NODES,
         )
-
+        
     def run(self, FLAMEGPU):
         global SAVE_DATA_TO_FILE, SAVE_EVERY_N_STEPS, N_SPECIES
         global RES_PATH
@@ -2032,6 +2035,28 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                 "pyflamegpu": pyflamegpu,
             },
         )
+
+
+class CheckFNODEStability(pyflamegpu.HostFunction):
+    def __init__(self):
+        super().__init__()
+
+    def run(self, FLAMEGPU):
+        global INCLUDE_FIBRE_NETWORK, ABORT_ON_UNSTABLE_FNODE_MOVE
+
+        if not INCLUDE_FIBRE_NETWORK or not ABORT_ON_UNSTABLE_FNODE_MOVE:
+            return
+
+        unstable_moves = FLAMEGPU.agent("FNODE").sumUInt8("unstable_move")
+        if unstable_moves > 0:
+            stepCounter = FLAMEGPU.getStepCounter() + 1
+            raise RuntimeError(
+                "Unstable FNODE motion detected at step "
+                f"{stepCounter}: {unstable_moves} node(s) exceeded "
+                "FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE in a single step."
+            )
+
+
 
 
 class ReportFAMetrics(pyflamegpu.HostFunction):
@@ -2102,6 +2127,10 @@ if INCLUDE_CELLS:
 if MOVING_BOUNDARIES:
     mb = MoveBoundaries()
     model.addStepFunction(mb)
+
+if INCLUDE_FIBRE_NETWORK:
+    cfs = CheckFNODEStability()
+    model.addStepFunction(cfs)
 
 sdf = SaveDataToFile()
 # SaveDataToFile host function; behavior is controlled by SAVE_DATA_TO_FILE flag.

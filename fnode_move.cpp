@@ -110,6 +110,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
   float agent_z = FLAMEGPU->getVariable<float>("z");
 
   int DEBUG_PRINTING = FLAMEGPU->environment.getProperty<int>("DEBUG_PRINTING");
+  int ABORT_ON_UNSTABLE_FNODE_MOVE = FLAMEGPU->environment.getProperty<int>("ABORT_ON_UNSTABLE_FNODE_MOVE");
 
   // Agent velocity
   float agent_vx = FLAMEGPU->getVariable<float>("vx");
@@ -209,29 +210,49 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
   float prev_agent_x = agent_x;
   float prev_agent_y = agent_y;
   float prev_agent_z = agent_z;
-  float inc_pos_max = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE;
+  float inc_pos_max = 0.0f;
+  uint8_t unstable_move = 0;
    
   if ((clamped_bx_pos == 0) && (clamped_bx_neg == 0)) {
     agent_vx = (agent_fx) / ECM_ETA;
     agent_x += agent_vx * TIME_STEP;
-    inc_pos_max = fminf(inc_pos_max, fabsf(agent_vx * TIME_STEP));
+    inc_pos_max = fmaxf(inc_pos_max, fabsf(agent_vx * TIME_STEP));
   }
 
   if ((clamped_by_pos == 0) && (clamped_by_neg == 0)) {
     agent_vy = (agent_fy) / ECM_ETA;
     agent_y += agent_vy * TIME_STEP;
-    inc_pos_max = fminf(inc_pos_max, fabsf(agent_vy * TIME_STEP));
+    inc_pos_max = fmaxf(inc_pos_max, fabsf(agent_vy * TIME_STEP));
   }
   
   if ((clamped_bz_pos == 0) && (clamped_bz_neg == 0)) {
     agent_vz = (agent_fz) / ECM_ETA;
     agent_z += agent_vz * TIME_STEP;
-    inc_pos_max = fminf(inc_pos_max, fabsf(agent_vz * TIME_STEP));
+    inc_pos_max = fmaxf(inc_pos_max, fabsf(agent_vz * TIME_STEP));
   }
 
-  if (inc_pos_max >= FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE) {
-    printf("WARNING: ECM agent %d moved more than FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE = %2.6f in a single time step (moved %2.6f). Consider reducing TIME_STEP or tweaking k_elast, d_dumping.\n", id, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, inc_pos_max);
-    //TODO: implement a fix (e.g., scale back the movement to the maximum allowed)
+  if (inc_pos_max > FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE) {
+    if (ABORT_ON_UNSTABLE_FNODE_MOVE == 1) {
+      unstable_move = 1;
+    } 
+    else { 
+      // If not aborting, cap the movement to avoid instability and divergence
+      float scale_factor = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / inc_pos_max;
+      agent_fx *= scale_factor;
+      agent_fy *= scale_factor;
+      agent_fz *= scale_factor;
+      agent_vx *= scale_factor;
+      agent_vy *= scale_factor;
+      agent_vz *= scale_factor;
+      agent_x = prev_agent_x + agent_vx * TIME_STEP;
+      agent_y = prev_agent_y + agent_vy * TIME_STEP;
+      agent_z = prev_agent_z + agent_vz * TIME_STEP;
+
+    }
+    
+    if (DEBUG_PRINTING == 1) {
+      printf("WARNING: FNODE agent %d moved more than FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE = %2.6f in a single time step (moved %2.6f). Consider reducing TIME_STEP or tweaking k_elast, d_dumping.\n", id, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, inc_pos_max);
+    }
   }
   
   
@@ -452,6 +473,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
   FLAMEGPU->setVariable<uint8_t>("clamped_by_neg", clamped_by_neg);
   FLAMEGPU->setVariable<uint8_t>("clamped_bz_pos", clamped_bz_pos);
   FLAMEGPU->setVariable<uint8_t>("clamped_bz_neg", clamped_bz_neg);
+  FLAMEGPU->setVariable<uint8_t>("unstable_move", unstable_move);
   FLAMEGPU->setVariable<float>("f_bx_pos", f_bx_pos);
   FLAMEGPU->setVariable<float>("f_bx_neg", f_bx_neg);
   FLAMEGPU->setVariable<float>("f_by_pos", f_by_pos);

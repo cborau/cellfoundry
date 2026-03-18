@@ -72,6 +72,14 @@ def _load_pickle(path):
         return _SafeUnpickler(f).load()
 
 
+def _read_log_tail(path: str, max_chars: int) -> str:
+    if not os.path.isfile(path):
+        return ""
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+    return content[-max_chars:]
+
+
 # ---------------------------------------------------------------------------
 # Configuration loader
 # ---------------------------------------------------------------------------
@@ -149,37 +157,37 @@ def run_trial_subprocess(
     ]
     print(f"  [trial] Running: {' '.join(cmd)}")
     t0 = time.time()
-    proc = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=timeout if timeout > 0 else None,
-    )
+    stdout_log = os.path.join(result_dir, "stdout.log")
+    stderr_log = os.path.join(result_dir, "stderr.log")
+    with open(stdout_log, "w", encoding="utf-8", errors="replace") as stdout_handle, open(
+        stderr_log, "w", encoding="utf-8", errors="replace"
+    ) as stderr_handle:
+        proc = subprocess.run(
+            cmd,
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            text=True,
+            timeout=timeout if timeout > 0 else None,
+        )
     elapsed = time.time() - t0
     print(f"  [trial] Finished in {elapsed:.1f}s (exit code {proc.returncode})")
 
     if proc.returncode != 0:
-        # Dump stderr for debugging
-        err_log = os.path.join(result_dir, "stderr.log")
-        with open(err_log, "w") as f:
-            f.write(proc.stderr)
+        stderr_tail = _read_log_tail(stderr_log, 500)
         raise RuntimeError(
             f"model.py exited with code {proc.returncode}. "
-            f"See {err_log} for details.\n"
-            f"Last 500 chars of stderr:\n{proc.stderr[-500:]}"
+            f"See {stderr_log} for details.\n"
+            f"Last 500 chars of stderr:\n{stderr_tail}"
         )
 
     # Find the pickle file
     pickle_path = os.path.join(result_dir, "output_data_0.pickle")
     if not os.path.isfile(pickle_path):
-        # Dump full stdout for post-mortem
-        stdout_log = os.path.join(result_dir, "stdout.log")
-        with open(stdout_log, "w") as f:
-            f.write(proc.stdout)
+        stdout_tail = _read_log_tail(stdout_log, 1500)
         raise FileNotFoundError(
             f"Expected pickle not found at {pickle_path}. "
             f"Full stdout saved to {stdout_log}.\n"
-            f"model.py stdout (last 1500 chars):\n{proc.stdout[-1500:]}"
+            f"model.py stdout (last 1500 chars):\n{stdout_tail}"
         )
 
     return _load_pickle(pickle_path)

@@ -149,6 +149,69 @@ def _raise_if_axis_selection_has_no_signal(
         )
 
 
+def _compute_differential_modulus(
+    strain: pd.Series | np.ndarray,
+    stress: pd.Series | np.ndarray,
+    smooth_window: int = 5,
+    smooth_polyorder: int = 2,
+) -> np.ndarray:
+    """Compute K(epsilon) = d(stress)/d(strain) with optional smoothing."""
+    strain_arr = np.asarray(strain, dtype=float)
+    stress_arr = np.asarray(stress, dtype=float)
+
+    if strain_arr.shape != stress_arr.shape:
+        raise ValueError("strain and stress must have the same shape")
+    if strain_arr.ndim != 1:
+        raise ValueError("strain and stress must be 1-D")
+    if len(strain_arr) == 0:
+        return np.array([], dtype=float)
+
+    invalid_strain = np.where(~np.isfinite(strain_arr))[0]
+    if invalid_strain.size:
+        first_idx = ", ".join(str(i) for i in invalid_strain[:5])
+        raise ValueError(
+            "Non-finite strain encountered while computing differential modulus: "
+            f"count={invalid_strain.size}, first_indices=[{first_idx}]"
+        )
+
+    invalid_stress = np.where(~np.isfinite(stress_arr))[0]
+    if invalid_stress.size:
+        first_idx = ", ".join(str(i) for i in invalid_stress[:5])
+        raise ValueError(
+            "Non-finite stress encountered while computing differential modulus: "
+            f"count={invalid_stress.size}, first_indices=[{first_idx}]"
+        )
+
+    d_stress = np.gradient(stress_arr)
+    d_strain = np.gradient(strain_arr)
+
+    sim_K = np.zeros_like(stress_arr)
+    safe_mask = np.abs(d_strain) > 1e-15
+    sim_K[safe_mask] = d_stress[safe_mask] / d_strain[safe_mask]
+
+    invalid_modulus = np.where(~np.isfinite(sim_K))[0]
+    if invalid_modulus.size:
+        first_idx = ", ".join(str(i) for i in invalid_modulus[:5])
+        raise ValueError(
+            "Non-finite differential modulus encountered after differentiation: "
+            f"count={invalid_modulus.size}, first_indices=[{first_idx}]"
+        )
+
+    if smooth_window > 2 and len(sim_K) >= smooth_window:
+        from scipy.signal import savgol_filter
+
+        if smooth_window % 2 == 0:
+            smooth_window += 1
+        try:
+            sim_K = savgol_filter(sim_K, smooth_window, min(smooth_polyorder, smooth_window - 1))
+        except Exception as exc:
+            raise ValueError(
+                "Savitzky-Golay smoothing failed while computing differential modulus"
+            ) from exc
+
+    return sim_K
+
+
 # ---------------------------------------------------------------------------
 # Built-in objectives
 # ---------------------------------------------------------------------------
@@ -426,27 +489,15 @@ def differential_modulus_error(results: dict, reference_path: str, **kwargs) -> 
     )
     _raise_if_axis_selection_has_no_signal(sim_strain, sim_stress, ref, force_type, axis)
 
-    # Convert to numpy
     strain_arr = sim_strain.values.astype(float)
-    stress_arr = sim_stress.values.astype(float)
-
-    # Numerical derivative  dσ/dε  (central differences where possible)
-    d_stress = np.gradient(stress_arr)
-    d_strain = np.gradient(strain_arr)
-    # Avoid division by zero
-    safe_mask = np.abs(d_strain) > 1e-15
-    sim_K = np.zeros_like(stress_arr)
-    sim_K[safe_mask] = d_stress[safe_mask] / d_strain[safe_mask]
-
-    # Optional Savitzky-Golay smoothing
     smooth_window = int(kwargs.get("smooth_window", 5))
     smooth_polyorder = int(kwargs.get("smooth_polyorder", 2))
-    if smooth_window > 2 and len(sim_K) >= smooth_window:
-        from scipy.signal import savgol_filter
-        # Window must be odd
-        if smooth_window % 2 == 0:
-            smooth_window += 1
-        sim_K = savgol_filter(sim_K, smooth_window, min(smooth_polyorder, smooth_window - 1))
+    sim_K = _compute_differential_modulus(
+        strain=sim_strain,
+        stress=sim_stress,
+        smooth_window=smooth_window,
+        smooth_polyorder=smooth_polyorder,
+    )
 
     # Interpolate to match reference length
     sim_strain_interp = _interpolate_to_match(pd.Series(strain_arr), len(ref))

@@ -42,6 +42,7 @@ from optimizer.objectives import (
     shear_stress_strain_curve_error,
     differential_modulus_error,
     shear_differential_modulus_error,
+    _compute_differential_modulus,
     _extract_sim_strain_stress,
     _interpolate_to_match,
     OBJECTIVE_REGISTRY,
@@ -230,21 +231,14 @@ def _plot_real_data(results: dict, ref_df: pd.DataFrame, obj_name: str, kwargs: 
     is_diff_modulus = "diff_modulus" in obj_name
 
     if is_diff_modulus:
-        stress_arr = sim_stress_arr
-        strain_arr = sim_strain.values.astype(float)
-        d_stress = np.gradient(stress_arr)
-        d_strain = np.gradient(strain_arr)
-        safe = np.abs(d_strain) > 1e-15
-        sim_K = np.zeros_like(stress_arr)
-        sim_K[safe] = d_stress[safe] / d_strain[safe]
-
         smooth_window = int(kwargs.get("smooth_window", 5))
         smooth_polyorder = int(kwargs.get("smooth_polyorder", 2))
-        if smooth_window > 2 and len(sim_K) >= smooth_window:
-            from scipy.signal import savgol_filter
-            if smooth_window % 2 == 0:
-                smooth_window += 1
-            sim_K = savgol_filter(sim_K, smooth_window, min(smooth_polyorder, smooth_window - 1))
+        sim_K = _compute_differential_modulus(
+            strain=sim_strain,
+            stress=sim_stress,
+            smooth_window=smooth_window,
+            smooth_polyorder=smooth_polyorder,
+        )
 
         sim_y = sim_K
         sim_y_interp = _interpolate_to_match(pd.Series(sim_K), len(ref_df))

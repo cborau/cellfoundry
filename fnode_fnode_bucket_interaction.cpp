@@ -252,12 +252,6 @@ FLAMEGPU_AGENT_FUNCTION(fnode_fnode_bucket_interaction, flamegpu::MessageBucket,
         agent_fy += -1 * total_f * cos_y;
         agent_fz += -1 * total_f * cos_z;
       }
-
-      if (DEBUG_PRINTING == 1 && (id == 9 || id == 10 || id == 11 || id == 12)) {
-         printf("ECM interaction [id1: %d - id2: %d] agent_pos (%2.6f, %2.6f, %2.6f), message_pos (%2.6f, %2.6f, %2.6f)\n", id, message_id, agent_x, agent_y, agent_z, message_x, message_y, message_z);
-         printf("ECM interaction id1: %d - id2: %d distance -> (%2.6f)\n", id, message_id, distance);
-         printf("ECM interaction id1: %d - id2: %d total_f -> %2.6f (%2.6f , %2.6f, %2.6f)\n", id, message_id, total_f, -1 * total_f * cos_x, -1 * total_f * cos_y, -1 * total_f * cos_z);
-      }
     }
   }
   

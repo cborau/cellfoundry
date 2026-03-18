@@ -25,7 +25,7 @@
 # --- Optuna study settings ------------------------------------------------
 study:
   name: "cellfoundry_diff_modulus"
-  n_trials: 40
+  n_trials: 100
   sampler: TPE
   seed: 42
   direction: minimize
@@ -42,6 +42,7 @@ objective:
     strain_weight: 0.0          # weight of strain MSE relative to K(ε) MSE
     smooth_window: 5            # Savitzky-Golay window (odd int; 0/1 = no smoothing)
     smooth_polyorder: 2         # polynomial order for Savitzky-Golay filter
+    stress_area_mode: "per_fibre_area"
 
 # Option B: Shear differential modulus (uncomment and replace Option A above)
 # objective:
@@ -59,8 +60,15 @@ parameters:
   # Core elastic stiffness of each fibre segment
   FIBRE_SEGMENT_K_ELAST:
     type: float
-    low: 1.0
-    high: 500.0
+    low: 0.01
+    high: 10.0
+    log: true
+
+  # Damping coefficient for fibre-segment movement (affects dynamic response and thus effective stiffness)
+  FIBRE_SEGMENT_D_DUMPING:
+    type: float
+    low: 0.0001
+    high: 1.0
     log: true
 
   # Buckling coefficient d0 — controls the exponential softening rate
@@ -90,8 +98,14 @@ parameters:
   # Caps the exponential growth of getStrainKfactor to prevent unbounded forces.
   MAX_STRAIN_K_FACTOR:
     type: float
-    low: 2.0
+    low: 5.0
     high: 50.0
+    log: true
+  
+  ECM_ETA:  # Effective viscosity of the ECM (affects FNODE damping and thus dynamic response)
+    type: float
+    low: 0.1
+    high: 100.0
     log: true
 
   # CELL_RADIUS:
@@ -108,8 +122,8 @@ model:
   cleanup_trials: false
 
   extra_overrides:
-    STEPS: 50000
-    SAVE_EVERY_N_STEPS: 1000
+    STEPS: 5000
+    SAVE_EVERY_N_STEPS: 100
     INCLUDE_FIBRE_NETWORK: true
     INCLUDE_CELLS: false
     INCLUDE_CELL_CYCLE: false
@@ -118,3 +132,4 @@ model:
     SHOW_PLOTS: false
     SAVE_DATA_TO_FILE: false
     SAVE_PICKLE: true
+    ABORT_ON_UNSTABLE_FNODE_MOVE: true
