@@ -575,8 +575,7 @@ def differential_modulus_error(results: dict, reference_path: str, **kwargs) -> 
     disable smoothing.  ``kwargs["smooth_polyorder"]`` (int, default 2) sets
     the polynomial order.
 
-    **Error weighting**: ``kwargs["strain_weight"]`` (default 0.1) — relative
-    weight of the strain-alignment MSE term.
+    **Error weighting**: ``kwargs["strain_weight"]`` (default 0.0) — weight of strain-range coverage penalty relative to K(ε) MSE”.
 
     **Initial stabilization cutoff**: ``kwargs["min_sim_strain"]`` ignores
     simulation samples below this strain before computing the modulus and error.

@@ -25,7 +25,7 @@
 # --- Optuna study settings ------------------------------------------------
 study:
   name: "cellfoundry_diff_modulus"
-  n_trials: 200
+  n_trials: 100
   sampler: TPE
   seed: 42
   direction: minimize
@@ -39,7 +39,7 @@ objective:
   kwargs:
     force_type: "normal"        # "normal" | "shear"
     strain_axis: 1              # 0=x, 1=y, 2=z  (axis of applied displacement)
-    strain_weight: 0.0          # weight of strain MSE relative to K(ε) MSE
+    strain_weight: 0.0          # weight of strain-range coverage penalty relative to K(ε) MSE
     smooth_window: 5            # Savitzky-Golay window (odd int; 0/1 = no smoothing)
     smooth_polyorder: 2         # polynomial order for Savitzky-Golay filter
     stress_area_mode: "per_fibre_area"
@@ -63,13 +63,6 @@ parameters:
     type: float
     low: 0.01
     high: 10.0
-    log: true
-
-  # Damping coefficient for fibre-segment movement (affects dynamic response and thus effective stiffness)
-  FIBRE_SEGMENT_D_DUMPING:
-    type: float
-    low: 0.0001
-    high: 1.0
     log: true
 
   # Buckling coefficient d0 — controls the exponential softening rate
