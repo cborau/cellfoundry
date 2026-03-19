@@ -72,12 +72,12 @@ STEPS = 5000
 # ----------------------------------------------------------------------
 ECM_K_ELAST = 0.2  # [nN/um]
 ECM_D_DUMPING = 0.04  # [nN·s/um]
-ECM_ETA = 20.0  # [nN·s/µm] Effective drag for overdamped FNODE motion (calibration parameter)
+ECM_ETA = 0.15  # [nN·s/µm] Effective drag for overdamped FNODE motion (calibration parameter)
 
 #BOUNDARY_COORDS = [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]  # +X,-X,+Y,-Y,+Z,-Z
-BOUNDARY_COORDS = [50.0, -50.0, 50.0, -50.0, 50.0, -50.0]# microdevice dimensions in um
+BOUNDARY_COORDS = [500.0, -500.0, 500.0, -500.0, 500.0, -500.0]# microdevice dimensions in um
 #BOUNDARY_COORDS = [coord / 1000.0 for coord in BOUNDARY_COORDS] # in mm
-BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0044, -0.0044, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
+BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
 BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[um/s]
 
 POISSON_DIRS = [0, 1]  # 0: xdir, 1:ydir, 2:zdir. poisson_ratio ~= -incL(dir1)/incL(dir2) dir2 is the direction in which the load is applied
@@ -137,14 +137,6 @@ OSCILLATORY_W = 2 * math.pi * OSCILLATORY_FREQ * TIME_STEP
 # Compute expected boundary positions after motion, WARNING: make sure the direction matches with OSCILLATORY_AMPLITUDE definition
 MAX_EXPECTED_BOUNDARY_POS_OSCILLATORY = 0.25 * (BOUNDARY_COORDS[2] - BOUNDARY_COORDS[3]) + BOUNDARY_COORDS[2]  # max pos reached at sin()=1
 
-# Fitting parameters for the fiber strain-stiffening phenomena
-# Ref: https://bio.physik.fau.de/publications/Steinwachs%20Nat%20Meth%202016.pdf
-# ----------------------------------------------------------------------
-BUCKLING_COEFF_D0 = 0.1
-STRAIN_STIFFENING_COEFF_DS = 0.25
-CRITICAL_STRAIN = 0.1
-MAX_STRAIN_K_FACTOR = 100.0  # Cap on the strain-dependent stiffness multiplier (plateau / damage limit)
-
 # Parallel disp rate values are overrun in oscillatory assays
 # ----------------------------------------------------------------------
 if OSCILLATORY_SHEAR_ASSAY:
@@ -158,19 +150,27 @@ if OSCILLATORY_SHEAR_ASSAY:
 # | FIBRE NETWORK PARAMETERS                                           |
 # +====================================================================+
 INCLUDE_FIBRE_NETWORK = True
-NETWORK_FILE = 'mini_network.pkl'  # path to the .pkl file with node_coords + connectivity
-ALLOW_IRREGULAR_NETWORK = True  # default: False, meaning that all boundaries must have network nodes attached (e.g. a network going from -y to y and touching the other boundaries should have this variable set to True)
+NETWORK_FILE = 'network_medium_density.pkl'  # path to the .pkl file with node_coords + connectivity
+ALLOW_IRREGULAR_NETWORK = False  # default: False, meaning that all boundaries must have network nodes attached (e.g. a network going from -y to y and touching the other boundaries should have this variable set to True)
+
+# Fitting parameters for the fiber strain-stiffening phenomena
+# Ref: https://bio.physik.fau.de/publications/Steinwachs%20Nat%20Meth%202016.pdf
+# ----------------------------------------------------------------------
+BUCKLING_COEFF_D0 = 0.15
+STRAIN_STIFFENING_COEFF_DS = 0.85
+CRITICAL_STRAIN = 0.1
+MAX_STRAIN_K_FACTOR = 12.0  # Cap on the strain-dependent stiffness multiplier (plateau / damage limit)
 
 MAX_CONNECTIVITY = 8 # must match hard-coded C++ values
 # NOTE: These are calibrated model parameters (effective segment-level mechanics), not universal material constants.
 # They depend on collagen type/concentration, crosslinking, architecture and coarse-graining choices.
-FIBRE_SEGMENT_K_ELAST = 2.0  # [nN/um] Effective fibre-segment stiffness (baseline for tuning)
+FIBRE_SEGMENT_K_ELAST = 0.08  # [nN/um] Effective fibre-segment stiffness (baseline for tuning)
 FIBRE_SEGMENT_D_DUMPING = 0.0  # [nN*s/um] Effective fibre-segment damping (baseline for tuning)
 FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE = 45 # WARNING: must match the value used in network generation
 FIBRE_SECTION_AREA_UM2 = 0.05  # [um^2] Approximate collagen-fibre cross-section used for effective stress normalization
 FIBRE_NODE_BOUNDARY_INTERACTION_RADIUS = 0.05
 FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE = 0.0
-MAX_SEARCH_RADIUS_FNODES = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / 100.0 # must me smaller than FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
+MAX_SEARCH_RADIUS_FNODES = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / 10.0 # must me smaller than FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
 FIBRE_NODE_REPULSION_K = 0.0 * FIBRE_SEGMENT_K_ELAST  # [nN/um] Short-range FNODE-FNODE exclusion stiffness (kept below segment stiffness)
 # WARNING: THESE VARIABLES SIZE DEPENDS ON N_CELL_TYPES (DEFINED BELOW IN THE CELL PARAMETERS SECTION)
 # FNODE remodeling (degradation/deposition + birth/death)
@@ -900,7 +900,6 @@ BCORNER_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY
 BCORNER_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS)
 # A message to hold the location of an agent. WARNING: spatial3D messages already define x,y,z variables internally.
 BCORNER_location_message.newVariableInt("id")
-
 
 if INCLUDE_FIBRE_NETWORK:
     FNODE_spatial_location_message = model.newMessageSpatial3D("fnode_spatial_location_message")
