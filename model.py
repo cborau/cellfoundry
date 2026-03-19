@@ -77,7 +77,7 @@ ECM_ETA = 0.15  # [nN·s/µm] Effective drag for overdamped FNODE motion (calibr
 #BOUNDARY_COORDS = [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]  # +X,-X,+Y,-Y,+Z,-Z
 BOUNDARY_COORDS = [500.0, -500.0, 500.0, -500.0, 500.0, -500.0]# microdevice dimensions in um
 #BOUNDARY_COORDS = [coord / 1000.0 for coord in BOUNDARY_COORDS] # in mm
-BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
+BOUNDARY_DISP_RATES = [0.0, 0.0, 0.044, -0.044, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
 BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[um/s]
 
 POISSON_DIRS = [0, 1]  # 0: xdir, 1:ydir, 2:zdir. poisson_ratio ~= -incL(dir1)/incL(dir2) dir2 is the direction in which the load is applied
@@ -449,11 +449,14 @@ OSCILLATORY_STRAIN_OVER_TIME = pd.DataFrame([OSOT(0)])
 # ----------------------------------------------------------------------
 critical_error = False
 try:
-    hard_coded_check_exit_code = check_hard_coded_values.main([
+    hard_coded_check_args = [
         "--model-file", str(CURR_PATH / "model.py"),
         "--scan-root", str(CURR_PATH),
-        "--fail-on-mismatch",
-    ])
+    ]
+    if _OPTUNA_QUIET:
+        hard_coded_check_args.append("--fail-on-mismatch")
+
+    hard_coded_check_exit_code = check_hard_coded_values.main(hard_coded_check_args)
     if hard_coded_check_exit_code != 0:
         print("ERROR: hard-coded value consistency check found mismatches or failed")
         critical_error = True

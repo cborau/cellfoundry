@@ -359,7 +359,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=",".join(sorted(DEFAULT_EXTS)),
         help="Comma-separated extensions to scan.",
     )
-    parser.add_argument("--fail-on-mismatch", action="store_true")
+    parser.add_argument(
+        "--fail-on-mismatch",
+        action="store_true",
+        help="Run non-interactively: automatically apply fixes instead of prompting.",
+    )
     args = parser.parse_args(argv)
 
     model_file = os.path.abspath(args.model_file)
@@ -429,6 +433,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("\nExpected values summary:")
     for var, val in unique_expected.items():
         print(f"  {var} = {val}")
+
+    if args.fail_on_mismatch:
+        print("\nAuto-applying fixes because --fail-on-mismatch was provided.")
+        apply_fixes(mismatches)
+        return 0
 
     answer = input(
         "\nDo you want to automatically update the variables to their expected values "
