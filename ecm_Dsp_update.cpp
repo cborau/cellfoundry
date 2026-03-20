@@ -128,7 +128,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_Dsp_update, flamegpu::MessageSpatial3D, flamegpu::Me
   const float avg = (AVG_NETWORK_VOXEL_DENSITY > 0) ? (float)AVG_NETWORK_VOXEL_DENSITY : 1.0f;
   const float rho = (float)n_fibre / avg;
   
-  // Tunables (use diff_reduction_test.py to find optimal values for a given problem)
+  // Tunables (use manual_tests/test_diff_reduction.py to find optimal values for a given problem)
   const float alpha = 1.0f;     // strength of reduction
   const float m_min = 0.05f;    // floor multiplier so diffusion never fully stops
 

@@ -44,7 +44,7 @@ PAUSE_EVERY_STEP = False  # If True, the visualization stops every step until P 
 SAVE_PICKLE = True  # If True, dumps model configuration into a pickle file for post-processing
 SHOW_PLOTS = False  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
-SAVE_EVERY_N_STEPS = 100 # Affects both the .vtk files and the Dataframes storing boundary data
+SAVE_EVERY_N_STEPS = 1000 # Affects both the .vtk files and the Dataframes storing boundary data
 
 CURR_PATH = pathlib.Path(__file__).resolve().parent
 RES_PATH = CURR_PATH / 'result_files'
@@ -61,8 +61,8 @@ N = 21
 
 # Time simulation parameters
 # ----------------------------------------------------------------------
-TIME_STEP = 1.0 # s. WARNING: diffusion and cell migration events might need different scales
-STEPS = 5000
+TIME_STEP = 0.1 # s. WARNING: diffusion and cell migration events might need different scales
+STEPS = 50000
 
 # +====================================================================+
 # | BOUNDARY CONDITIONS                                                |
@@ -75,9 +75,9 @@ ECM_D_DUMPING = 0.04  # [nN·s/um]
 ECM_ETA = 0.15  # [nN·s/µm] Effective drag for overdamped FNODE motion (calibration parameter)
 
 #BOUNDARY_COORDS = [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]  # +X,-X,+Y,-Y,+Z,-Z
-BOUNDARY_COORDS = [500.0, -500.0, 500.0, -500.0, 500.0, -500.0]# microdevice dimensions in um
+BOUNDARY_COORDS = [50.0, -50.0, 50.0, -50.0, 50.0, -50.0]# microdevice dimensions in um
 #BOUNDARY_COORDS = [coord / 1000.0 for coord in BOUNDARY_COORDS] # in mm
-BOUNDARY_DISP_RATES = [0.0, 0.0, 0.044, -0.044, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
+BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0044, -0.0044, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
 BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[um/s]
 
 POISSON_DIRS = [0, 1]  # 0: xdir, 1:ydir, 2:zdir. poisson_ratio ~= -incL(dir1)/incL(dir2) dir2 is the direction in which the load is applied
@@ -150,7 +150,7 @@ if OSCILLATORY_SHEAR_ASSAY:
 # | FIBRE NETWORK PARAMETERS                                           |
 # +====================================================================+
 INCLUDE_FIBRE_NETWORK = True
-NETWORK_FILE = 'network_medium_density.pkl'  # path to the .pkl file with node_coords + connectivity
+NETWORK_FILE = 'mini_network_high_res.pkl'  # path to the .pkl file with node_coords + connectivity
 ALLOW_IRREGULAR_NETWORK = False  # default: False, meaning that all boundaries must have network nodes attached (e.g. a network going from -y to y and touching the other boundaries should have this variable set to True)
 
 # Fitting parameters for the fiber strain-stiffening phenomena
@@ -2044,7 +2044,7 @@ class CheckFNODEStability(pyflamegpu.HostFunction):
         super().__init__()
 
     def run(self, FLAMEGPU):
-        global INCLUDE_FIBRE_NETWORK, ABORT_ON_UNSTABLE_FNODE_MOVE
+        global INCLUDE_FIBRE_NETWORK, ABORT_ON_UNSTABLE_FNODE_MOVE, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
 
         if not INCLUDE_FIBRE_NETWORK or not ABORT_ON_UNSTABLE_FNODE_MOVE:
             return
@@ -2055,7 +2055,7 @@ class CheckFNODEStability(pyflamegpu.HostFunction):
             raise RuntimeError(
                 "Unstable FNODE motion detected at step "
                 f"{stepCounter}: {unstable_moves} node(s) exceeded "
-                "FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE in a single step."
+                f"FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE:{FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE} in a single step."
             )
 
 

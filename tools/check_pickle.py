@@ -151,10 +151,10 @@ def main() -> None:
         print(f"Top-level keys ({len(keys)}):")
         for key in keys:
             print(f"\n{key}:")
-            summarize_value(data[key], indent=2, max_depth=2, max_items=5, dataframe_rows=3)
+            summarize_value(data[key], indent=2, max_depth=2, max_items=10, dataframe_rows=3)
     else:
         print("\nTop-level content:")
-        summarize_value(data, indent=2, max_depth=2, max_items=5, dataframe_rows=3)
+        summarize_value(data, indent=2, max_depth=2, max_items=10, dataframe_rows=3)
 
 
 if __name__ == "__main__":

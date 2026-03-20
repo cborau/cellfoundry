@@ -46,6 +46,7 @@ from optimizer.objectives import (
     _extract_sim_strain_stress,
     _filter_simulation_from_min_strain,
     _interpolate_response_to_reference_x,
+    _smooth_signal_savgol,
     OBJECTIVE_REGISTRY,
 )
 
@@ -212,9 +213,9 @@ def _plot_real_data(results: dict, ref_df: pd.DataFrame, obj_name: str, kwargs: 
     """Plot simulated vs reference curves for visual inspection.
 
     Layout (2×2):
-        Top-left : stress (or K) vs strain — sim raw, sim interpolated, ref
+        Top-left : stress (or K) vs strain — sim curve, sim interpolated, ref
         Top-right: strain vs timestep index  (raw sim time-series)
-        Bot-left : stress (or K) vs timestep index  (raw sim time-series)
+        Bot-left : raw and smoothed stress vs timestep index
         Bot-right: both +/- face forces vs timestep (for shear) or residuals
     """
     force_type = "shear" if "shear" in obj_name else "normal"
@@ -234,28 +235,47 @@ def _plot_real_data(results: dict, ref_df: pd.DataFrame, obj_name: str, kwargs: 
     )
     sim_strain = pd.Series(sim_strain_arr)
     sim_stress = pd.Series(sim_stress_arr)
+    stress_smooth_arr = None
 
     is_diff_modulus = "diff_modulus" in obj_name
 
     if is_diff_modulus:
         smooth_window = int(kwargs.get("smooth_window", 5))
         smooth_polyorder = int(kwargs.get("smooth_polyorder", 2))
+        stress_smooth_arr = _smooth_signal_savgol(
+            sim_stress,
+            smooth_window=smooth_window,
+            smooth_polyorder=smooth_polyorder,
+            label="stress",
+        )
+        modulus_smooth_window = int(kwargs.get("modulus_smooth_window", 0))
+        modulus_smooth_polyorder = kwargs.get("modulus_smooth_polyorder")
+        if modulus_smooth_polyorder is not None:
+            modulus_smooth_polyorder = int(modulus_smooth_polyorder)
         sim_K = _compute_differential_modulus(
             strain=sim_strain,
             stress=sim_stress,
             smooth_window=smooth_window,
             smooth_polyorder=smooth_polyorder,
+            modulus_smooth_window=modulus_smooth_window,
+            modulus_smooth_polyorder=modulus_smooth_polyorder,
         )
 
         sim_y = sim_K
         ref_y = ref_df["differential_modulus"].values
         ylabel = "Diff. modulus K(ε) [kPa]"
         title_suffix = "Differential Modulus"
+        sim_curve_label = "Sim K (from smoothed stress)"
+        if modulus_smooth_window > 1:
+            sim_curve_label = "Sim K (post-smoothed)"
+        sim_interp_label = "Sim K (interp)"
     else:
         sim_y = sim_stress.values
         ref_y = ref_df["stress"].values
         ylabel = "Stress [kPa]"
         title_suffix = "Stress-Strain"
+        sim_curve_label = "Sim stress"
+        sim_interp_label = "Sim stress (interp)"
 
     sim_strain_arr = sim_strain.values
     ref_strain = ref_df["strain"].values.astype(float)
@@ -278,8 +298,8 @@ def _plot_real_data(results: dict, ref_df: pd.DataFrame, obj_name: str, kwargs: 
 
     # ── Top-left: main curve (stress or K vs strain) ──────────────────────
     ax = axes[0, 0]
-    ax.plot(sim_strain_arr, sim_y, "-", color="tab:blue", alpha=0.4, linewidth=1, label="Sim (raw)")
-    ax.plot(sim_strain_interp, sim_y_interp, "o-", color="tab:blue", markersize=3, label="Sim (interp)")
+    ax.plot(sim_strain_arr, sim_y, "-", color="tab:blue", alpha=0.5, linewidth=1.2, label=sim_curve_label)
+    ax.plot(sim_strain_interp, sim_y_interp, "o-", color="tab:blue", markersize=3, label=sim_interp_label)
     ax.plot(ref_strain, ref_y, "s--", color="tab:red", markersize=4, label="Reference")
     min_sim_strain = kwargs.get("min_sim_strain")
     if min_sim_strain is not None:
@@ -305,14 +325,23 @@ def _plot_real_data(results: dict, ref_df: pd.DataFrame, obj_name: str, kwargs: 
 
     # ── Bot-left: stress (or K) vs timestep ───────────────────────────────
     ax_sf = axes[1, 0]
-    ax_sf.plot(timesteps, sim_stress_arr, "-", color="tab:blue", label="Sim Stress")
+    ax_sf.plot(timesteps, sim_stress_arr, "-", color="tab:blue", alpha=0.7, label="Sim stress (raw)")
+    if stress_smooth_arr is not None and not np.array_equal(stress_smooth_arr, sim_stress_arr):
+        ax_sf.plot(
+            timesteps,
+            stress_smooth_arr,
+            "-",
+            color="tab:orange",
+            linewidth=2,
+            label="Sim stress (smoothed)",
+        )
     if "stress" in ref_df.columns:
         ref_stress = ref_df["stress"].values
         ax_sf.axhline(np.min(ref_stress), color="tab:red", ls="--", alpha=0.5, label=f"Ref min ({np.min(ref_stress):.4g})")
         ax_sf.axhline(np.max(ref_stress), color="tab:red", ls="--", alpha=0.5, label=f"Ref max ({np.max(ref_stress):.4g})")
     ax_sf.set_xlabel("Timestep index")
     ax_sf.set_ylabel("Stress [kPa]")
-    ax_sf.set_title("Sim stress over time")
+    ax_sf.set_title("Sim stress over time (raw + smoothed)")
     ax_sf.legend(fontsize=8)
     ax_sf.grid(True, alpha=0.3)
 
@@ -438,6 +467,8 @@ def run_real_data_test(args):
     if "diff_modulus" in obj_name:
         kwargs["smooth_window"] = args.smooth_window
         kwargs["smooth_polyorder"] = args.smooth_polyorder
+        kwargs["modulus_smooth_window"] = args.modulus_smooth_window
+        kwargs["modulus_smooth_polyorder"] = args.modulus_smooth_polyorder
     kwargs["strain_weight"] = args.strain_weight
 
     print(f"\nRunning: {obj_name}")
@@ -502,11 +533,19 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--smooth-window", type=int, default=5,
-        help="Savitzky-Golay window for diff. modulus smoothing (default: 5).",
+        help="Savitzky-Golay window for stress pre-smoothing before d(stress)/d(strain) (default: 5).",
     )
     parser.add_argument(
         "--smooth-polyorder", type=int, default=2,
-        help="Savitzky-Golay polynomial order (default: 2).",
+        help="Savitzky-Golay polynomial order for stress pre-smoothing (default: 2).",
+    )
+    parser.add_argument(
+        "--modulus-smooth-window", type=int, default=0,
+        help="Optional Savitzky-Golay window for post-smoothing the differential modulus (default: 0).",
+    )
+    parser.add_argument(
+        "--modulus-smooth-polyorder", type=int, default=2,
+        help="Savitzky-Golay polynomial order for modulus post-smoothing (default: 2).",
     )
     parser.add_argument(
         "--min-sim-strain", type=float, default=None,

@@ -243,13 +243,59 @@ def _raise_if_axis_selection_has_no_signal(
         )
 
 
+def _smooth_signal_savgol(
+    values: pd.Series | np.ndarray,
+    smooth_window: int = 0,
+    smooth_polyorder: int = 2,
+    *,
+    label: str,
+) -> np.ndarray:
+    """Apply Savitzky-Golay smoothing to a 1-D signal when enabled."""
+    values_arr = np.asarray(values, dtype=float)
+
+    if values_arr.ndim != 1:
+        raise ValueError(f"{label} must be 1-D for smoothing")
+    if len(values_arr) == 0 or smooth_window <= 1:
+        return values_arr.copy()
+
+    max_window = len(values_arr) if len(values_arr) % 2 == 1 else len(values_arr) - 1
+    if max_window < 3:
+        return values_arr.copy()
+
+    window = min(int(smooth_window), max_window)
+    if window < 3:
+        return values_arr.copy()
+    if window % 2 == 0:
+        window -= 1
+    if window < 3:
+        return values_arr.copy()
+
+    polyorder = min(int(smooth_polyorder), window - 1)
+    if polyorder < 0:
+        raise ValueError(f"Invalid Savitzky-Golay polyorder for {label}: {smooth_polyorder}")
+
+    try:
+        from scipy.signal import savgol_filter
+
+        return np.asarray(savgol_filter(values_arr, window, polyorder), dtype=float)
+    except Exception as exc:
+        raise ValueError(f"Savitzky-Golay smoothing failed for {label}") from exc
+
+
 def _compute_differential_modulus(
     strain: pd.Series | np.ndarray,
     stress: pd.Series | np.ndarray,
     smooth_window: int = 5,
     smooth_polyorder: int = 2,
+    modulus_smooth_window: int = 0,
+    modulus_smooth_polyorder: int | None = None,
 ) -> np.ndarray:
-    """Compute K(epsilon) = d(stress)/d(strain) with optional smoothing."""
+    """Compute K(epsilon) = d(stress)/d(strain) with optional smoothing.
+
+    ``smooth_window`` / ``smooth_polyorder`` are applied to the stress signal
+    before differentiation. ``modulus_smooth_window`` optionally applies a
+    second Savitzky-Golay pass to the resulting differential modulus.
+    """
     strain_arr = np.asarray(strain, dtype=float)
     stress_arr = np.asarray(stress, dtype=float)
 
@@ -276,6 +322,13 @@ def _compute_differential_modulus(
             f"count={invalid_stress.size}, first_indices=[{first_idx}]"
         )
 
+    stress_arr = _smooth_signal_savgol(
+        stress_arr,
+        smooth_window=smooth_window,
+        smooth_polyorder=smooth_polyorder,
+        label="stress",
+    )
+
     d_stress = np.gradient(stress_arr)
     d_strain = np.gradient(strain_arr)
 
@@ -291,17 +344,15 @@ def _compute_differential_modulus(
             f"count={invalid_modulus.size}, first_indices=[{first_idx}]"
         )
 
-    if smooth_window > 2 and len(sim_K) >= smooth_window:
-        from scipy.signal import savgol_filter
+    if modulus_smooth_polyorder is None:
+        modulus_smooth_polyorder = smooth_polyorder
 
-        if smooth_window % 2 == 0:
-            smooth_window += 1
-        try:
-            sim_K = savgol_filter(sim_K, smooth_window, min(smooth_polyorder, smooth_window - 1))
-        except Exception as exc:
-            raise ValueError(
-                "Savitzky-Golay smoothing failed while computing differential modulus"
-            ) from exc
+    sim_K = _smooth_signal_savgol(
+        sim_K,
+        smooth_window=modulus_smooth_window,
+        smooth_polyorder=modulus_smooth_polyorder,
+        label="differential modulus",
+    )
 
     return sim_K
 
@@ -570,10 +621,15 @@ def differential_modulus_error(results: dict, reference_path: str, **kwargs) -> 
 
     **Shear component** (shear only): ``kwargs["shear_component"]`` (0 or 1).
 
-    **Smoothing**: ``kwargs["smooth_window"]`` (int, default 5) — Savitzky-Golay
-    window length for smoothing the numerical derivative.  Set to 0 or 1 to
-    disable smoothing.  ``kwargs["smooth_polyorder"]`` (int, default 2) sets
-    the polynomial order.
+        **Smoothing**:
+                - ``kwargs["smooth_window"]`` (int, default 5) and
+                    ``kwargs["smooth_polyorder"]`` (int, default 2) apply
+                    Savitzky-Golay smoothing to the **stress** signal *before*
+                    differentiation.
+                - ``kwargs["modulus_smooth_window"]`` (int, default 0) and
+                    ``kwargs["modulus_smooth_polyorder"]`` optionally smooth the
+                    resulting differential modulus *after* differentiation.
+                - Set either window to 0 or 1 to disable that smoothing stage.
 
     **Error weighting**: ``kwargs["strain_weight"]`` (default 0.0) — weight of strain-range coverage penalty relative to K(ε) MSE”.
 
@@ -608,11 +664,17 @@ def differential_modulus_error(results: dict, reference_path: str, **kwargs) -> 
     strain_arr = sim_strain.values.astype(float)
     smooth_window = int(kwargs.get("smooth_window", 5))
     smooth_polyorder = int(kwargs.get("smooth_polyorder", 2))
+    modulus_smooth_window = int(kwargs.get("modulus_smooth_window", 0))
+    modulus_smooth_polyorder = kwargs.get("modulus_smooth_polyorder")
+    if modulus_smooth_polyorder is not None:
+        modulus_smooth_polyorder = int(modulus_smooth_polyorder)
     sim_K = _compute_differential_modulus(
         strain=sim_strain,
         stress=sim_stress,
         smooth_window=smooth_window,
         smooth_polyorder=smooth_polyorder,
+        modulus_smooth_window=modulus_smooth_window,
+        modulus_smooth_polyorder=modulus_smooth_polyorder,
     )
 
     ref_strain = ref["strain"].to_numpy(dtype=float)

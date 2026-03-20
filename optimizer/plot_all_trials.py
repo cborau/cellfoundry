@@ -326,13 +326,13 @@ def main():
         "--smooth-window",
         type=int,
         default=5,
-        help="Savitzky-Golay window used for differential modulus. Use 1 to disable smoothing.",
+        help="Savitzky-Golay window used to pre-smooth stress before computing differential modulus.",
     )
     parser.add_argument(
         "--smooth-polyorder",
         type=int,
         default=2,
-        help="Savitzky-Golay polynomial order used for differential modulus.",
+        help="Savitzky-Golay polynomial order used for stress pre-smoothing.",
     )
     parser.add_argument(
         "--save-dir",

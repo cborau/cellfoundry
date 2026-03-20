@@ -24,12 +24,12 @@
 
 # --- Optuna study settings ------------------------------------------------
 study:
-  name: "cellfoundry_diff_modulus"
-  n_trials: 100
+  name: "cellfoundry_diff_modulus_high_res"
+  n_trials: 400
   sampler: TPE
-  seed: 42
+  seed: 1
   direction: minimize
-  storage: "sqlite:///cellfoundry_diff_modulus.db"
+  storage: "sqlite:///cellfoundry_diff_modulus_high_res.db"
 
 # --- Objective function ---------------------------------------------------
 # Option A: Normal (uniaxial) differential modulus
@@ -40,7 +40,7 @@ objective:
     force_type: "normal"        # "normal" | "shear"
     strain_axis: 1              # 0=x, 1=y, 2=z  (axis of applied displacement)
     strain_weight: 0.0          # weight of strain-range coverage penalty relative to K(ε) MSE
-    smooth_window: 5            # Savitzky-Golay window for stress pre-smoothing before differentiation
+    smooth_window: 10            # Savitzky-Golay window for stress pre-smoothing before differentiation
     smooth_polyorder: 2         # polynomial order for stress pre-smoothing
     modulus_smooth_window: 0    # optional post-smoothing of K(ε); 0/1 disables it
     modulus_smooth_polyorder: 2 # polynomial order for K(ε) post-smoothing
@@ -100,11 +100,6 @@ parameters:
     high: 50.0
     log: true
   
-  ECM_ETA:  # Effective viscosity of the ECM (affects FNODE damping and thus dynamic response)
-    type: float
-    low: 0.1
-    high: 100.0
-    log: true
 
   # CELL_RADIUS:
   #   type: array_float
@@ -120,8 +115,8 @@ model:
   cleanup_trials: false
 
   extra_overrides:
-    STEPS: 5000
-    SAVE_EVERY_N_STEPS: 100
+    STEPS: 50000
+    SAVE_EVERY_N_STEPS: 1000
     INCLUDE_FIBRE_NETWORK: true
     INCLUDE_CELLS: false
     INCLUDE_CELL_CYCLE: false
