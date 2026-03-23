@@ -18,7 +18,7 @@
 
 study:
   name: "cellfoundry_cell_speed"
-  n_trials: 30
+  n_trials: 500
   sampler: TPE
   seed: 42
   direction: minimize
@@ -28,7 +28,7 @@ objective:
   function: cell_speed_error
   reference: "optimizer/reference_data/target_cell_speed.csv"
   kwargs:
-    population_stat: mean
+    population_stat: median
     include_dead: false
     normalize: true
     min_trajectory_time: 1.0
@@ -37,16 +37,16 @@ parameters:
   CELL_SPEED_REF:
     type: array_float
     elements:
-      0: {low: 0.1, high: 3.0}
-      1: {low: 0.1, high: 3.0}
-      2: {low: 0.1, high: 3.0}
+      0: {low: 0.01, high: 2.0}
+      1: {low: 0.01, high: 2.0}
+      2: {low: 0.01, high: 2.0}
 
   BROWNIAN_MOTION_STRENGTH_FACTOR:
     type: array_float
     elements:
-      0: {low: 0.0, high: 10.0}
-      1: {low: 0.0, high: 10.0}
-      2: {low: 0.0, high: 10.0}
+      0: {low: 0.0, high: 2.0}
+      1: {low: 0.0, high: 2.0}
+      2: {low: 0.0, high: 2.0}
 
   CHEMOTAXIS_CHI:
     type: array_float
@@ -54,6 +54,13 @@ parameters:
       0: {low: 0.0, high: 10.0}
       1: {low: 0.0, high: 10.0}
       2: {low: 0.0, high: 10.0}
+
+  # DIFFUSION_COEFF_MULTI:
+  #   type: array_float
+  #   elements:
+  #     0: {low: 10.0, high: 3000.0}
+  #   log: true
+
 
 model:
   result_dir: "optuna_cell_speed_results"
@@ -63,12 +70,14 @@ model:
   extra_overrides:
     STEPS: 200
     SAVE_EVERY_N_STEPS: 20
+    PERIODIC_BOUNDARIES_FOR_CELLS: false # if True, veff has no meaning, so should be removed from the target file.
     INCLUDE_CELLS: true
     INCLUDE_CELL_CYCLE: false
     INCLUDE_FIBRE_NETWORK: false
     INCLUDE_FOCAL_ADHESIONS: false
     INCLUDE_DIFFUSION: true
-    INCLUDE_DUROTAXIS: false 
+    INCLUDE_DUROTAXIS: false
+    INCLUDE_CHEMOTAXIS: true 
     VISUALISATION: false
     SHOW_PLOTS: false
     SAVE_DATA_TO_FILE: false

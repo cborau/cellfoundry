@@ -44,7 +44,7 @@ PAUSE_EVERY_STEP = False  # If True, the visualization stops every step until P 
 SAVE_PICKLE = True  # If True, dumps model configuration into a pickle file for post-processing
 SHOW_PLOTS = False  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
-SAVE_EVERY_N_STEPS = 100 # Affects both the .vtk files and the Dataframes storing boundary data
+SAVE_EVERY_N_STEPS = 20 # Affects both the .vtk files and the Dataframes storing boundary data
 
 CURR_PATH = pathlib.Path(__file__).resolve().parent
 RES_PATH = CURR_PATH / 'result_files'
@@ -62,7 +62,7 @@ N = 21
 # Time simulation parameters
 # ----------------------------------------------------------------------
 TIME_STEP = 1.0 # s. WARNING: diffusion and cell migration events might need different scales
-STEPS = 3600
+STEPS = 200
 
 # +====================================================================+
 # | BOUNDARY CONDITIONS                                                |
@@ -194,7 +194,7 @@ FNODE_BIRTH_REFRACTORY = [20.0, 20.0, 20.0]  # [s]
 # +====================================================================+
 # | DIFFUSION PARAMETERS                                               |
 # +====================================================================+
-INCLUDE_DIFFUSION = False
+INCLUDE_DIFFUSION = True
 N_SPECIES = 2  # number of diffusing species.WARNING: make sure that the value coincides with the one declared in TODO
 DIFFUSION_COEFF_MULTI = [300.0, 300.0]  # diffusion coefficient in [um^2/s] per specie
 BOUNDARY_CONC_INIT_MULTI = [[50.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -223,7 +223,7 @@ INCLUDE_CELLS = True
 INCLUDE_CELL_CELL_INTERACTION = False # If True, cells interact with each other through short-range repulsion and adhesion forces. 
 INCLUDE_CELL_CYCLE = False # If True, cells go through a simplified cell cycle with G1, S, G2 and M phases, which can affect their behavior. Also includes birth/death dynamics (WARNING: USER-DEFINED in cell_cycle.cpp).
 DEAD_CELLS_DISAPPEAR = False  # If True, dead CELL agents are removed; if False, they remain inert with dead=1.
-PERIODIC_BOUNDARIES_FOR_CELLS = True
+PERIODIC_BOUNDARIES_FOR_CELLS = False
 INCLUDE_CELL_FNODE_REPULSION = False
 N_CELLS = 100
 
@@ -233,7 +233,7 @@ CELL_K_ELAST = [2.0, 2.0, 2.0]  # [nN/um]
 CELL_D_DUMPING = [0.4, 0.4, 0.4]  # [nN·s/um]
 CELL_RADIUS = [8.412, 8.412, 8.412] # [um]
 CELL_NUCLEUS_RADIUS = [r / 2 for r in CELL_RADIUS] # [um]
-CELL_SPEED_REF = [0.95, 0.75, 0.45] # [um/s] Another option is to define it according to grid distance ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / X. WARNING: if cell speed is too high, consider increasing N or reducing TIME_STEP.
+CELL_SPEED_REF = [1.25, 1.25, 0.75] # [um/s] Another option is to define it according to grid distance ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / X. WARNING: if cell speed is too high, consider increasing N or reducing TIME_STEP.
 BROWNIAN_MOTION_STRENGTH_FACTOR = [1.0, 1.0, 1.0]
 BROWNIAN_MOTION_STRENGTH = [s / f for s, f in zip(CELL_SPEED_REF, BROWNIAN_MOTION_STRENGTH_FACTOR)]  # [um/s] # [um/s] Strength of random movement added to cell velocity.
 CELL_CELL_REPULSION_K = [2.0 * k for k in CELL_K_ELAST]  # [nN/um] contact exclusion stiffness
@@ -280,14 +280,14 @@ CELL_PRODUCTION_MULTIPLIER = [1.0, 1.0, 1.0]   # [-] per-type scaling of product
 CELL_REACTION_MULTIPLIER = [1.0, 1.0, 1.0]      # [-] per-type scaling of reaction rates
 CELL_INIT_CONCENTRATION_MULTIPLIER = [1.0, 1.0, 1.0]  # [-] per-type scaling of initial species concentrations
 
-INIT_ECM_CONCENTRATION_VALS = [20.0, 20.0]  # initial concentration of each species on the ECM agents
-INIT_CELL_CONCENTRATION_VALS = [15.0, 15.0]  # initial concentration of each species on the CELL agents
+INIT_ECM_CONCENTRATION_VALS = [0.0, 0.0]  # initial concentration of each species on the ECM agents
+INIT_CELL_CONCENTRATION_VALS = [0.0, 0.0]  # initial concentration of each species on the CELL agents
 # Reference concentrations (actual per-agent mass is computed at init using per-type volume & conc multiplier).
 INIT_CELL_CONC_MASS_VALS = [x for x in INIT_CELL_CONCENTRATION_VALS]
-INIT_ECM_SAT_CONCENTRATION_VALS = [0.0, 10.0]  # initial saturation concentration of each species on the ECM agents
-INIT_CELL_CONSUMPTION_RATES = [0.001, 0.0]  # base consumption rate of each species by the CELL agents 
-INIT_CELL_PRODUCTION_RATES = [0.0, 10.0]  # base production rate of each species by the CELL agents 
-INIT_CELL_REACTION_RATES = [0.00018, 0.00018]  # base metabolic reaction rates of each species by the CELL agents 
+INIT_ECM_SAT_CONCENTRATION_VALS = [0.0, 0.0]  # initial saturation concentration of each species on the ECM agents
+INIT_CELL_CONSUMPTION_RATES = [0.0, 0.0]  # base consumption rate of each species by the CELL agents 
+INIT_CELL_PRODUCTION_RATES = [0.0, 0.0]  # base production rate of each species by the CELL agents 
+INIT_CELL_REACTION_RATES = [0.0, 0.0]  # base metabolic reaction rates of each species by the CELL agents 
 
 # Per-cell-type damage and death pathway controls
 # Note: cell stress variables (sig_xx, sig_eig_1, etc.) are in [nN/um^2], numerically equivalent to [kPa].
@@ -381,10 +381,10 @@ NUCLEUS_EPS_CLAMP = [0.30, 0.30, 0.30]      # [-] Clamp for each strain componen
 # +====================================================================+
 # | CHEMOTAXIS                                                         |
 # +====================================================================+
-INCLUDE_CHEMOTAXIS = False
+INCLUDE_CHEMOTAXIS = True
 CHEMOTAXIS_SENSITIVITY = [1.0, 0.0] # [-1.0 to +1.0] Chemotactic sensitivity for each species. Positive: attraction, Negative: repulsion towards higher concentrations.
 CHEMOTAXIS_ONLY_DIR = True # if True, chemotaxis only affects cell orientation, not speed. If False, chemotaxis affects both orientation and speed (e.g. by making cells move faster when they are oriented towards higher concentration gradient)
-CHEMOTAXIS_CHI = [10.0, 10.0, 10.0] # [um^2/s] Chemotactic coefficient (χ). Typical range: 0.1–10 µm²/s.
+CHEMOTAXIS_CHI = [0.1, 0.1, 0.10] # [um^2/s] Chemotactic coefficient (χ) per cell-type. Typical range: 0.1–10 µm²/s.
 # +====================================================================+
 # | CELL MIGRATION RELATED PARAMETERS                                  |
 # +====================================================================+

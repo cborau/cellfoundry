@@ -2907,7 +2907,15 @@ def recompute_derived_params(ns: dict) -> None:
         ns["MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION"] = 3.0 * _max_cr
     if "CELL_SPEED_REF" in ns:
         cs = ns["CELL_SPEED_REF"]
-        ns["BROWNIAN_MOTION_STRENGTH"] = _map1(lambda s: s / 10.0, cs)
+        # Use BROWNIAN_MOTION_STRENGTH_FACTOR if present, else default to 10.0
+        if "BROWNIAN_MOTION_STRENGTH_FACTOR" in ns:
+            f = ns["BROWNIAN_MOTION_STRENGTH_FACTOR"]
+            def _div(a, b):
+                # Avoid division by zero
+                return a / b if b != 0 else 0.0
+            ns["BROWNIAN_MOTION_STRENGTH"] = _map2(_div, cs, f)
+        else:
+            ns["BROWNIAN_MOTION_STRENGTH"] = _map1(lambda s: s / 10.0, cs)
         ns["CELL_CELL_DV_MAX"] = _map1(lambda s: 0.5 * s, cs)
         ns["CELL_FNODE_DV_MAX"] = _map1(lambda s: 0.5 * s, cs)
     if "CELL_K_ELAST" in ns:

@@ -168,6 +168,12 @@ def _relative_abs_error(predicted: float, target: float) -> float:
         return abs(float(predicted) - float(target))
     return abs(float(predicted) - float(target)) / abs_target
 
+def _abs_error(predicted: float, target: float, normalize: bool = False) -> float:
+    error = abs(float(predicted) - float(target))
+    if normalize:
+        error = _relative_abs_error(predicted, target)
+    return error
+
 
 def _get_cell_speed_metrics_frame(results: dict) -> pd.DataFrame:
     metrics = results.get("CELL_SPEED_METRICS")
@@ -996,8 +1002,7 @@ def cell_speed_error(results: dict, reference_path: str, **kwargs) -> float:
     reduction is controlled by ``population_stat`` and can be ``"mean"``
     (default) or ``"median"``.
 
-    Error terms are normalized by the corresponding target magnitude so that
-    ``vmean`` and ``veff`` contribute on a comparable relative scale.
+    If normalize is True, e rror terms are normalized by the corresponding target magnitude.
     """
     ref = _load_reference_csv(reference_path)
     if "cell_type" not in ref.columns:
@@ -1039,7 +1044,7 @@ def cell_speed_error(results: dict, reference_path: str, **kwargs) -> float:
         if "target_vmean" in target_cols and pd.notna(row.get("target_vmean")):
             sim_vmean = _reduce_population_values(group["vmean"], population_stat)
             target_vmean = float(row["target_vmean"])
-            error_vmean = _relative_abs_error(sim_vmean, target_vmean)
+            error_vmean = _abs_error(sim_vmean, target_vmean, normalize) 
             total_error += error_vmean
             n_terms += 1
             display_parts.append(
@@ -1053,7 +1058,7 @@ def cell_speed_error(results: dict, reference_path: str, **kwargs) -> float:
         if "target_veff" in target_cols and pd.notna(row.get("target_veff")):
             sim_veff = _reduce_population_values(group["veff"], population_stat)
             target_veff = float(row["target_veff"])
-            error_veff = _relative_abs_error(sim_veff, target_veff)
+            error_veff = _abs_error(sim_veff, target_veff, normalize)
             total_error += error_veff
             n_terms += 1
             display_parts.append(
@@ -1068,7 +1073,7 @@ def cell_speed_error(results: dict, reference_path: str, **kwargs) -> float:
         raise ValueError("No usable target speed values found in reference CSV")
 
     display_text = f"({'; '.join(display_parts)})" if display_parts else None
-    return (total_error / n_terms if normalize else total_error), display_text
+    return total_error / n_terms, display_text
 
 
 # ---------------------------------------------------------------------------
