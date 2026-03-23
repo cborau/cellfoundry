@@ -42,6 +42,7 @@ from optimizer.objectives import (
     shear_stress_strain_curve_error,
     differential_modulus_error,
     shear_differential_modulus_error,
+    cell_speed_error,
     _compute_differential_modulus,
     _extract_sim_strain_stress,
     _filter_simulation_from_min_strain,
@@ -136,7 +137,29 @@ def _make_mock_results(n_steps: int = 50) -> dict:
             "n_bz_neg": np.full(n_steps, 20.0),
         }),
         "FIBRE_SECTION_AREA_UM2": 0.05,
+        "CELL_SPEED_METRICS": pd.DataFrame({
+            "id": [0, 1, 2, 3],
+            "cell_type": [0, 0, 1, 1],
+            "dead": [0, 0, 0, 0],
+            "trajectory_time": [10.0, 10.0, 8.0, 8.0],
+            "trajectory_length": [10.0, 14.0, 4.0, 8.0],
+            "effective_displacement": [8.0, 10.0, 2.0, 6.0],
+            "vmean": [1.0, 1.4, 0.5, 1.0],
+            "veff": [0.8, 1.0, 0.25, 0.75],
+        }),
     }
+
+
+def _make_reference_cell_speed(tmp: Path) -> str:
+    """Write a small per-cell-type target speed CSV and return its path."""
+    df = pd.DataFrame({
+        "cell_type": [0, 1],
+        "target_vmean": [1.2, 0.75],
+        "target_veff": [0.9, 0.5],
+    })
+    p = tmp / "ref_cell_speed.csv"
+    df.to_csv(p, index=False)
+    return str(p)
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
@@ -149,6 +172,7 @@ def run_tests():
         tmp = Path(tmp)
         ref_ss = _make_reference_stress_strain(tmp)
         ref_dm = _make_reference_diff_modulus(tmp)
+        ref_cs = _make_reference_cell_speed(tmp)
         results = _make_mock_results()
 
         tests = [
@@ -162,6 +186,10 @@ def run_tests():
              lambda: shear_differential_modulus_error(results, ref_dm, strain_axis=0, shear_component=0)),
             ("differential_modulus_error (no smoothing)",
              lambda: differential_modulus_error(results, ref_dm, force_type="normal", smooth_window=0)),
+              ("cell_speed_error (mean)",
+               lambda: cell_speed_error(results, ref_cs, population_stat="mean")),
+              ("cell_speed_error (median)",
+               lambda: cell_speed_error(results, ref_cs, population_stat="median")),
         ]
 
         for name, fn in tests:
@@ -184,6 +212,7 @@ def run_tests():
             "shear_stress_strain_curve_error",
             "differential_modulus_error",
             "shear_differential_modulus_error",
+            "cell_speed_error",
         ]
         for key in expected_keys:
             if key in OBJECTIVE_REGISTRY:

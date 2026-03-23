@@ -162,6 +162,52 @@ def _format_percent_detail(label: str, error: float, target: float) -> str:
     return f"{label}: {percent_error:.2f}% off"
 
 
+def _relative_abs_error(predicted: float, target: float) -> float:
+    abs_target = abs(float(target))
+    if abs_target <= 1e-12:
+        return abs(float(predicted) - float(target))
+    return abs(float(predicted) - float(target)) / abs_target
+
+
+def _get_cell_speed_metrics_frame(results: dict) -> pd.DataFrame:
+    metrics = results.get("CELL_SPEED_METRICS")
+    if metrics is None or len(metrics) == 0:
+        raise ValueError(
+            "Results must contain non-empty CELL_SPEED_METRICS. "
+            "Rerun the simulation with a build that exports per-cell speed summaries to the pickle."
+        )
+
+    if not isinstance(metrics, pd.DataFrame):
+        metrics = pd.DataFrame(metrics)
+
+    required = {"id", "cell_type", "trajectory_time", "vmean", "veff"}
+    missing = required.difference(metrics.columns)
+    if missing:
+        raise ValueError(
+            "CELL_SPEED_METRICS is missing required columns: "
+            f"{sorted(missing)}"
+        )
+
+    if "dead" not in metrics.columns:
+        metrics = metrics.copy()
+        metrics["dead"] = 0
+
+    return metrics
+
+
+def _reduce_population_values(values: pd.Series | np.ndarray, reducer: str) -> float:
+    values_arr = np.asarray(values, dtype=float)
+    values_arr = values_arr[np.isfinite(values_arr)]
+    if values_arr.size == 0:
+        raise ValueError("No finite population values available for aggregation")
+
+    if reducer == "mean":
+        return float(np.mean(values_arr))
+    if reducer == "median":
+        return float(np.median(values_arr))
+    raise ValueError("population_stat must be 'mean' or 'median'")
+
+
 def _get_boundary_surface_area(bpos: pd.DataFrame, axis: int) -> float:
     ortho_axes = [i for i in range(3) if i != axis]
     lengths = []
@@ -933,6 +979,98 @@ def final_focad_per_cell_error(results: dict, reference_path: str = None, **kwar
     return error, _format_percent_text(error, target)
 
 
+def cell_speed_error(results: dict, reference_path: str, **kwargs) -> float:
+    """Match per-cell-type mean/effective speeds against a reference CSV.
+
+    The reference CSV must contain a ``cell_type`` column and at least one of:
+    ``target_vmean`` or ``target_veff``.
+
+    Simulation values are read from ``CELL_SPEED_METRICS`` stored in the pickle.
+    Those metrics are computed from compact per-cell trajectory summaries:
+
+    - ``vmean``: cumulative path length / tracked lifetime [um/s]
+    - ``veff``: net displacement / tracked lifetime [um/s]
+
+    By default, only alive cells are considered. Set ``include_dead=True`` to
+    include dead cells that remain in the final population. The population
+    reduction is controlled by ``population_stat`` and can be ``"mean"``
+    (default) or ``"median"``.
+
+    Error terms are normalized by the corresponding target magnitude so that
+    ``vmean`` and ``veff`` contribute on a comparable relative scale.
+    """
+    ref = _load_reference_csv(reference_path)
+    if "cell_type" not in ref.columns:
+        raise ValueError("Reference CSV must contain a 'cell_type' column")
+
+    target_cols = [col for col in ("target_vmean", "target_veff") if col in ref.columns]
+    if not target_cols:
+        raise ValueError(
+            "Reference CSV must contain at least one of 'target_vmean' or 'target_veff'"
+        )
+
+    speed_metrics = _get_cell_speed_metrics_frame(results)
+    include_dead = bool(kwargs.get("include_dead", False))
+    if not include_dead:
+        speed_metrics = speed_metrics[speed_metrics["dead"] == 0]
+
+    min_trajectory_time = kwargs.get("min_trajectory_time")
+    if min_trajectory_time is not None:
+        speed_metrics = speed_metrics[
+            speed_metrics["trajectory_time"].astype(float) >= float(min_trajectory_time)
+        ]
+
+    if len(speed_metrics) == 0:
+        raise ValueError("No cells remain after applying the selected speed-metric filters")
+
+    population_stat = str(kwargs.get("population_stat", "mean")).strip().lower()
+    normalize = bool(kwargs.get("normalize", True))
+
+    total_error = 0.0
+    n_terms = 0
+    display_parts = []
+
+    for _, row in ref.iterrows():
+        cell_type = int(row["cell_type"])
+        group = speed_metrics[speed_metrics["cell_type"].astype(int) == cell_type]
+        if len(group) == 0:
+            raise ValueError(f"No simulation cells found for cell_type={cell_type}")
+
+        if "target_vmean" in target_cols and pd.notna(row.get("target_vmean")):
+            sim_vmean = _reduce_population_values(group["vmean"], population_stat)
+            target_vmean = float(row["target_vmean"])
+            error_vmean = _relative_abs_error(sim_vmean, target_vmean)
+            total_error += error_vmean
+            n_terms += 1
+            display_parts.append(
+                _format_percent_detail(
+                    f"type {cell_type} vmean",
+                    sim_vmean - target_vmean,
+                    target_vmean,
+                )
+            )
+
+        if "target_veff" in target_cols and pd.notna(row.get("target_veff")):
+            sim_veff = _reduce_population_values(group["veff"], population_stat)
+            target_veff = float(row["target_veff"])
+            error_veff = _relative_abs_error(sim_veff, target_veff)
+            total_error += error_veff
+            n_terms += 1
+            display_parts.append(
+                _format_percent_detail(
+                    f"type {cell_type} veff",
+                    sim_veff - target_veff,
+                    target_veff,
+                )
+            )
+
+    if n_terms == 0:
+        raise ValueError("No usable target speed values found in reference CSV")
+
+    display_text = f"({'; '.join(display_parts)})" if display_parts else None
+    return (total_error / n_terms if normalize else total_error), display_text
+
+
 # ---------------------------------------------------------------------------
 # VTK spatial helpers (for organoid / spheroid size measurements)
 # ---------------------------------------------------------------------------
@@ -1145,5 +1283,6 @@ OBJECTIVE_REGISTRY = {
     "matrix_remodeling_error": matrix_remodeling_error,
     "final_cell_count_error": final_cell_count_error,
     "final_focad_per_cell_error": final_focad_per_cell_error,
+    "cell_speed_error": cell_speed_error,
     "organoid_size_error": organoid_size_error,
 }

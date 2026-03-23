@@ -252,6 +252,11 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
       FLAMEGPU->setVariable<float>("vx", 0.0f);
       FLAMEGPU->setVariable<float>("vy", 0.0f);
       FLAMEGPU->setVariable<float>("vz", 0.0f);
+      FLAMEGPU->setVariable<float>("trajectory_length", 0.0f);
+      FLAMEGPU->setVariable<float>("trajectory_time", 0.0f);
+      FLAMEGPU->setVariable<float>("birth_x", parent_new_x);
+      FLAMEGPU->setVariable<float>("birth_y", parent_new_y);
+      FLAMEGPU->setVariable<float>("birth_z", parent_new_z);
       FLAMEGPU->setVariable<float>("radius", CELL_RADIUS / 2); // to prevent diminishing radius over multiple divisions.
       FLAMEGPU->setVariable<float>("nucleus_radius", CELL_NUCLEUS_RADIUS / 2);
       FLAMEGPU->setVariable<float>("eps_xx", 0.0f);
@@ -346,6 +351,11 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
       FLAMEGPU->agent_out.setVariable<float>("vx", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("vy", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("vz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("trajectory_length", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("trajectory_time", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("birth_x", daughter_x);
+      FLAMEGPU->agent_out.setVariable<float>("birth_y", daughter_y);
+      FLAMEGPU->agent_out.setVariable<float>("birth_z", daughter_z);
       FLAMEGPU->agent_out.setVariable<float>("orx", rand_dir_x);
       FLAMEGPU->agent_out.setVariable<float>("ory", rand_dir_y);
       FLAMEGPU->agent_out.setVariable<float>("orz", rand_dir_z);

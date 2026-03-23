@@ -44,7 +44,7 @@ PAUSE_EVERY_STEP = False  # If True, the visualization stops every step until P 
 SAVE_PICKLE = True  # If True, dumps model configuration into a pickle file for post-processing
 SHOW_PLOTS = False  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
-SAVE_EVERY_N_STEPS = 1000 # Affects both the .vtk files and the Dataframes storing boundary data
+SAVE_EVERY_N_STEPS = 100 # Affects both the .vtk files and the Dataframes storing boundary data
 
 CURR_PATH = pathlib.Path(__file__).resolve().parent
 RES_PATH = CURR_PATH / 'result_files'
@@ -61,8 +61,8 @@ N = 21
 
 # Time simulation parameters
 # ----------------------------------------------------------------------
-TIME_STEP = 0.1 # s. WARNING: diffusion and cell migration events might need different scales
-STEPS = 50000
+TIME_STEP = 1.0 # s. WARNING: diffusion and cell migration events might need different scales
+STEPS = 3600
 
 # +====================================================================+
 # | BOUNDARY CONDITIONS                                                |
@@ -75,9 +75,9 @@ ECM_D_DUMPING = 0.04  # [nN·s/um]
 ECM_ETA = 0.15  # [nN·s/µm] Effective drag for overdamped FNODE motion (calibration parameter)
 
 #BOUNDARY_COORDS = [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]  # +X,-X,+Y,-Y,+Z,-Z
-BOUNDARY_COORDS = [50.0, -50.0, 50.0, -50.0, 50.0, -50.0]# microdevice dimensions in um
+BOUNDARY_COORDS = [500.0, -500.0, 500.0, -500.0, 500.0, -500.0]# microdevice dimensions in um
 #BOUNDARY_COORDS = [coord / 1000.0 for coord in BOUNDARY_COORDS] # in mm
-BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0044, -0.0044, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
+BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
 BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[um/s]
 
 POISSON_DIRS = [0, 1]  # 0: xdir, 1:ydir, 2:zdir. poisson_ratio ~= -incL(dir1)/incL(dir2) dir2 is the direction in which the load is applied
@@ -149,8 +149,8 @@ if OSCILLATORY_SHEAR_ASSAY:
 # +====================================================================+
 # | FIBRE NETWORK PARAMETERS                                           |
 # +====================================================================+
-INCLUDE_FIBRE_NETWORK = True
-NETWORK_FILE = 'mini_network_high_res.pkl'  # path to the .pkl file with node_coords + connectivity
+INCLUDE_FIBRE_NETWORK = False
+NETWORK_FILE = 'mini_network.pkl'  # path to the .pkl file with node_coords + connectivity
 ALLOW_IRREGULAR_NETWORK = False  # default: False, meaning that all boundaries must have network nodes attached (e.g. a network going from -y to y and touching the other boundaries should have this variable set to True)
 
 # Fitting parameters for the fiber strain-stiffening phenomena
@@ -219,13 +219,13 @@ HETEROGENEOUS_DIFFUSION = False  # if True, diffusion coefficient is multiplied 
 # --------------------------------------------------------------------------
 N_CELL_TYPES = 3
 
-INCLUDE_CELLS = False
-INCLUDE_CELL_CELL_INTERACTION = False # TODO: implement cell-cell repulsion and adhesion
+INCLUDE_CELLS = True
+INCLUDE_CELL_CELL_INTERACTION = False # If True, cells interact with each other through short-range repulsion and adhesion forces. 
 INCLUDE_CELL_CYCLE = False # If True, cells go through a simplified cell cycle with G1, S, G2 and M phases, which can affect their behavior. Also includes birth/death dynamics (WARNING: USER-DEFINED in cell_cycle.cpp).
 DEAD_CELLS_DISAPPEAR = False  # If True, dead CELL agents are removed; if False, they remain inert with dead=1.
-PERIODIC_BOUNDARIES_FOR_CELLS = False
+PERIODIC_BOUNDARIES_FOR_CELLS = True
 INCLUDE_CELL_FNODE_REPULSION = False
-N_CELLS = 1
+N_CELLS = 100
 
 # Per-cell-type mechanical & morphological properties
 # Each is a list of length N_CELL_TYPES.  A scalar is broadcast to all types.
@@ -233,8 +233,9 @@ CELL_K_ELAST = [2.0, 2.0, 2.0]  # [nN/um]
 CELL_D_DUMPING = [0.4, 0.4, 0.4]  # [nN·s/um]
 CELL_RADIUS = [8.412, 8.412, 8.412] # [um]
 CELL_NUCLEUS_RADIUS = [r / 2 for r in CELL_RADIUS] # [um]
-CELL_SPEED_REF = [0.75, 0.75, 0.75] # [um/s] Another option is to define it according to grid distance ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / X. WARNING: if cell speed is too high, consider increasing N or reducing TIME_STEP.
-BROWNIAN_MOTION_STRENGTH = [s / 10.0 for s in CELL_SPEED_REF] # [um/s] Strength of random movement added to cell velocity.
+CELL_SPEED_REF = [0.95, 0.75, 0.45] # [um/s] Another option is to define it according to grid distance ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / X. WARNING: if cell speed is too high, consider increasing N or reducing TIME_STEP.
+BROWNIAN_MOTION_STRENGTH_FACTOR = [1.0, 1.0, 1.0]
+BROWNIAN_MOTION_STRENGTH = [s / f for s, f in zip(CELL_SPEED_REF, BROWNIAN_MOTION_STRENGTH_FACTOR)]  # [um/s] # [um/s] Strength of random movement added to cell velocity.
 CELL_CELL_REPULSION_K = [2.0 * k for k in CELL_K_ELAST]  # [nN/um] contact exclusion stiffness
 CELL_CELL_ADHESION_K = [0.2 * k for k in CELL_K_ELAST]  # [nN/um] weak cohesion in near-contact shell
 CELL_CELL_ADHESION_RANGE = [0.5 * r for r in CELL_RADIUS]  # [um] adhesive shell thickness outside contact
@@ -380,14 +381,14 @@ NUCLEUS_EPS_CLAMP = [0.30, 0.30, 0.30]      # [-] Clamp for each strain componen
 # +====================================================================+
 # | CHEMOTAXIS                                                         |
 # +====================================================================+
-INCLUDE_CHEMOTAXIS = True
+INCLUDE_CHEMOTAXIS = False
 CHEMOTAXIS_SENSITIVITY = [1.0, 0.0] # [-1.0 to +1.0] Chemotactic sensitivity for each species. Positive: attraction, Negative: repulsion towards higher concentrations.
 CHEMOTAXIS_ONLY_DIR = True # if True, chemotaxis only affects cell orientation, not speed. If False, chemotaxis affects both orientation and speed (e.g. by making cells move faster when they are oriented towards higher concentration gradient)
 CHEMOTAXIS_CHI = [10.0, 10.0, 10.0] # [um^2/s] Chemotactic coefficient (χ). Typical range: 0.1–10 µm²/s.
 # +====================================================================+
 # | CELL MIGRATION RELATED PARAMETERS                                  |
 # +====================================================================+
-INCLUDE_DUROTAXIS = True   # if True, cells prefer to move towards stiffer regions, which is implemented by making them prefer to move in the direction of maximum stress/strain. 
+INCLUDE_DUROTAXIS = False   # if True, cells prefer to move towards stiffer regions, which is implemented by making them prefer to move in the direction of maximum stress/strain. 
 DUROTAXIS_ONLY_DIR = True  # if True, stress/strain direction changes movement vector (keeps speed), False: changes speed too
 FOCAD_MOBILITY_MU  = [1e-4, 1e-4, 1e-4]   # Mobility scaling for stress contribution
 INCLUDE_ORIENTATION_ALIGN = True  # True: enable gradual alignment to principal direction
@@ -444,6 +445,7 @@ BPOS_OVER_TIME = pd.DataFrame([BPOS(BOUNDARY_COORDS[0], BOUNDARY_COORDS[1], BOUN
                                     BOUNDARY_COORDS[4], BOUNDARY_COORDS[5])])
 OSOT = make_dataclass("OSOT", [("strain", float)])
 OSCILLATORY_STRAIN_OVER_TIME = pd.DataFrame([OSOT(0)])
+CELL_SPEED_METRICS = pd.DataFrame()
 
 # Checking for incompatible conditions
 # ----------------------------------------------------------------------
@@ -498,6 +500,11 @@ if INCLUDE_FIBRE_NETWORK:
         N_FIBRES = n_fib
     else:
         N_FIBRES = None
+else: 
+    N_NODES = None
+    NODE_COORDS = None
+    INITIAL_NETWORK_CONNECTIVITY = None
+    AVG_NETWORK_VOXEL_DENSITY = None
 
 UNSTABLE_DIFFUSION = False
 # Check diffusion parameters
@@ -685,7 +692,8 @@ env.newPropertyArrayUInt("ECM_AGENTS_PER_DIR", ECM_AGENTS_PER_DIR)
 env.newPropertyUInt("INCLUDE_DIFFUSION", INCLUDE_DIFFUSION)
 env.newPropertyUInt("HETEROGENEOUS_DIFFUSION", HETEROGENEOUS_DIFFUSION)
 env.newPropertyUInt("UNSTABLE_DIFFUSION", UNSTABLE_DIFFUSION)
-env.newPropertyUInt("AVG_NETWORK_VOXEL_DENSITY", AVG_NETWORK_VOXEL_DENSITY)
+if INCLUDE_FIBRE_NETWORK:
+    env.newPropertyUInt("AVG_NETWORK_VOXEL_DENSITY", AVG_NETWORK_VOXEL_DENSITY)
 env.newPropertyArrayFloat("DIFFUSION_COEFF_MULTI", DIFFUSION_COEFF_MULTI)
 env.newPropertyFloat("ECM_VOXEL_VOLUME", ECM_VOXEL_VOLUME)
 
@@ -1236,6 +1244,11 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableFloat("vx", 0.0) # cell velocity [um/s]
     CELL_agent.newVariableFloat("vy", 0.0)
     CELL_agent.newVariableFloat("vz", 0.0)
+    CELL_agent.newVariableFloat("trajectory_length", 0.0) # cumulative path length since birth/latest division [um]
+    CELL_agent.newVariableFloat("trajectory_time", 0.0) # elapsed tracked lifetime since birth/latest division [s]
+    CELL_agent.newVariableFloat("birth_x", 0.0) # reference position for effective speed [um]
+    CELL_agent.newVariableFloat("birth_y", 0.0)
+    CELL_agent.newVariableFloat("birth_z", 0.0)
     CELL_agent.newVariableFloat("orx") # cell polarity/orientation unit vector
     CELL_agent.newVariableFloat("ory")
     CELL_agent.newVariableFloat("orz")
@@ -1602,6 +1615,11 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableFloat("vx", 0.0)
                 instance.setVariableFloat("vy", 0.0)
                 instance.setVariableFloat("vz", 0.0)
+                instance.setVariableFloat("trajectory_length", 0.0)
+                instance.setVariableFloat("trajectory_time", 0.0)
+                instance.setVariableFloat("birth_x", cell_pos[i, 0])
+                instance.setVariableFloat("birth_y", cell_pos[i, 1])
+                instance.setVariableFloat("birth_z", cell_pos[i, 2])
                 instance.setVariableFloat("orx", cell_orientations[i, 0])
                 instance.setVariableFloat("ory", cell_orientations[i, 1])
                 instance.setVariableFloat("orz", cell_orientations[i, 2])
@@ -2039,6 +2057,56 @@ class SaveDataToFile(pyflamegpu.HostFunction):
         )
 
 
+class CollectCellSpeedMetrics(pyflamegpu.HostFunction):
+    def __init__(self):
+        super().__init__()
+
+    def run(self, FLAMEGPU):
+        global INCLUDE_CELLS, STEPS, CELL_SPEED_METRICS
+
+        if not INCLUDE_CELLS:
+            return
+
+        if (FLAMEGPU.getStepCounter() + 1) != STEPS:
+            return
+
+        rows = []
+        cell_agent = FLAMEGPU.agent("CELL")
+        cell_agent.sortInt("id", pyflamegpu.HostAgentAPI.Asc)
+        for ai in cell_agent.getPopulationData():
+            cell_x = float(ai.getVariableFloat("x"))
+            cell_y = float(ai.getVariableFloat("y"))
+            cell_z = float(ai.getVariableFloat("z"))
+            birth_x = float(ai.getVariableFloat("birth_x"))
+            birth_y = float(ai.getVariableFloat("birth_y"))
+            birth_z = float(ai.getVariableFloat("birth_z"))
+            tracked_time = float(ai.getVariableFloat("trajectory_time"))
+            tracked_length = float(ai.getVariableFloat("trajectory_length"))
+            displacement = math.sqrt(
+                (cell_x - birth_x) ** 2
+                + (cell_y - birth_y) ** 2
+                + (cell_z - birth_z) ** 2
+            )
+            if tracked_time > 1e-12:
+                vmean = tracked_length / tracked_time
+                veff = displacement / tracked_time
+            else:
+                vmean = 0.0
+                veff = 0.0
+            rows.append({
+                "id": int(ai.getVariableInt("id")),
+                "cell_type": int(ai.getVariableInt("cell_type")),
+                "dead": int(ai.getVariableInt("dead")),
+                "mother_id": int(ai.getVariableInt("mother_id")),
+                "trajectory_time": tracked_time,
+                "trajectory_length": tracked_length,
+                "effective_displacement": displacement,
+                "vmean": vmean,
+                "veff": veff,
+            })
+        CELL_SPEED_METRICS = pd.DataFrame(rows)
+
+
 class CheckFNODEStability(pyflamegpu.HostFunction):
     def __init__(self):
         super().__init__()
@@ -2137,6 +2205,10 @@ if INCLUDE_FIBRE_NETWORK:
 sdf = SaveDataToFile()
 # SaveDataToFile host function; behavior is controlled by SAVE_DATA_TO_FILE flag.
 model.addStepFunction(sdf)
+
+if SAVE_PICKLE and INCLUDE_CELLS:
+    csm = CollectCellSpeedMetrics()
+    model.addStepFunction(csm)
 
 if INCLUDE_FOCAL_ADHESIONS:
     fam = ReportFAMetrics()
@@ -2487,6 +2559,7 @@ POISSON_RATIO_OVER_TIME = -1 * incL_dir1 / incL_dir2
 def manageLogs(steps, is_ensemble, idx):
     global SAVE_EVERY_N_STEPS, SAVE_PICKLE, SHOW_PLOTS, RES_PATH, MODEL_CONFIG, EXECUTION_TIME
     global BPOS_OVER_TIME, BFORCE_OVER_TIME, BFORCE_SHEAR_OVER_TIME, POISSON_RATIO_OVER_TIME, OSCILLATORY_STRAIN_OVER_TIME
+    global CELL_SPEED_METRICS
     global INCLUDE_FIBRE_NETWORK, INCLUDE_CELLS, INCLUDE_FOCAL_ADHESIONS
     ecm_agent_counts = [None] * len(steps)
     counter = 0
@@ -2728,6 +2801,11 @@ def manageLogs(steps, is_ensemble, idx):
             print("CELL POPULATION METRICS OVER TIME")
             print(CELL_METRICS_OVER_TIME)
             print()
+        if INCLUDE_CELLS and len(CELL_SPEED_METRICS) > 0:
+            print("============================")
+            print("FINAL CELL SPEED METRICS")
+            print(CELL_SPEED_METRICS)
+            print()
     # Saving pickle
     print(f"[DIAG] manageLogs: SAVE_PICKLE={SAVE_PICKLE}, RES_PATH={RES_PATH}, idx={idx}")
     if SAVE_PICKLE:
@@ -2744,6 +2822,7 @@ def manageLogs(steps, is_ensemble, idx):
                          'FOCAD_POLARITY_METRICS_OVER_TIME': FOCAD_POLARITY_METRICS_OVER_TIME,
                          'FNODE_METRICS_OVER_TIME': FNODE_METRICS_OVER_TIME,
                          'CELL_METRICS_OVER_TIME': CELL_METRICS_OVER_TIME,
+                         'CELL_SPEED_METRICS': CELL_SPEED_METRICS,
                          'POISSON_RATIO_OVER_TIME': POISSON_RATIO_OVER_TIME,
                          'OSCILLATORY_STRAIN_OVER_TIME': OSCILLATORY_STRAIN_OVER_TIME,
                          'MODEL_CONFIG': MODEL_CONFIG,

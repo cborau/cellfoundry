@@ -68,6 +68,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   const float agent_x_prev = agent_x;
   const float agent_y_prev = agent_y;
   const float agent_z_prev = agent_z;
+  float trajectory_length = FLAMEGPU->getVariable<float>("trajectory_length");
+  float trajectory_time = FLAMEGPU->getVariable<float>("trajectory_time");
 
   // Velocity contributions are accumulated and applied at the end
   float agent_vx = 0.0f;
@@ -181,9 +183,10 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   // Brownian motion (base component)
   const float agent_speed_ref = FLAMEGPU->getVariable<float>("speed_ref");  
   const float BROWNIAN_MOTION_STRENGTH = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("BROWNIAN_MOTION_STRENGTH", agent_cell_type);
-  v_base_x += agent_speed_ref * BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));
-  v_base_y += agent_speed_ref * BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));
-  v_base_z += agent_speed_ref * BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));
+  const float inv_sqrt3 = 0.577350269f; // To ensure the combined Brownian velocity has the correct magnitude, we scale by 1/sqrt(3) 
+  v_base_x = agent_speed_ref * inv_sqrt3 * BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));
+  v_base_y = agent_speed_ref * inv_sqrt3 * BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));
+  v_base_z = agent_speed_ref * inv_sqrt3 * BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));
 
   float chemotaxis_sensitivity[N_SPECIES] = {};
   for (int i = 0; i < N_SPECIES; i++) {
@@ -433,6 +436,17 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
     }
   }
 
+  float dx_track = agent_x - agent_x_prev;
+  float dy_track = agent_y - agent_y_prev;
+  float dz_track = agent_z - agent_z_prev;
+  if (PERIODIC_BOUNDARIES_FOR_CELLS == 1 && INCLUDE_FOCAL_ADHESIONS == 0) {
+    dx_track = agent_vx * TIME_STEP;
+    dy_track = agent_vy * TIME_STEP;
+    dz_track = agent_vz * TIME_STEP;
+  }
+  trajectory_length += sqrtf(dx_track * dx_track + dy_track * dy_track + dz_track * dz_track);
+  trajectory_time += TIME_STEP;
+
   //Set agent variables
   FLAMEGPU->setVariable<int>("id", agent_id);
   FLAMEGPU->setVariable<float>("x", agent_x);
@@ -446,6 +460,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   FLAMEGPU->setVariable<float>("vx", agent_vx);
   FLAMEGPU->setVariable<float>("vy", agent_vy);
   FLAMEGPU->setVariable<float>("vz", agent_vz);
+  FLAMEGPU->setVariable<float>("trajectory_length", trajectory_length);
+  FLAMEGPU->setVariable<float>("trajectory_time", trajectory_time);
 
   return flamegpu::ALIVE;
 }
