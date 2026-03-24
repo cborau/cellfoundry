@@ -51,6 +51,7 @@ from pathlib import Path
 
 import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.ticker import LogLocator, LogFormatterSciNotation, NullFormatter
 from matplotlib.offsetbox import AnnotationBbox, DrawingArea
 from matplotlib.patches import Wedge
 import numpy as np
@@ -65,7 +66,7 @@ DEFAULT_CSV = TOOLS_DIR / "benchmark_results.csv"
 DEFAULT_OUTDIR = TOOLS_DIR / "benchmark_plots"
 
 # Global typography. Adjust BASE_FONT_SIZE to scale the whole plotting style.
-BASE_FONT_SIZE = 12
+BASE_FONT_SIZE = 14
 FONT_SIZE_SMALL = BASE_FONT_SIZE - 1
 FONT_SIZE_TEXT = BASE_FONT_SIZE - 2
 FONT_SIZE_LABEL = BASE_FONT_SIZE + 1
@@ -77,7 +78,7 @@ FONT_SIZE_YTICKS_COMPACT = BASE_FONT_SIZE - 4
 
 YLABEL_STEP = "Time/step (s)"
 YLABEL_INIT = "Init time (s)"
-XLABEL_TOTAL_AGENTS = "Total agents (ECM + CELL + FOCAD + FNODES)"
+XLABEL_TOTAL_AGENTS = "Total agents"
 
 # Agent-count columns present in the CSV (ordered for display)
 AGENT_COLS = [
@@ -103,6 +104,13 @@ REGRESSION_BASE_COLS = [
     "CELL_RADIUS",
 ]
 
+CONTOUR_COLS = [
+    "ECM_POPULATION_SIZE",
+    "N_CELLS",
+    "N_FNODES",
+    "CELL_RADIUS",
+]
+
 # All columns that may be swept in benchmark runs
 SWEEP_COLS = AGENT_COLS + PARAM_COLS
 
@@ -121,6 +129,20 @@ COL_LABELS = {
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _set_compact_log_ticks(ax: plt.Axes) -> None:
+    """Use compact scientific notation on log axes and hide minor tick labels."""
+    major_locator = LogLocator(base=10.0)
+    minor_locator = LogLocator(base=10.0, subs=np.arange(2, 10) * 0.1)
+
+    formatter = LogFormatterSciNotation(base=10.0)
+    formatter.labelOnlyBase = False
+
+    for axis in (ax.xaxis, ax.yaxis):
+        axis.set_major_locator(major_locator)
+        axis.set_major_formatter(formatter)
+        axis.set_minor_locator(minor_locator)
+        axis.set_minor_formatter(NullFormatter())
 
 def _label(col: str) -> str:
     return COL_LABELS.get(col, col)
@@ -192,11 +214,29 @@ def _load(csv_path: Path) -> pd.DataFrame:
     """Load CSV keeping only successful runs with valid timing."""
     df = pd.read_csv(csv_path)
     df = df[df["status"].str.startswith("OK", na=False)].copy()
-    for col in ("time_per_step_s", "total_time_s", "init_time_s",
-                 "simulation_time_s", "rtc_time_s", "init_functions_time_s",
-                 "exit_functions_time_s", "CELL_RADIUS", "MAX_SEARCH_RADIUS"):
+
+    for col in (
+        "time_per_step_s",
+        "total_time_s",
+        "init_time_s",
+        "simulation_time_s",
+        "rtc_time_s",
+        "init_functions_time_s",
+        "exit_functions_time_s",
+        "CELL_RADIUS",
+        "MAX_SEARCH_RADIUS",
+    ):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Correct init_time_s by removing RTC compilation time, when available.
+    # Some runs recompile and others do not, so RTC should not be counted as
+    # model initialization cost for benchmarking.
+    if "init_time_s" in df.columns and "rtc_time_s" in df.columns:
+        rtc = df["rtc_time_s"].fillna(0.0)
+        df["init_time_s_raw"] = df["init_time_s"]
+        df["init_time_s"] = (df["init_time_s"] - rtc).clip(lower=0.0)
+
     df.dropna(subset=["time_per_step_s"], inplace=True)
     if df.empty:
         print("ERROR: no successful runs with timing data found in CSV.")
@@ -416,15 +456,40 @@ def _fit_loglog_power_law(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.
 
 
 def _annotate_horizontal_bars(ax: plt.Axes, bars, values: np.ndarray) -> None:
-    """Write coefficient values next to horizontal bars."""
-    span = float(np.max(np.abs(values))) if len(values) else 0.0
-    offset = max(0.01, 0.04 * span)
+    """Write coefficient values next to horizontal bars.
+
+    Large bars get labels outside the bar.
+    Very small bars get labels inside the plotting area with a fixed minimum offset
+    from zero to avoid overlapping the y-axis/category labels.
+    """
+    if len(values) == 0:
+        return
+
+    span = float(np.max(np.abs(values)))
+    if span <= 0:
+        span = 1.0
+
+    outside_offset = max(0.01, 0.04 * span)
+    min_abs_x = max(0.02, 0.12 * span)
+
     for bar, value in zip(bars, values):
-        x_text = value + offset if value >= 0 else value - offset
-        ha = "left" if value >= 0 else "right"
+        y = bar.get_y() + bar.get_height() / 2
+
+        # Large enough bar: place label outside the bar
+        if abs(value) >= min_abs_x:
+            x_text = value + outside_offset if value >= 0 else -value + outside_offset
+            ha = "left" if value >= 0 else "right"
+        else:
+            # Tiny bar: place label slightly away from zero to avoid overlap
+            x_text = min_abs_x if value >= 0 else -min_abs_x
+            ha = "left" if value >= 0 else "right"
+
+        if abs(value) < 0.005:
+            continue
+
         ax.text(
             x_text,
-            bar.get_y() + bar.get_height() / 2,
+            y,
             f"{value:+.2f}",
             va="center",
             ha=ha,
@@ -565,7 +630,7 @@ def plot_total_agent_scatter(df: pd.DataFrame, outdir: Path) -> plt.Figure | Non
         print("  Skipping total-agent scatter (not enough data).")
         return None
 
-    fig, ax = plt.subplots(figsize=(7, 5))
+    fig, ax = plt.subplots(figsize=(5, 5))
     pie_cols = _pie_agent_cols(df)
 
     x = df["TOTAL_AGENTS"].values.astype(float)
@@ -583,7 +648,7 @@ def plot_total_agent_scatter(df: pd.DataFrame, outdir: Path) -> plt.Figure | Non
     ax.set_yscale("log")
     ax.set_xlabel(XLABEL_TOTAL_AGENTS, fontsize=FONT_SIZE_LABEL)
     ax.set_ylabel(YLABEL_STEP, fontsize=FONT_SIZE_LABEL)
-    ax.set_title("Overall computational scaling", fontsize=FONT_SIZE_TITLE)
+    #ax.set_title("Overall computational scaling", fontsize=FONT_SIZE_TITLE)
     ax.grid(True, which="both", ls=":", lw=0.4, alpha=0.6)
 
     if pie_cols:
@@ -715,7 +780,7 @@ def plot_multivariate_summary_panel(df: pd.DataFrame, outdir: Path) -> plt.Figur
         return None
 
     pie_cols = _pie_agent_cols(df)
-    fig, axes = plt.subplots(2, 2, figsize=(13.8, 10.6))
+    fig, axes = plt.subplots(2, 2, figsize=(10.0, 9.0))
     panel_specs = [
         (axes[0, 0], init_fit, YLABEL_INIT, "Init-time fit"),
         (axes[1, 0], step_fit, YLABEL_STEP, "Step-time fit"),
@@ -731,6 +796,7 @@ def plot_multivariate_summary_panel(df: pd.DataFrame, outdir: Path) -> plt.Figur
         ax.plot([lo, hi], [lo, hi], "r--", lw=1.0)
         ax.set_xscale("log")
         ax.set_yscale("log")
+        _set_compact_log_ticks(ax)
         ax.set_xlabel(f"Predicted {y_label}", fontsize=FONT_SIZE_LABEL)
         ax.set_ylabel(f"Observed {y_label}", fontsize=FONT_SIZE_LABEL)
         ax.set_title(f"{title} ($R^2={fit['r2']:.3f}$)", fontsize=FONT_SIZE_TITLE)
@@ -756,7 +822,7 @@ def plot_multivariate_summary_panel(df: pd.DataFrame, outdir: Path) -> plt.Figur
         ax.tick_params(axis="y", labelsize=FONT_SIZE_SMALL)
         _annotate_horizontal_bars(ax, bars, ordered_coeffs)
 
-    fig.suptitle("Cellfoundry - Multivariate fit summary", fontsize=FONT_SIZE_SUPTITLE, y=1.01)
+    #fig.suptitle("Cellfoundry - Multivariate fit summary", fontsize=FONT_SIZE_SUPTITLE, y=1.01)
     fig.tight_layout()
     _savefig(fig, outdir, "multivariate_fit_summary_panel")
     return fig
@@ -915,7 +981,8 @@ def plot_total_time_bars(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
 def plot_surface_panel(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
     """Single figure with one filled-contour (contourf) subplot per pair of
     swept columns.  Colour = mean time/step."""
-    cols = _varied_cols(df)
+    #cols = _varied_cols(df)
+    cols = _varied_cols(df, CONTOUR_COLS)
     if len(cols) < 2:
         print("  Skipping contourf panel (need ≥2 varied agent columns).")
         return None
@@ -928,7 +995,7 @@ def plot_surface_panel(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
 
     fig, axes = plt.subplots(
         nrows_grid, ncols_grid,
-        figsize=(5.8 * ncols_grid, 4.6 * nrows_grid),
+        figsize=(5.0 * ncols_grid, 5.0 * nrows_grid),
         squeeze=False,
     )
     axes_flat = axes.ravel()
@@ -959,21 +1026,21 @@ def plot_surface_panel(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
 
         cf = ax.contourf(
             X_mesh, Y_mesh, Z,
-            levels=levels, cmap="viridis", norm=norm,
+            levels=levels, cmap="inferno", norm=norm,
         )
         # Overlay contour lines with inline value labels
         cs = ax.contour(
             X_mesh, Y_mesh, Z,
-            levels=cf.levels, colors="k", linewidths=0.5, alpha=0.55,
+            levels=cf.levels, colors="w", linewidths=0.5, alpha=0.95,
         )
         ax.clabel(cs, inline=True, fontsize=BASE_FONT_SIZE, fmt="%.2g")
 
         ax.set_xlabel(_label(col_x), fontsize=FONT_SIZE_LABEL + 2)
         ax.set_ylabel(_label(col_y), fontsize=FONT_SIZE_LABEL + 2)
-        ax.set_title(
-            f"{_label(col_y)}  vs  {_label(col_x)}",
-            fontsize=FONT_SIZE_TITLE + 2, pad=6,
-        )
+        # ax.set_title(
+        #     f"{_label(col_y)}  vs  {_label(col_x)}",
+        #     fontsize=FONT_SIZE_TITLE + 2, pad=6,
+        # )
         ax.tick_params(labelsize=FONT_SIZE_TICKS + 2)
         ax.ticklabel_format(style="scientific", scilimits=(0, 3),
                             axis="both", useMathText=True)
@@ -982,10 +1049,10 @@ def plot_surface_panel(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
     for j in range(len(pairs), len(axes_flat)):
         axes_flat[j].set_visible(False)
 
-    fig.suptitle(
-        "Cellfoundry – Pairwise Cost Contours (mean time/step)",
-        fontsize=FONT_SIZE_SUPTITLE, y=1.01,
-    )
+    # fig.suptitle(
+    #     "Cellfoundry – Pairwise Cost Contours (mean time/step)",
+    #     fontsize=FONT_SIZE_SUPTITLE, y=1.01,
+    # )
     fig.tight_layout()
     _savefig(fig, outdir, "contourf_panel")
     return fig
@@ -1017,6 +1084,7 @@ def plot_summary_panel(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
         ax.errorbar(agg[col], agg["mean"], yerr=agg["std"],
                      marker="o", markersize=4, capsize=3, color="C0")
         ax.set_xscale("log"); ax.set_yscale("log")
+        _set_compact_log_ticks(ax)
         ax.set_xlabel(_label(col), fontsize=FONT_SIZE_SMALL)
         ax.set_ylabel(YLABEL_STEP, fontsize=FONT_SIZE_SMALL)
         ax.set_title(f"Scaling: {_label(col)}", fontsize=FONT_SIZE_SMALL)
@@ -1031,6 +1099,7 @@ def plot_summary_panel(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
         ax.scatter(x[mask], y[mask], s=12, alpha=0.7, c="C1", edgecolors="none")
         ax.set_title("Total agents", fontsize=FONT_SIZE_SMALL)
         ax.set_xscale("log"); ax.set_yscale("log")
+        _set_compact_log_ticks(ax)
         ax.set_xlabel("Total agents", fontsize=FONT_SIZE_SMALL)
         ax.set_ylabel(YLABEL_STEP, fontsize=FONT_SIZE_SMALL)
         ax.grid(True, which="both", ls=":", lw=0.3, alpha=0.5)
@@ -1104,7 +1173,7 @@ def plot_init_time_scatter(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
         print("  Skipping init-time scatter (not enough data).")
         return None
 
-    fig, ax = plt.subplots(figsize=(7, 5))
+    fig, ax = plt.subplots(figsize=(5, 5))
     pie_cols = _pie_agent_cols(df)
 
     x = df["TOTAL_AGENTS"].values.astype(float)
@@ -1122,7 +1191,7 @@ def plot_init_time_scatter(df: pd.DataFrame, outdir: Path) -> plt.Figure | None:
     ax.set_yscale("log")
     ax.set_xlabel(XLABEL_TOTAL_AGENTS, fontsize=FONT_SIZE_LABEL)
     ax.set_ylabel(YLABEL_INIT, fontsize=FONT_SIZE_LABEL)
-    ax.set_title("Initialization-time scaling", fontsize=FONT_SIZE_TITLE)
+    #ax.set_title("Initialization-time scaling", fontsize=FONT_SIZE_TITLE)
     ax.grid(True, which="both", ls=":", lw=0.4, alpha=0.6)
 
     if pie_cols:
