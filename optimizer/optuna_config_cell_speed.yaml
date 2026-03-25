@@ -17,7 +17,7 @@
 # ============================================================================
 
 study:
-  name: "cellfoundry_cell_speed"
+  name: "cellfoundry_cell_speed_control"
   n_trials: 500
   sampler: TPE
   seed: 42
@@ -26,7 +26,7 @@ study:
 
 objective:
   function: cell_speed_error
-  reference: "optimizer/reference_data/target_cell_speed.csv"
+  reference: "optimizer/reference_data/target_cell_speed_control.csv"
   kwargs:
     population_stat: median
     include_dead: false
@@ -37,23 +37,23 @@ parameters:
   CELL_SPEED_REF:
     type: array_float
     elements:
-      0: {low: 0.01, high: 2.0}
-      1: {low: 0.01, high: 2.0}
-      2: {low: 0.01, high: 2.0}
+      0: {low: 0.0001, high: 0.005}
+      1: {low: 0.0001, high: 0.005}
+      2: {low: 0.0001, high: 0.005}
 
   BROWNIAN_MOTION_STRENGTH_FACTOR:
-    type: array_float
-    elements:
-      0: {low: 0.0, high: 2.0}
-      1: {low: 0.0, high: 2.0}
-      2: {low: 0.0, high: 2.0}
-
-  CHEMOTAXIS_CHI:
     type: array_float
     elements:
       0: {low: 0.0, high: 10.0}
       1: {low: 0.0, high: 10.0}
       2: {low: 0.0, high: 10.0}
+
+  # CHEMOTAXIS_CHI:
+  #   type: array_float
+  #   elements:
+  #     0: {low: 0.0, high: 10.0}
+  #     1: {low: 0.0, high: 10.0}
+  #     2: {low: 0.0, high: 10.0}
 
   # DIFFUSION_COEFF_MULTI:
   #   type: array_float
@@ -63,7 +63,7 @@ parameters:
 
 
 model:
-  result_dir: "optuna_cell_speed_results"
+  result_dir: "optuna_cell_speed_control_results"
   timeout: 0
   cleanup_trials: false
 

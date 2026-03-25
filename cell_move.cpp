@@ -96,7 +96,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
     agent_z_i[i] = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("z_i", i);
   }
 
-  // Orientation (assumed updated elsewhere)
+  // Orientation 
   float agent_orx = FLAMEGPU->getVariable<float>("orx");
   float agent_ory = FLAMEGPU->getVariable<float>("ory");
   float agent_orz = FLAMEGPU->getVariable<float>("orz");
@@ -176,17 +176,22 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   // ---------------------------------------------------------------------------
   // Intermediate velocity accumulation
   // ---------------------------------------------------------------------------
-  float v_base_x = 0.0f, v_base_y = 0.0f, v_base_z = 0.0f;     // base velocity (Brownian)
+  float v_base_x = 0.0f, v_base_y = 0.0f, v_base_z = 0.0f;     // base velocity (Persistent + Brownian)
   float steer_x  = 0.0f, steer_y  = 0.0f, steer_z  = 0.0f;     // direction-only accumulators
   float dv_x     = 0.0f, dv_y     = 0.0f, dv_z     = 0.0f;     // speed-changing accumulators
 
-  // Brownian motion (base component)
-  const float agent_speed_ref = FLAMEGPU->getVariable<float>("speed_ref");  
+  // Persistent self-propulsion along current orientation
+  const float agent_speed_ref = FLAMEGPU->getVariable<float>("speed_ref"); 
+  
+  v_base_x += agent_speed_ref * agent_orx;
+  v_base_y += agent_speed_ref * agent_ory;
+  v_base_z += agent_speed_ref * agent_orz;
+
+  // Brownian motion    
   const float BROWNIAN_MOTION_STRENGTH = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("BROWNIAN_MOTION_STRENGTH", agent_cell_type);
-  const float inv_sqrt3 = 0.577350269f; // To ensure the combined Brownian velocity has the correct magnitude, we scale by 1/sqrt(3) 
-  v_base_x = agent_speed_ref * inv_sqrt3 * BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));
-  v_base_y = agent_speed_ref * inv_sqrt3 * BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));
-  v_base_z = agent_speed_ref * inv_sqrt3 * BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));
+  v_base_x += BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));
+  v_base_y += BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));
+  v_base_z += BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));
 
   float chemotaxis_sensitivity[N_SPECIES] = {};
   for (int i = 0; i < N_SPECIES; i++) {

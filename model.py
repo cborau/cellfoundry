@@ -194,14 +194,14 @@ FNODE_BIRTH_REFRACTORY = [20.0, 20.0, 20.0]  # [s]
 # +====================================================================+
 # | DIFFUSION PARAMETERS                                               |
 # +====================================================================+
-INCLUDE_DIFFUSION = True
+INCLUDE_DIFFUSION = False
 N_SPECIES = 2  # number of diffusing species.WARNING: make sure that the value coincides with the one declared in TODO
 DIFFUSION_COEFF_MULTI = [300.0, 300.0]  # diffusion coefficient in [um^2/s] per specie
-BOUNDARY_CONC_INIT_MULTI = [[50.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                            # initial concentration at each surface (+X,-X,+Y,-Y,+Z,-Z) [um^2/s]. -1.0 means no condition assigned. All agents are assigned 0 by default.
+BOUNDARY_CONC_INIT_MULTI = [[2.5, 2.5, 2.5, 2.5, 2.5, 2.5],
+                            # initial concentration at each surface (+X,-X,+Y,-Y,+Z,-Z) [ng/ml]. -1.0 means no condition assigned. All agents are assigned 0 by default.
                             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
 
-BOUNDARY_CONC_FIXED_MULTI = [[50.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+BOUNDARY_CONC_FIXED_MULTI = [[2.5, 2.5, 2.5, 2.5, 2.5, 2.5],
                              # concentration boundary conditions at each surface. WARNING: -1.0 means initial condition prevails. Don't use 0.0 as initial condition if that value is not fixed. Use -1.0 instead
                              [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
 HETEROGENEOUS_DIFFUSION = False  # if True, diffusion coefficient is multiplied by (1 - local ECM density) to simulate hindered diffusion through the ECM. WARNING: this is a very simple approximation of the phenomenon and highly depends on grid density (N). 
@@ -233,9 +233,9 @@ CELL_K_ELAST = [2.0, 2.0, 2.0]  # [nN/um]
 CELL_D_DUMPING = [0.4, 0.4, 0.4]  # [nN·s/um]
 CELL_RADIUS = [8.412, 8.412, 8.412] # [um]
 CELL_NUCLEUS_RADIUS = [r / 2 for r in CELL_RADIUS] # [um]
-CELL_SPEED_REF = [1.25, 1.25, 0.75] # [um/s] Another option is to define it according to grid distance ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / X. WARNING: if cell speed is too high, consider increasing N or reducing TIME_STEP.
-BROWNIAN_MOTION_STRENGTH_FACTOR = [1.0, 1.0, 1.0]
-BROWNIAN_MOTION_STRENGTH = [s / f for s, f in zip(CELL_SPEED_REF, BROWNIAN_MOTION_STRENGTH_FACTOR)]  # [um/s] # [um/s] Strength of random movement added to cell velocity.
+CELL_SPEED_REF = [0.002, 0.002, 0.002] # [um/s] Another option is to define it according to grid distance ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / X. WARNING: if cell speed is too high, consider increasing N or reducing TIME_STEP.
+BROWNIAN_MOTION_STRENGTH_FACTOR = [2.0, 2.0, 2.0]
+BROWNIAN_MOTION_STRENGTH = [s * f for s, f in zip(CELL_SPEED_REF, BROWNIAN_MOTION_STRENGTH_FACTOR)]  # [um/s] # [um/s] Strength of random movement added to cell velocity.
 CELL_CELL_REPULSION_K = [2.0 * k for k in CELL_K_ELAST]  # [nN/um] contact exclusion stiffness
 CELL_CELL_ADHESION_K = [0.2 * k for k in CELL_K_ELAST]  # [nN/um] weak cohesion in near-contact shell
 CELL_CELL_ADHESION_RANGE = [0.5 * r for r in CELL_RADIUS]  # [um] adhesive shell thickness outside contact
@@ -267,20 +267,20 @@ CYCLE_PHASE_G2_START = [CYCLE_PHASE_G1_DURATION[0] + CYCLE_PHASE_S_DURATION[0], 
 CYCLE_PHASE_M_START  = [CYCLE_PHASE_G1_DURATION[0] + CYCLE_PHASE_S_DURATION[0] + CYCLE_PHASE_G2_DURATION[0], CYCLE_PHASE_G1_DURATION[1] + CYCLE_PHASE_S_DURATION[1] + CYCLE_PHASE_G2_DURATION[1], CYCLE_PHASE_G1_DURATION[2] + CYCLE_PHASE_S_DURATION[2] + CYCLE_PHASE_G2_DURATION[2]]
 CELL_CYCLE_DURATION  = [CYCLE_PHASE_G1_DURATION[0] + CYCLE_PHASE_S_DURATION[0] + CYCLE_PHASE_G2_DURATION[0] + CYCLE_PHASE_M_DURATION[0], CYCLE_PHASE_G1_DURATION[1] + CYCLE_PHASE_S_DURATION[1] + CYCLE_PHASE_G2_DURATION[1] + CYCLE_PHASE_M_DURATION[1], CYCLE_PHASE_G1_DURATION[2] + CYCLE_PHASE_S_DURATION[2] + CYCLE_PHASE_G2_DURATION[2] + CYCLE_PHASE_M_DURATION[2]]  # typically 24h
 
-# Per-cell-type cycle multipliers (Phase 1)
+# Per-cell-type cycle multipliers 
 DIVISION_RATE_MULTIPLIER = [1.0, 1.15, 0.85]  # [-] scales division probability per cell type
 DAMAGE_ACCUMULATION_MULTIPLIER = [1.0, 0.85, 1.25]  # [-] scales damage accrual per cell type
 DAMAGE_REPAIR_MULTIPLIER = [1.0, 1.10, 0.85]  # [-] scales damage repair per cell type
 DAMAGE_DEATH_THRESHOLD = [1.0, 1.0, 0.80]  # [-] damage threshold for death per cell type
 
-# Per-cell-type species multipliers (Phase 3 — Option A)
+# Per-cell-type species multipliers 
 # These multiply the base per-species rates (INIT_CELL_*_RATES) for each cell type.
 CELL_CONSUMPTION_MULTIPLIER = [1.0, 1.0, 1.0]  # [-] per-type scaling of consumption rates
 CELL_PRODUCTION_MULTIPLIER = [1.0, 1.0, 1.0]   # [-] per-type scaling of production rates
 CELL_REACTION_MULTIPLIER = [1.0, 1.0, 1.0]      # [-] per-type scaling of reaction rates
 CELL_INIT_CONCENTRATION_MULTIPLIER = [1.0, 1.0, 1.0]  # [-] per-type scaling of initial species concentrations
 
-INIT_ECM_CONCENTRATION_VALS = [0.0, 0.0]  # initial concentration of each species on the ECM agents
+INIT_ECM_CONCENTRATION_VALS = [2.5, 2.5]  # initial concentration of each species on the ECM agents
 INIT_CELL_CONCENTRATION_VALS = [0.0, 0.0]  # initial concentration of each species on the CELL agents
 # Reference concentrations (actual per-agent mass is computed at init using per-type volume & conc multiplier).
 INIT_CELL_CONC_MASS_VALS = [x for x in INIT_CELL_CONCENTRATION_VALS]
@@ -381,7 +381,7 @@ NUCLEUS_EPS_CLAMP = [0.30, 0.30, 0.30]      # [-] Clamp for each strain componen
 # +====================================================================+
 # | CHEMOTAXIS                                                         |
 # +====================================================================+
-INCLUDE_CHEMOTAXIS = True
+INCLUDE_CHEMOTAXIS = False
 CHEMOTAXIS_SENSITIVITY = [1.0, 0.0] # [-1.0 to +1.0] Chemotactic sensitivity for each species. Positive: attraction, Negative: repulsion towards higher concentrations.
 CHEMOTAXIS_ONLY_DIR = True # if True, chemotaxis only affects cell orientation, not speed. If False, chemotaxis affects both orientation and speed (e.g. by making cells move faster when they are oriented towards higher concentration gradient)
 CHEMOTAXIS_CHI = [0.1, 0.1, 0.10] # [um^2/s] Chemotactic coefficient (χ) per cell-type. Typical range: 0.1–10 µm²/s.
@@ -786,12 +786,10 @@ env.newPropertyArrayFloat("CYCLE_PHASE_G1_START", CYCLE_PHASE_G1_START)
 env.newPropertyArrayFloat("CYCLE_PHASE_S_START", CYCLE_PHASE_S_START)
 env.newPropertyArrayFloat("CYCLE_PHASE_G2_START", CYCLE_PHASE_G2_START)
 env.newPropertyArrayFloat("CYCLE_PHASE_M_START", CYCLE_PHASE_M_START)
-# Phase 1 — per-cell-type multipliers
 env.newPropertyArrayFloat("DIVISION_RATE_MULTIPLIER", DIVISION_RATE_MULTIPLIER)
 env.newPropertyArrayFloat("DAMAGE_ACCUMULATION_MULTIPLIER", DAMAGE_ACCUMULATION_MULTIPLIER)
 env.newPropertyArrayFloat("DAMAGE_REPAIR_MULTIPLIER", DAMAGE_REPAIR_MULTIPLIER)
 env.newPropertyArrayFloat("DAMAGE_DEATH_THRESHOLD", DAMAGE_DEATH_THRESHOLD)
-# Phase 3 — per-cell-type species multipliers
 env.newPropertyArrayFloat("CELL_CONSUMPTION_MULTIPLIER", CELL_CONSUMPTION_MULTIPLIER)
 env.newPropertyArrayFloat("CELL_PRODUCTION_MULTIPLIER", CELL_PRODUCTION_MULTIPLIER)
 env.newPropertyArrayFloat("CELL_REACTION_MULTIPLIER", CELL_REACTION_MULTIPLIER)

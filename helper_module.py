@@ -1987,6 +1987,7 @@ class ModelParameterConfig:
         include_cell_fnode_repulsion: bool = None,
         cell_nucleus_radius: float = None,
         brownian_motion_strength: float = None,
+        brownian_motion_strength_factor: bool = None,
         cell_cell_repulsion_k: float = None,
         cell_cell_adhesion_k: float = None,
         cell_cell_adhesion_range: float = None,
@@ -2192,6 +2193,7 @@ class ModelParameterConfig:
         self.INCLUDE_CELL_FNODE_REPULSION = include_cell_fnode_repulsion
         self.CELL_NUCLEUS_RADIUS = cell_nucleus_radius
         self.BROWNIAN_MOTION_STRENGTH = brownian_motion_strength
+        self.BROWNIAN_MOTION_STRENGTH_FACTOR = brownian_motion_strength_factor
         self.CELL_CELL_REPULSION_K = cell_cell_repulsion_k
         self.CELL_CELL_ADHESION_K = cell_cell_adhesion_k
         self.CELL_CELL_ADHESION_RANGE = cell_cell_adhesion_range
@@ -2742,6 +2744,7 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         include_cell_fnode_repulsion=ns.get("INCLUDE_CELL_FNODE_REPULSION"),
         cell_nucleus_radius=ns.get("CELL_NUCLEUS_RADIUS"),
         brownian_motion_strength=ns.get("BROWNIAN_MOTION_STRENGTH"),
+        brownian_motion_strength_factor=ns.get("BROWNIAN_MOTION_STRENGTH_FACTOR"),
         cell_cell_repulsion_k=ns.get("CELL_CELL_REPULSION_K"),
         cell_cell_adhesion_k=ns.get("CELL_CELL_ADHESION_K"),
         cell_cell_adhesion_range=ns.get("CELL_CELL_ADHESION_RANGE"),
@@ -2907,15 +2910,15 @@ def recompute_derived_params(ns: dict) -> None:
         ns["MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION"] = 3.0 * _max_cr
     if "CELL_SPEED_REF" in ns:
         cs = ns["CELL_SPEED_REF"]
-        # Use BROWNIAN_MOTION_STRENGTH_FACTOR if present, else default to 10.0
+        # Use BROWNIAN_MOTION_STRENGTH_FACTOR if present, else default to 2.0
         if "BROWNIAN_MOTION_STRENGTH_FACTOR" in ns:
             f = ns["BROWNIAN_MOTION_STRENGTH_FACTOR"]
-            def _div(a, b):
-                # Avoid division by zero
-                return a / b if b != 0 else 0.0
-            ns["BROWNIAN_MOTION_STRENGTH"] = _map2(_div, cs, f)
+            def _mult(a, b):
+                return a * b 
+            ns["BROWNIAN_MOTION_STRENGTH"] = _map2(_mult, cs, f)
         else:
-            ns["BROWNIAN_MOTION_STRENGTH"] = _map1(lambda s: s / 10.0, cs)
+            print("Warning: BROWNIAN_MOTION_STRENGTH_FACTOR not found; defaulting to 2.0 for Brownian motion strength calculation.")
+            ns["BROWNIAN_MOTION_STRENGTH"] = _map1(lambda s: s * 2.0, cs)
         ns["CELL_CELL_DV_MAX"] = _map1(lambda s: 0.5 * s, cs)
         ns["CELL_FNODE_DV_MAX"] = _map1(lambda s: 0.5 * s, cs)
     if "CELL_K_ELAST" in ns:
