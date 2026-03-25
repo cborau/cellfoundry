@@ -17,7 +17,7 @@
 # ============================================================================
 
 study:
-  name: "cellfoundry_cell_speed_control"
+  name: "cellfoundry_cell_speed_tgfb"
   n_trials: 500
   sampler: TPE
   seed: 42
@@ -26,7 +26,7 @@ study:
 
 objective:
   function: cell_speed_error
-  reference: "optimizer/reference_data/target_cell_speed_control.csv"
+  reference: "optimizer/reference_data/target_cell_speed_tgfb.csv"
   kwargs:
     population_stat: median
     include_dead: false
@@ -48,12 +48,12 @@ parameters:
       1: {low: 0.0, high: 10.0}
       2: {low: 0.0, high: 10.0}
 
-  # CHEMOTAXIS_CHI:
-  #   type: array_float
-  #   elements:
-  #     0: {low: 0.0, high: 10.0}
-  #     1: {low: 0.0, high: 10.0}
-  #     2: {low: 0.0, high: 10.0}
+  CHEMOTAXIS_CHI:
+    type: array_float
+    elements:
+      0: {low: 0.0, high: 10.0}
+      1: {low: 0.0, high: 10.0}
+      2: {low: 0.0, high: 10.0}
 
   # DIFFUSION_COEFF_MULTI:
   #   type: array_float
@@ -63,7 +63,7 @@ parameters:
 
 
 model:
-  result_dir: "optuna_cell_speed_control_results"
+  result_dir: "optuna_cell_speed_tgfb_results"
   timeout: 0
   cleanup_trials: false
 
@@ -77,7 +77,7 @@ model:
     INCLUDE_FOCAL_ADHESIONS: false
     INCLUDE_DIFFUSION: true
     INCLUDE_DUROTAXIS: false
-    INCLUDE_CHEMOTAXIS: true 
+    INCLUDE_CHEMOTAXIS: true
     VISUALISATION: false
     SHOW_PLOTS: false
     SAVE_DATA_TO_FILE: false
