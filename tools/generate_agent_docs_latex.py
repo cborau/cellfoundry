@@ -355,7 +355,7 @@ def main() -> int:
     )
     ap.add_argument(
         "--model",
-        default="../model.py",
+        default="./model.py",
         help='Path to the model file to parse (default: "model.py").',
     )
     ap.add_argument(

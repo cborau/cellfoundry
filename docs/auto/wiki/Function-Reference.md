@@ -509,6 +509,20 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - MessageBucket record for direct id-based neighbor access
 - - -
 
+## 📄 fnode_cell_repulsion.cpp
+
+### 🔹 [fnode_cell_repulsion](https://github.com/cborau/cellfoundry/blob/master/fnode_cell_repulsion.cpp)
+**Type:** `agent`  
+**Source:** [Open fnode_cell_repulsion.cpp](https://github.com/cborau/cellfoundry/blob/master/fnode_cell_repulsion.cpp)
+
+- 🔸 **Purpose:** Prevent FNODE points from being pushed into CELL centers by adding a short-range repulsive force (Newton-3 counterpart of cell_fnode_repulsion).
+- ⬇️ **Inputs:**
+  - cell_spatial_location_message (spatial neighbors)
+  - Environment interaction parameters (same as cell_fnode_repulsion)
+- ⬆️ **Outputs:**
+  - Updated FNODE force components (fx, fy, fz) with repulsive contributions added
+- - -
+
 ## 📄 fnode_fnode_bucket_interaction.cpp
 
 ### 🔹 [fnode_fnode_bucket_interaction](https://github.com/cborau/cellfoundry/blob/master/fnode_fnode_bucket_interaction.cpp)
