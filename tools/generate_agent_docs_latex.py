@@ -40,6 +40,27 @@ from typing import Dict, List, Optional, Tuple
 
 TARGET_AGENTS_DEFAULT = ["CELL", "FOCAD", "FNODE", "ECM", "BCORNER"]
 
+# Agent header-row colours (HTML hex, no leading #).
+# LIGHT_GRAY is used for the column-label row of every table.
+AGENT_COLORS: Dict[str, str] = {
+    "ECM":     "0e6377",
+    "CELL":    "87d1d5",
+    "FOCAD":   "f9cb37",
+    "FNODE":   "f37c20",
+    "BCORNER": "d22959",
+}
+LIGHT_GRAY = "E6E6E6"
+
+# Text colour for the agent-name header row, chosen for legibility.
+# Computed via L = 0.299R + 0.587G + 0.114B; white when L < 128.
+AGENT_TEXT_COLORS: Dict[str, str] = {
+    "ECM":     "FFFFFF",   # L ≈  76  → white
+    "CELL":    "000000",   # L ≈ 187  → black
+    "FOCAD":   "000000",   # L ≈ 200  → black
+    "FNODE":   "FFFFFF",   # L ≈ 149  → white
+    "BCORNER": "FFFFFF",   # L ≈  97  → white
+}
+
 
 @dataclass
 class VarInfo:
@@ -231,8 +252,34 @@ def parse_model(
     return vars_by_agent, funcs_by_agent
 
 
-def _latex_agent_section(agent_name: str, var_rows: List[VarInfo], func_rows: List[FuncInfo]) -> str:
+def _latex_agent_section(
+    agent_name: str,
+    var_rows: List[VarInfo],
+    func_rows: List[FuncInfo],
+    agent_color: Optional[str] = None,
+    agent_text_color: Optional[str] = None,
+) -> str:
+    """Render one agent's variables + functions as two longtable blocks.
+
+    *agent_color* is an HTML hex string (no leading ``#``) used to tint the
+    agent-name header row of each table.  The column-label row (Variable /
+    Description, etc.) is always tinted with LIGHT_GRAY.  When *agent_color*
+    is ``None`` no ``\\rowcolor`` commands are emitted.
+
+    *agent_text_color* is an HTML hex string for the text in the agent-name
+    header row (black or white for legibility).  Defaults to black when None.
+    """
     lines: List[str] = []
+
+    # Helper: emit \rowcolor[HTML]{HEX} when a colour is available.
+    def rowcolor(hex_color: str) -> str:
+        return r"\rowcolor[HTML]{" + hex_color + r"}"
+
+    # Wrap text in \color for the agent-name header cells.
+    txt_hex = agent_text_color or "000000"
+
+    def colored_text(s: str) -> str:
+        return r"\color[HTML]{" + txt_hex + r"}" + s
 
     lines.append(r"\subsection*{" + latex_escape(agent_name) + r"}")
     lines.append("")
@@ -244,17 +291,25 @@ def _latex_agent_section(agent_name: str, var_rows: List[VarInfo], func_rows: Li
     lines.append(r"\par\smallskip")
 
     # p{...} gives fixed width columns that can wrap text
-    lines.append(r"\begin{longtable}{@{} p{0.25\textwidth} p{0.75\textwidth} @{} }")
+    lines.append(r"\begin{longtable}{@{} >{\hspace{4pt}} p{0.25\textwidth} p{0.69\textwidth} <{\hspace{4pt}} @{}}")
     lines.append(r"\toprule")
-    lines.append(r"\multicolumn{2}{@{}l@{}}{\textbf{" + latex_escape(agent_name) + r"}} \\")
+    # Row 1 – agent name (primary colour)
+    if agent_color:
+        lines.append(rowcolor(agent_color))
+    lines.append(r"\multicolumn{2}{@{}l@{}}{\textbf{" + colored_text(latex_escape(agent_name)) + r"}} \\")
     lines.append(r"\midrule")
+    # Row 2 – column labels (light gray)
+    lines.append(rowcolor(LIGHT_GRAY))
     lines.append(r"\textbf{Variable} & \textbf{Description} \\")
     lines.append(r"\midrule")
     lines.append(r"\endfirsthead")
 
     lines.append(r"\toprule")
-    lines.append(r"\multicolumn{2}{@{}l@{}}{\textbf{" + latex_escape(agent_name) + r" (continued)}} \\")
+    if agent_color:
+        lines.append(rowcolor(agent_color))
+    lines.append(r"\multicolumn{2}{@{}l@{}}{\textbf{" + colored_text(latex_escape(agent_name)) + r" (continued)}} \\")
     lines.append(r"\midrule")
+    lines.append(rowcolor(LIGHT_GRAY))
     lines.append(r"\textbf{Variable} & \textbf{Description} \\")
     lines.append(r"\midrule")
     lines.append(r"\endhead")
@@ -278,17 +333,25 @@ def _latex_agent_section(agent_name: str, var_rows: List[VarInfo], func_rows: Li
     lines.append(r"\noindent\textbf{Functions}")
     lines.append(r"\par\smallskip")
 
-    lines.append(r"\begin{longtable}{@{} p{0.4\textwidth} p{0.3\textwidth} p{0.3\textwidth} @{} }")
+    lines.append(r"\begin{longtable}{@{} >{\hspace{4pt}} p{0.37\textwidth} p{0.27\textwidth} p{0.27\textwidth} <{\hspace{4pt}} @{}}")
     lines.append(r"\toprule")
-    lines.append(r"\multicolumn{3}{@{}l@{}}{\textbf{" + latex_escape(agent_name) + r"}} \\")
+    # Row 1 – agent name (primary colour)
+    if agent_color:
+        lines.append(rowcolor(agent_color))
+    lines.append(r"\multicolumn{3}{@{}l@{}}{\textbf{" + colored_text(latex_escape(agent_name)) + r"}} \\")
     lines.append(r"\midrule")
+    # Row 2 – column labels (light gray)
+    lines.append(rowcolor(LIGHT_GRAY))
     lines.append(r"\textbf{Function} & \textbf{Input} & \textbf{Output} \\")
     lines.append(r"\midrule")
     lines.append(r"\endfirsthead")
 
     lines.append(r"\toprule")
-    lines.append(r"\multicolumn{3}{@{}l@{}}{\textbf{" + latex_escape(agent_name) + r" (continued)}} \\")
+    if agent_color:
+        lines.append(rowcolor(agent_color))
+    lines.append(r"\multicolumn{3}{@{}l@{}}{\textbf{" + colored_text(latex_escape(agent_name)) + r" (continued)}} \\")
     lines.append(r"\midrule")
+    lines.append(rowcolor(LIGHT_GRAY))
     lines.append(r"\textbf{Function} & \textbf{Input} & \textbf{Output} \\")
     lines.append(r"\midrule")
     lines.append(r"\endhead")
@@ -327,9 +390,42 @@ def emit_latex(
         parts.append(r"\usepackage[margin=1.6cm]{geometry}")
         parts.append(r"\usepackage{booktabs}")
         parts.append(r"\usepackage{tabularx}")
+        parts.append(r"\usepackage{longtable}")
+        parts.append(r"\usepackage{array}")           # for >{}  <{}  cell modifiers
+        parts.append(r"\usepackage[table]{xcolor}")   # table option enables \rowcolor
         parts.append(r"\usepackage{parskip}")  # nicer spacing, avoids indentation
         parts.append(r"\renewcommand{\arraystretch}{1.15}")
         parts.append(r"\setlength{\tabcolsep}{8pt}")
+        parts.append("")
+    else:
+        # Fragment mode: emit \usepackage so parent doc is reminded to load it,
+        # wrapped in a comment block for easy removal if already loaded.
+        parts.append(r"% Required in preamble: \usepackage[table]{xcolor}")
+        parts.append(r"% Required in preamble: \usepackage{longtable}")
+        parts.append(r"% Required in preamble: \usepackage{array}")
+        parts.append("")
+
+    # \definecolor declarations – emitted regardless of standalone/fragment so
+    # that the colour names are always in scope.  In fragment mode the parent
+    # document must load xcolor before \input-ing this file.
+    parts.append(r"% --- Agent colour definitions ---")
+    parts.append(r"\definecolor{agentLightGray}{HTML}{" + LIGHT_GRAY + r"}")
+    for agent, hex_color in AGENT_COLORS.items():
+        parts.append(r"\definecolor{agentColor" + agent + r"}{HTML}{" + hex_color + r"}")
+    parts.append("")
+
+    # Zero out the extra space booktabs inserts above/below rules so that
+    # \rowcolor backgrounds align flush with \toprule / \midrule / \bottomrule.
+    parts.append(r"% --- Booktabs rule-spacing fix for \rowcolor alignment ---")
+    parts.append(r"\setlength{\aboverulesep}{0pt}")
+    parts.append(r"\setlength{\belowrulesep}{0pt}")
+    # colortbl extends \rowcolor outward by \tabcolsep beyond the outermost
+    # @{...} expression.  Setting it to 0pt eliminates that bleed entirely;
+    # the explicit @{\hspace{4pt}} in each column spec provides the padding.
+    parts.append(r"\setlength{\tabcolsep}{0pt}")
+    parts.append("")
+
+    if standalone:
         parts.append(r"\begin{document}")
         parts.append("")
 
@@ -337,7 +433,17 @@ def emit_latex(
     parts.append("")
 
     for agent in target_agents:
-        parts.append(_latex_agent_section(agent, vars_by_agent.get(agent, []), funcs_by_agent.get(agent, [])))
+        color = AGENT_COLORS.get(agent)
+        text_color = AGENT_TEXT_COLORS.get(agent)
+        parts.append(
+            _latex_agent_section(
+                agent,
+                vars_by_agent.get(agent, []),
+                funcs_by_agent.get(agent, []),
+                agent_color=color,
+                agent_text_color=text_color,
+            )
+        )
 
     if standalone:
         parts.append(r"\end{document}")
