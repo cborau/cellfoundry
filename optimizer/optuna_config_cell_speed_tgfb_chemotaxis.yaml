@@ -3,7 +3,7 @@
 # ============================================================================
 #
 # Usage:
-#    python -m optimizer.optimize --config optimizer/optuna_config_cell_speed.yaml
+#    python -m optimizer.optimize --config optimizer/optuna_config_cell_speed_tgfb_chemotaxis.yaml
 #
 # This objective compares per-cell-type target_vmean and target_veff values
 # against the aggregated population statistics computed from CELL_SPEED_METRICS
@@ -17,7 +17,7 @@
 # ============================================================================
 
 study:
-  name: "cellfoundry_cell_speed_tgfb"
+  name: "cellfoundry_cell_speed_tgfb_chemotaxis"
   n_trials: 500
   sampler: TPE
   seed: 42
@@ -34,12 +34,12 @@ objective:
     min_trajectory_time: 1.0
 
 parameters:
-  CELL_SPEED_REF:
-    type: array_float
-    elements:
-      0: {low: 0.0001, high: 0.005}
-      1: {low: 0.0001, high: 0.005}
-      2: {low: 0.0001, high: 0.005}
+  # CELL_SPEED_REF:
+  #   type: array_float
+  #   elements:
+  #     0: {low: 0.0001, high: 0.005}
+  #     1: {low: 0.0001, high: 0.005}
+  #     2: {low: 0.0001, high: 0.005}
 
   BROWNIAN_MOTION_STRENGTH_FACTOR:
     type: array_float
@@ -51,9 +51,9 @@ parameters:
   CHEMOTAXIS_CHI:
     type: array_float
     elements:
-      0: {low: 0.0, high: 10.0}
-      1: {low: 0.0, high: 10.0}
-      2: {low: 0.0, high: 10.0}
+      0: {low: 0.0, high: 20.0}
+      1: {low: 0.0, high: 20.0}
+      2: {low: 0.0, high: 20.0}
 
   # DIFFUSION_COEFF_MULTI:
   #   type: array_float
@@ -78,6 +78,8 @@ model:
     INCLUDE_DIFFUSION: true
     INCLUDE_DUROTAXIS: false
     INCLUDE_CHEMOTAXIS: true
+    INCLUDE_CHEMOKINESIS: false
+    CHEMOTAXIS_ONLY_DIR: false
     VISUALISATION: false
     SHOW_PLOTS: false
     SAVE_DATA_TO_FILE: false

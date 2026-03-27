@@ -1002,7 +1002,8 @@ def cell_speed_error(results: dict, reference_path: str, **kwargs) -> float:
     reduction is controlled by ``population_stat`` and can be ``"mean"``
     (default) or ``"median"``.
 
-    If normalize is True, e rror terms are normalized by the corresponding target magnitude.
+    If normalize is True, error terms are normalized by the corresponding target magnitude.
+    If use_max_error is True, the final error is the maximum of the per-type errors instead of the average.
     """
     ref = _load_reference_csv(reference_path)
     if "cell_type" not in ref.columns:
@@ -1030,8 +1031,10 @@ def cell_speed_error(results: dict, reference_path: str, **kwargs) -> float:
 
     population_stat = str(kwargs.get("population_stat", "mean")).strip().lower()
     normalize = bool(kwargs.get("normalize", True))
+    use_max_error = bool(kwargs.get("use_max_error", True))
 
     total_error = 0.0
+    max_error = 0.0
     n_terms = 0
     display_parts = []
 
@@ -1045,6 +1048,8 @@ def cell_speed_error(results: dict, reference_path: str, **kwargs) -> float:
             sim_vmean = _reduce_population_values(group["vmean"], population_stat)
             target_vmean = float(row["target_vmean"])
             error_vmean = _abs_error(sim_vmean, target_vmean, normalize) 
+            if error_vmean > max_error:
+                max_error = error_vmean
             total_error += error_vmean
             n_terms += 1
             display_parts.append(
@@ -1059,6 +1064,8 @@ def cell_speed_error(results: dict, reference_path: str, **kwargs) -> float:
             sim_veff = _reduce_population_values(group["veff"], population_stat)
             target_veff = float(row["target_veff"])
             error_veff = _abs_error(sim_veff, target_veff, normalize)
+            if error_veff > max_error:
+                max_error = error_veff
             total_error += error_veff
             n_terms += 1
             display_parts.append(
@@ -1073,7 +1080,10 @@ def cell_speed_error(results: dict, reference_path: str, **kwargs) -> float:
         raise ValueError("No usable target speed values found in reference CSV")
 
     display_text = f"({'; '.join(display_parts)})" if display_parts else None
-    return total_error / n_terms, display_text
+    if use_max_error:
+        return max_error, display_text
+    else:
+        return total_error / n_terms, display_text
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,5 @@
-// -----------------------------------------------------------------------------// Device helper functions (no lambdas, no auto)
+// -----------------------------------------------------------------------------
+// Device helper functions 
 // -----------------------------------------------------------------------------
 FLAMEGPU_DEVICE_FUNCTION float clampf(const float x, const float lo, const float hi) {
   return fminf(hi, fmaxf(lo, x));
@@ -37,12 +38,34 @@ FLAMEGPU_DEVICE_FUNCTION void normalize3(float &x, float &y, float &z) {
   }
 }
 
+// Bounded Hill gate in [0, 1].
+FLAMEGPU_DEVICE_FUNCTION float hill01(const float c, const float K, const float n) {
+  const float c_pos = fmaxf(c, 0.0f);
+  const float K_pos = fmaxf(K, 1e-12f);
+  const float nn = fmaxf(n, 1.0f);
+
+  const float cn = powf(c_pos, nn);
+  const float Kn = powf(K_pos, nn);
+  return cn / (Kn + cn + 1e-12f);
+}
+
+// Soft saturation of a non-negative sensed signal.
+// Formulation:
+//   s_sat = s_max * s / (s_max + s)
+// For s << s_max, this is approximately linear.
+// For s >> s_max, this approaches s_max.
+FLAMEGPU_DEVICE_FUNCTION float saturate_signal(const float signal, const float sat_level) {
+  const float s = fmaxf(signal, 0.0f);
+  const float smax = fmaxf(sat_level, 1e-12f);
+  return smax * s / (smax + s);
+}
+
 /**
  * cell_move
  *
  * Purpose:
  *   Update CELL velocity/orientation-driven migration by combining Brownian,
- *   chemotactic, and durotactic components, then advance position.
+ *   chemotactic, chemokinetic and durotactic components, then advance position.
  *
  * Inputs:
  *   - CELL kinematic state, stress/strain eigensystem, chemotaxis sensitivities
@@ -59,7 +82,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
     FLAMEGPU->setVariable<float>("vz", 0.0f);
     return flamegpu::ALIVE;
   }
-  //Get agent variables (agent calling the function)
+
+  // Get agent variables
   int agent_id = FLAMEGPU->getVariable<int>("id");
   int agent_cell_type = FLAMEGPU->getVariable<int>("cell_type");
   float agent_x = FLAMEGPU->getVariable<float>("x");
@@ -96,7 +120,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
     agent_z_i[i] = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("z_i", i);
   }
 
-  // Orientation 
+  // Orientation
   float agent_orx = FLAMEGPU->getVariable<float>("orx");
   float agent_ory = FLAMEGPU->getVariable<float>("ory");
   float agent_orz = FLAMEGPU->getVariable<float>("orz");
@@ -146,60 +170,86 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   auto C_SP_MACRO = FLAMEGPU->environment.getMacroProperty<float, N_SPECIES, ECM_POPULATION_SIZE>("C_SP_MACRO");
 
   // Get number of agents per direction
-  const int Nx = FLAMEGPU->environment.getProperty<int>("ECM_AGENTS_PER_DIR",0);
-  const int Ny = FLAMEGPU->environment.getProperty<int>("ECM_AGENTS_PER_DIR",1);
-  const int Nz = FLAMEGPU->environment.getProperty<int>("ECM_AGENTS_PER_DIR",2);
+  const int Nx = FLAMEGPU->environment.getProperty<int>("ECM_AGENTS_PER_DIR", 0);
+  const int Ny = FLAMEGPU->environment.getProperty<int>("ECM_AGENTS_PER_DIR", 1);
+  const int Nz = FLAMEGPU->environment.getProperty<int>("ECM_AGENTS_PER_DIR", 2);
 
   // Get position of the boundaries
-  const float COORD_BOUNDARY_X_POS = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES",0);
-  const float COORD_BOUNDARY_X_NEG = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES",1);
-  const float COORD_BOUNDARY_Y_POS = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES",2);
-  const float COORD_BOUNDARY_Y_NEG = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES",3);
-  const float COORD_BOUNDARY_Z_POS = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES",4);
-  const float COORD_BOUNDARY_Z_NEG = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES",5);
+  const float COORD_BOUNDARY_X_POS = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES", 0);
+  const float COORD_BOUNDARY_X_NEG = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES", 1);
+  const float COORD_BOUNDARY_Y_POS = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES", 2);
+  const float COORD_BOUNDARY_Y_NEG = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES", 3);
+  const float COORD_BOUNDARY_Z_POS = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES", 4);
+  const float COORD_BOUNDARY_Z_NEG = FLAMEGPU->environment.getProperty<float>("COORDS_BOUNDARIES", 5);
 
   const uint8_t N_CELL_TYPES = 3; // WARNING: must match main python model N_CELL_TYPES
+
   // Chemotaxis controls
   const int INCLUDE_CHEMOTAXIS = FLAMEGPU->environment.getProperty<int>("INCLUDE_CHEMOTAXIS");
-  const int CHEMOTAXIS_ONLY_DIR = FLAMEGPU->environment.getProperty<int>("CHEMOTAXIS_ONLY_DIR"); // 1: change direction only
+  const int CHEMOTAXIS_ONLY_DIR = FLAMEGPU->environment.getProperty<int>("CHEMOTAXIS_ONLY_DIR");
   const float CHEMOTAXIS_CHI = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CHEMOTAXIS_CHI", agent_cell_type);
+
+  // Chemokinesis controls
+  const int INCLUDE_CHEMOKINESIS = FLAMEGPU->environment.getProperty<int>("INCLUDE_CHEMOKINESIS");
+  const float CHEMOKINESIS_ALPHA = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CHEMOKINESIS_ALPHA", agent_cell_type);
+  const float CHEMOKINESIS_K = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CHEMOKINESIS_K", agent_cell_type);
+  const float CHEMOKINESIS_HILL_N = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CHEMOKINESIS_HILL_N", agent_cell_type);
+  const float CHEMOKINESIS_ADAPT_TAU = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CHEMOKINESIS_ADAPT_TAU", agent_cell_type);
+  const float CHEMOKINESIS_SIGNAL_SAT_MULTIPLIER = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CHEMOKINESIS_SIGNAL_SAT_MULTIPLIER", agent_cell_type);
+
+  float chemokinesis_signal_sat_base[N_SPECIES] = {};
+  for (int s = 0; s < N_SPECIES; s++) {
+    chemokinesis_signal_sat_base[s] = FLAMEGPU->environment.getProperty<float, N_SPECIES>("CHEMOKINESIS_SIGNAL_SAT", s);
+  }
 
   // Durotaxis controls
   const int INCLUDE_DUROTAXIS = FLAMEGPU->environment.getProperty<int>("INCLUDE_DUROTAXIS");
-  const int DUROTAXIS_ONLY_DIR = FLAMEGPU->environment.getProperty<int>("DUROTAXIS_ONLY_DIR"); // 1: change direction only
+  const int DUROTAXIS_ONLY_DIR = FLAMEGPU->environment.getProperty<int>("DUROTAXIS_ONLY_DIR");
   const float FOCAD_MOBILITY_MU = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FOCAD_MOBILITY_MU", agent_cell_type);
 
   // Recommended additional controls for the blended model
-  const float DUROTAXIS_BLEND_BETA = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("DUROTAXIS_BLEND_BETA", agent_cell_type); // 0..1
-  const int DUROTAXIS_USE_STRESS = FLAMEGPU->environment.getProperty<int>("DUROTAXIS_USE_STRESS");     // 1: stress, 0: strain
+  const float DUROTAXIS_BLEND_BETA = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("DUROTAXIS_BLEND_BETA", agent_cell_type);
+  const int DUROTAXIS_USE_STRESS = FLAMEGPU->environment.getProperty<int>("DUROTAXIS_USE_STRESS");
 
   // ---------------------------------------------------------------------------
   // Intermediate velocity accumulation
   // ---------------------------------------------------------------------------
-  float v_base_x = 0.0f, v_base_y = 0.0f, v_base_z = 0.0f;     // base velocity (Persistent + Brownian)
-  float steer_x  = 0.0f, steer_y  = 0.0f, steer_z  = 0.0f;     // direction-only accumulators
-  float dv_x     = 0.0f, dv_y     = 0.0f, dv_z     = 0.0f;     // speed-changing accumulators
+  float v_base_x = 0.0f, v_base_y = 0.0f, v_base_z = 0.0f;
+  float steer_x  = 0.0f, steer_y  = 0.0f, steer_z  = 0.0f;
+  float dv_x     = 0.0f, dv_y     = 0.0f, dv_z     = 0.0f;
 
   // Persistent self-propulsion along current orientation
-  const float agent_speed_ref = FLAMEGPU->getVariable<float>("speed_ref"); 
-  
-  v_base_x += agent_speed_ref * agent_orx;
-  v_base_y += agent_speed_ref * agent_ory;
-  v_base_z += agent_speed_ref * agent_orz;
+  const float agent_speed_ref = FLAMEGPU->getVariable<float>("speed_ref");
 
-  // Brownian motion    
+  // Brownian motion
   const float BROWNIAN_MOTION_STRENGTH = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("BROWNIAN_MOTION_STRENGTH", agent_cell_type);
-  v_base_x += BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));
-  v_base_y += BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));
-  v_base_z += BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0, 1.0));
 
   float chemotaxis_sensitivity[N_SPECIES] = {};
   for (int i = 0; i < N_SPECIES; i++) {
-    chemotaxis_sensitivity[i] = FLAMEGPU->getVariable<float, N_SPECIES>("chemotaxis_sensitivity", i);
+    chemotaxis_sensitivity[i] = FLAMEGPU->environment.getProperty<float, N_SPECIES>("CHEMOTAXIS_SENSITIVITY", i);
+  }
+
+  // Unified chemokinesis sensitivity per species, shared by all cell types:
+  // > 0 contributes to the promotive channel
+  // < 0 contributes to the inhibitory channel
+  float chemokinesis_sensitivity[N_SPECIES] = {};
+  for (int i = 0; i < N_SPECIES; i++) {
+    chemokinesis_sensitivity[i] =  FLAMEGPU->environment.getProperty<float, N_SPECIES>("CHEMOKINESIS_SENSITIVITY", i);
+  }
+
+  // Separate adaptation states are kept for promotive and inhibitory signalling,
+  // both stored as arrays over species
+  float chemokinesis_promotive_adapt_state[N_SPECIES] = {};
+  float chemokinesis_inhibitory_adapt_state[N_SPECIES] = {};
+  for (int s = 0; s < N_SPECIES; s++) {
+    chemokinesis_promotive_adapt_state[s] =
+        FLAMEGPU->getVariable<float, N_SPECIES>("chemokinesis_promotive_adapt_state", s);
+    chemokinesis_inhibitory_adapt_state[s] =
+        FLAMEGPU->getVariable<float, N_SPECIES>("chemokinesis_inhibitory_adapt_state", s);
   }
 
   // ---------------------------------------------------------------------------
-  // transform x,y,z positions to i,j,k grid positions
+  // Transform x,y,z positions to i,j,k grid positions
   // ---------------------------------------------------------------------------
   int agent_grid_i = roundf(((agent_x - COORD_BOUNDARY_X_NEG) / (COORD_BOUNDARY_X_POS - COORD_BOUNDARY_X_NEG)) * (Nx - 1));
   int agent_grid_j = roundf(((agent_y - COORD_BOUNDARY_Y_NEG) / (COORD_BOUNDARY_Y_POS - COORD_BOUNDARY_Y_NEG)) * (Ny - 1));
@@ -209,6 +259,105 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   agent_grid_j = clampi(agent_grid_j, 0, Ny - 1);
   agent_grid_k = clampi(agent_grid_k, 0, Nz - 1);
 
+  // Current ECM voxel index, used by both chemotaxis and chemokinesis
+  const uint32_t c_idx = macro_lin_idx(agent_grid_i, agent_grid_j, agent_grid_k, Ny, Nz);
+
+  // ---------------------------------------------------------------------------
+  // CHEMOKINESIS: absolute local concentration modulates persistent speed
+  // Separate promotive and inhibitory signals are built from the sign of the
+  // unified per-species sensitivity, but both channels share the same response
+  // parameters (alpha, K, Hill exponent, adaptation timescale).
+  //
+  // Saturation is now applied per species and per cell:
+  //   sat_level(s, cell_type) =
+  //       CHEMOKINESIS_SIGNAL_SAT[s] *
+  //       CHEMOKINESIS_SIGNAL_SAT_MULTIPLIER[cell_type]
+  //
+  // Adaptation is also tracked per species and per channel, then the effective
+  // desensitized signals are summed into the promotive and inhibitory channels.
+  // ---------------------------------------------------------------------------
+  float chemokinesis_factor = 1.0f;
+  if (INCLUDE_CHEMOKINESIS) {
+    float promo_signal_eff_sum = 0.0f;
+    float inhib_signal_eff_sum = 0.0f;
+
+    for (int s = 0; s < N_SPECIES; s++) {
+      const float sens = chemokinesis_sensitivity[s];
+      const float c_local = fmaxf(C_SP_MACRO[s][c_idx], 0.0f);
+      const float sat_level =
+          chemokinesis_signal_sat_base[s] * CHEMOKINESIS_SIGNAL_SAT_MULTIPLIER;
+
+      if (sens > 0.0f) {
+        const float promo_signal_raw = sens * c_local;
+        const float promo_signal_pos = fmaxf(promo_signal_raw, 0.0f);
+        const float promo_signal_sat = saturate_signal(promo_signal_pos, sat_level);
+
+        if (CHEMOKINESIS_ADAPT_TAU > 1e-12f) {
+          chemokinesis_promotive_adapt_state[s] +=
+              (TIME_STEP / CHEMOKINESIS_ADAPT_TAU) *
+              (promo_signal_sat - chemokinesis_promotive_adapt_state[s]);
+        } else {
+          chemokinesis_promotive_adapt_state[s] = promo_signal_sat;
+        }
+        chemokinesis_promotive_adapt_state[s] =
+            fmaxf(chemokinesis_promotive_adapt_state[s], 0.0f);
+
+        // Unused inhibitory branch for this species
+        chemokinesis_inhibitory_adapt_state[s] = 0.0f;
+
+        const float promo_signal_eff =
+            fmaxf(promo_signal_sat - chemokinesis_promotive_adapt_state[s], 0.0f);
+        promo_signal_eff_sum += promo_signal_eff;
+
+      } else if (sens < 0.0f) {
+        const float inhib_signal_raw = (-sens) * c_local;
+        const float inhib_signal_pos = fmaxf(inhib_signal_raw, 0.0f);
+        const float inhib_signal_sat = saturate_signal(inhib_signal_pos, sat_level);
+
+        if (CHEMOKINESIS_ADAPT_TAU > 1e-12f) {
+          chemokinesis_inhibitory_adapt_state[s] +=
+              (TIME_STEP / CHEMOKINESIS_ADAPT_TAU) *
+              (inhib_signal_sat - chemokinesis_inhibitory_adapt_state[s]);
+        } else {
+          chemokinesis_inhibitory_adapt_state[s] = inhib_signal_sat;
+        }
+        chemokinesis_inhibitory_adapt_state[s] =
+            fmaxf(chemokinesis_inhibitory_adapt_state[s], 0.0f);
+
+        // Unused promotive branch for this species
+        chemokinesis_promotive_adapt_state[s] = 0.0f;
+
+        const float inhib_signal_eff =
+            fmaxf(inhib_signal_sat - chemokinesis_inhibitory_adapt_state[s], 0.0f);
+        inhib_signal_eff_sum += inhib_signal_eff;
+
+      } else {
+        chemokinesis_promotive_adapt_state[s] = 0.0f;
+        chemokinesis_inhibitory_adapt_state[s] = 0.0f;
+      }
+    }
+
+    const float h_promo = hill01(promo_signal_eff_sum, CHEMOKINESIS_K, CHEMOKINESIS_HILL_N);
+    const float h_inhib = hill01(inhib_signal_eff_sum, CHEMOKINESIS_K, CHEMOKINESIS_HILL_N);
+
+    // Shared alpha for both channels:
+    // promotive signal increases speed, inhibitory signal decreases speed
+    chemokinesis_factor = 1.0f + CHEMOKINESIS_ALPHA * (h_promo - h_inhib);
+
+    // Prevent negative persistent speed
+    chemokinesis_factor = fmaxf(chemokinesis_factor, 0.0f);
+  }
+
+  // Persistent self-propulsion along current orientation, modulated by chemokinesis
+  const float persistent_speed = agent_speed_ref * chemokinesis_factor;
+  v_base_x += persistent_speed * agent_orx;
+  v_base_y += persistent_speed * agent_ory;
+  v_base_z += persistent_speed * agent_orz;
+
+  v_base_x += BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0f, 1.0f));
+  v_base_y += BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0f, 1.0f));
+  v_base_z += BROWNIAN_MOTION_STRENGTH * (FLAMEGPU->random.uniform<float>(-1.0f, 1.0f));
+
   // ---------------------------------------------------------------------------
   // CHEMOTAXIS: compute direction and add to steer or dv
   // ---------------------------------------------------------------------------
@@ -216,8 +365,6 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
     const float dx = (COORD_BOUNDARY_X_POS - COORD_BOUNDARY_X_NEG) / (Nx - 1);
     const float dy = (COORD_BOUNDARY_Y_POS - COORD_BOUNDARY_Y_NEG) / (Ny - 1);
     const float dz = (COORD_BOUNDARY_Z_POS - COORD_BOUNDARY_Z_NEG) / (Nz - 1);
-
-    const uint32_t c_idx = macro_lin_idx(agent_grid_i, agent_grid_j, agent_grid_k, Ny, Nz);
 
     float grad_x = 0.0f, grad_y = 0.0f, grad_z = 0.0f;
 
@@ -271,12 +418,10 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
         steer_x += CHEMOTAXIS_CHI * chemo_dir_x;
         steer_y += CHEMOTAXIS_CHI * chemo_dir_y;
         steer_z += CHEMOTAXIS_CHI * chemo_dir_z;
-        //printf("Agent %d: chemotaxis steer=(%.3f, %.3f, %.3f)\n", agent_id, CHEMOTAXIS_CHI * chemo_dir_x, CHEMOTAXIS_CHI * chemo_dir_y, CHEMOTAXIS_CHI * chemo_dir_z);
       } else {
         dv_x += CHEMOTAXIS_CHI * chemo_dir_x;
         dv_y += CHEMOTAXIS_CHI * chemo_dir_y;
         dv_z += CHEMOTAXIS_CHI * chemo_dir_z;
-        //printf("Agent %d: chemotaxis dv=(%.3f, %.3f, %.3f)\n", agent_id, CHEMOTAXIS_CHI * chemo_dir_x, CHEMOTAXIS_CHI * chemo_dir_y, CHEMOTAXIS_CHI * chemo_dir_z);
       }
     }
   }
@@ -316,20 +461,16 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
     normalize3(duro_dir_x, duro_dir_y, duro_dir_z);
 
     // Strength scaling
-    //printf("agent_sig=(%.3f, %.3f, %.3f, %.3f, %.3f, %.3f) eps=(%.3f, %.3f, %.3f, %.3f, %.3f, %.3f)\n", agent_sig_xx, agent_sig_yy, agent_sig_zz, agent_sig_xy, agent_sig_xz, agent_sig_yz,
-    //                                                                                                                    agent_eps_xx, agent_eps_yy, agent_eps_zz, agent_eps_xy, agent_eps_xz, agent_eps_yz);
     float scale_energy = agent_sig_xx*agent_eps_xx + agent_sig_yy*agent_eps_yy + agent_sig_zz*agent_eps_zz
                        + 2.0f*(agent_sig_xy*agent_eps_xy + agent_sig_xz*agent_eps_xz + agent_sig_yz*agent_eps_yz);
     if (scale_energy < 0.0f) scale_energy = 0.0f;
 
-    // Unitless anisotropy factor from principal values (vanishes when nearly isotropic)
+    // Unitless anisotropy factor from principal values
     const float aniso_den = fabsf(l1) + fabsf(l2) + fabsf(l3) + 1e-12f;
-    float A = (l1 - l3) / aniso_den; // unitless, 0..1, vanishes when l1~l2~l3, increases as l1>>l2,l3; 
+    float A = (l1 - l3) / aniso_den;
 
     // Final durotaxis strength
-    //printf("Agent %d: durotaxis scale_energy=%.3f A=%.3f\n", agent_id, scale_energy, A);
     float duro_strength = FOCAD_MOBILITY_MU * (scale_energy + A);
-    // If both are tiny, keep a minimal fallback based on |l1|
     if (duro_strength < 1e-12f) {
       duro_strength = FOCAD_MOBILITY_MU * fabsf(l1);
     }
@@ -338,12 +479,10 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
       steer_x += duro_strength * duro_dir_x;
       steer_y += duro_strength * duro_dir_y;
       steer_z += duro_strength * duro_dir_z;
-      //printf("Agent %d: durotaxis steer=(%.3f, %.3f, %.3f)\n", agent_id, duro_strength * duro_dir_x, duro_strength * duro_dir_y, duro_strength * duro_dir_z);
     } else {
       dv_x += duro_strength * duro_dir_x;
       dv_y += duro_strength * duro_dir_y;
       dv_z += duro_strength * duro_dir_z;
-      //printf("Agent %d: durotaxis dv=(%.3f, %.3f, %.3f)\n", agent_id, duro_strength * duro_dir_x, duro_strength * duro_dir_y, duro_strength * duro_dir_z);
     }
   }
 
@@ -361,7 +500,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
     float vmag = sqrtf(v2 + 1e-12f);
 
     // If base speed is tiny, use speed_ref so steering can still produce motion
-    if (vmag < 1e-6f) vmag = agent_speed_ref;
+    if (vmag < 1e-6f) vmag = persistent_speed;
 
     float vdir_x = agent_vx;
     float vdir_y = agent_vy;
@@ -385,7 +524,6 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
     agent_vx = vmag * ndir_x;
     agent_vy = vmag * ndir_y;
     agent_vz = vmag * ndir_z;
-    //printf("Agent %d: steer=(%.3f, %.3f, %.3f) v=(%.3f, %.3f, %.3f)\n", agent_id, steer_x, steer_y, steer_z, agent_vx, agent_vy, agent_vz);
   }
 
   // Add speed-changing contributions
@@ -393,7 +531,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   agent_vy += dv_y;
   agent_vz += dv_z;
 
-  // Add short-range interaction contributions (computed in dedicated interaction RTC functions)
+  // Add short-range interaction contributions
   agent_vx += agent_cc_dvx + agent_cf_dvx;
   agent_vy += agent_cc_dvy + agent_cf_dvy;
   agent_vz += agent_cc_dvz + agent_cf_dvz;
@@ -407,7 +545,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
 
   // Boundary handling: periodic wrapping or simple clamping
   const unsigned int PERIODIC_BOUNDARIES_FOR_CELLS = FLAMEGPU->environment.getProperty<int>("PERIODIC_BOUNDARIES_FOR_CELLS");
-  const unsigned int INCLUDE_FOCAL_ADHESIONS    = FLAMEGPU->environment.getProperty<int>("INCLUDE_FOCAL_ADHESIONS");
+  const unsigned int INCLUDE_FOCAL_ADHESIONS = FLAMEGPU->environment.getProperty<int>("INCLUDE_FOCAL_ADHESIONS");
 
   if (PERIODIC_BOUNDARIES_FOR_CELLS == 1 && INCLUDE_FOCAL_ADHESIONS == 0) {
     // Periodic wrapping for cell position
@@ -452,7 +590,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   trajectory_length += sqrtf(dx_track * dx_track + dy_track * dy_track + dz_track * dz_track);
   trajectory_time += TIME_STEP;
 
-  //Set agent variables
+  // Set agent variables
   FLAMEGPU->setVariable<int>("id", agent_id);
   FLAMEGPU->setVariable<float>("x", agent_x);
   FLAMEGPU->setVariable<float>("y", agent_y);
@@ -467,6 +605,14 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   FLAMEGPU->setVariable<float>("vz", agent_vz);
   FLAMEGPU->setVariable<float>("trajectory_length", trajectory_length);
   FLAMEGPU->setVariable<float>("trajectory_time", trajectory_time);
+
+  // Persist separate adaptation states for promotive and inhibitory chemokinesis
+  for (int s = 0; s < N_SPECIES; s++) {
+    FLAMEGPU->setVariable<float, N_SPECIES>(
+        "chemokinesis_promotive_adapt_state", s, chemokinesis_promotive_adapt_state[s]);
+    FLAMEGPU->setVariable<float, N_SPECIES>(
+        "chemokinesis_inhibitory_adapt_state", s, chemokinesis_inhibitory_adapt_state[s]);
+  }
 
   return flamegpu::ALIVE;
 }

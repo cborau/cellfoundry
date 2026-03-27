@@ -97,14 +97,12 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
   float agent_k_reaction[N_SPECIES] = {};
   float agent_C_sp[N_SPECIES] = {};
   float agent_M_sp[N_SPECIES] = {};
-  float agent_chemotaxis_sensitivity[N_SPECIES] = {};
   for (int i = 0; i < N_SPECIES; i++) {
     agent_k_consumption[i] = FLAMEGPU->getVariable<float, N_SPECIES>("k_consumption", i);
     agent_k_production[i] = FLAMEGPU->getVariable<float, N_SPECIES>("k_production", i);
     agent_k_reaction[i] = FLAMEGPU->getVariable<float, N_SPECIES>("k_reaction", i);
     agent_C_sp[i] = FLAMEGPU->getVariable<float, N_SPECIES>("C_sp", i);
     agent_M_sp[i] = FLAMEGPU->getVariable<float, N_SPECIES>("M_sp", i);
-    agent_chemotaxis_sensitivity[i] = FLAMEGPU->getVariable<float, N_SPECIES>("chemotaxis_sensitivity", i);
   }
 
   float agent_x_i[N_ANCHOR_POINTS] = {};
@@ -368,7 +366,6 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
         FLAMEGPU->agent_out.setVariable<float, N_SPECIES>("k_reaction", i, agent_k_reaction[i]);
         FLAMEGPU->agent_out.setVariable<float, N_SPECIES>("C_sp", i, agent_C_sp[i]);
         FLAMEGPU->agent_out.setVariable<float, N_SPECIES>("M_sp", i, 0.5f * agent_M_sp[i]);
-        FLAMEGPU->agent_out.setVariable<float, N_SPECIES>("chemotaxis_sensitivity", i, agent_chemotaxis_sensitivity[i]);
       }
       FLAMEGPU->agent_out.setVariable<float>("speed_ref", agent_speed_ref);
       FLAMEGPU->agent_out.setVariable<float>("radius", CELL_RADIUS / 2); // to prevent diminishing cell size with each division, set radius to the agent base variable and not the current parent's value.

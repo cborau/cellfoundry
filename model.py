@@ -233,8 +233,8 @@ CELL_K_ELAST = [2.0, 2.0, 2.0]  # [nN/um]
 CELL_D_DUMPING = [0.4, 0.4, 0.4]  # [nN·s/um]
 CELL_RADIUS = [8.412, 8.412, 8.412] # [um]
 CELL_NUCLEUS_RADIUS = [r / 2 for r in CELL_RADIUS] # [um]
-CELL_SPEED_REF = [0.002, 0.002, 0.002] # [um/s] Another option is to define it according to grid distance ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / X. WARNING: if cell speed is too high, consider increasing N or reducing TIME_STEP.
-BROWNIAN_MOTION_STRENGTH_FACTOR = [2.0, 2.0, 2.0]
+CELL_SPEED_REF = [0.00041817020062396415, 0.0006199050301202626, 0.0004034913399763545] # [um/s] Another option is to define it according to grid distance ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / X. WARNING: if cell speed is too high, consider increasing N or reducing TIME_STEP.
+BROWNIAN_MOTION_STRENGTH_FACTOR = [2.5189218869227887, 2.3736333480245912, 3.116570743208639]
 BROWNIAN_MOTION_STRENGTH = [s * f for s, f in zip(CELL_SPEED_REF, BROWNIAN_MOTION_STRENGTH_FACTOR)]  # [um/s] # [um/s] Strength of random movement added to cell velocity.
 CELL_CELL_REPULSION_K = [2.0 * k for k in CELL_K_ELAST]  # [nN/um] contact exclusion stiffness
 CELL_CELL_ADHESION_K = [0.2 * k for k in CELL_K_ELAST]  # [nN/um] weak cohesion in near-contact shell
@@ -281,7 +281,7 @@ CELL_REACTION_MULTIPLIER = [1.0, 1.0, 1.0]      # [-] per-type scaling of reacti
 CELL_INIT_CONCENTRATION_MULTIPLIER = [1.0, 1.0, 1.0]  # [-] per-type scaling of initial species concentrations
 
 INIT_ECM_CONCENTRATION_VALS = [2.5, 2.5]  # initial concentration of each species on the ECM agents
-INIT_CELL_CONCENTRATION_VALS = [0.0, 0.0]  # initial concentration of each species on the CELL agents
+INIT_CELL_CONCENTRATION_VALS = [2.5, 2.5]  # initial concentration of each species on the CELL agents
 # Reference concentrations (actual per-agent mass is computed at init using per-type volume & conc multiplier).
 INIT_CELL_CONC_MASS_VALS = [x for x in INIT_CELL_CONCENTRATION_VALS]
 INIT_ECM_SAT_CONCENTRATION_VALS = [0.0, 0.0]  # initial saturation concentration of each species on the ECM agents
@@ -385,6 +385,18 @@ INCLUDE_CHEMOTAXIS = False
 CHEMOTAXIS_SENSITIVITY = [1.0, 0.0] # [-1.0 to +1.0] Chemotactic sensitivity for each species. Positive: attraction, Negative: repulsion towards higher concentrations.
 CHEMOTAXIS_ONLY_DIR = True # if True, chemotaxis only affects cell orientation, not speed. If False, chemotaxis affects both orientation and speed (e.g. by making cells move faster when they are oriented towards higher concentration gradient)
 CHEMOTAXIS_CHI = [0.1, 0.1, 0.10] # [um^2/s] Chemotactic coefficient (χ) per cell-type. Typical range: 0.1–10 µm²/s.
+# +====================================================================+
+# | CHEMOKINESIS                                                         |
+# +====================================================================+
+INCLUDE_CHEMOKINESIS = True
+CHEMOKINESIS_SENSITIVITY = [-100.0, 0.0] # [-1.0 to +1.0] Chemokinesis sensitivity for each species. Positive: speed increases with higher concentrations, Negative: speed decreases with higher concentrations.
+CHEMOKINESIS_ALPHA = [0.5, 0.5, 0.5] # [-] Baseline speed is multiplied by (1 + alpha * f(C_sp)) 
+CHEMOKINESIS_K = [2.0, 2.0, 2.0] # [concentration units] Chemokinesis half-saturation constant for concentration-dependent speed modulation.
+CHEMOKINESIS_HILL_N = [2.0, 2.0, 2.0] # Hill coefficient for chemokinesis response curve.
+CHEMOKINESIS_ADAPT_TAU = [60.0, 60.0, 60.0] # [s] Time constant for chemokinesis adaptation (how quickly cells adjust their internal state to changes in chemoattractant concentration).
+CHEMOKINESIS_SIGNAL_SAT_MULTIPLIER = [1.0, 1.0, 1.0] # Multiplier for chemokinesis signal saturation level per cell-type.
+CHEMOKINESIS_SIGNAL_SAT = [20.0, 20.0] # [concentration units] Saturation level of the chemokinesis signal for each species. Can be tuned together with CHEMOKINESIS_SIGNAL_SAT_MULTIPLIER to adjust per-species per cell-type sensitivity.
+
 # +====================================================================+
 # | CELL MIGRATION RELATED PARAMETERS                                  |
 # +====================================================================+
@@ -861,6 +873,17 @@ env.newPropertyArrayFloat("NUCLEUS_EPS_CLAMP", NUCLEUS_EPS_CLAMP)
 env.newPropertyUInt("INCLUDE_CHEMOTAXIS", INCLUDE_CHEMOTAXIS)
 env.newPropertyArrayFloat("CHEMOTAXIS_CHI", CHEMOTAXIS_CHI)
 env.newPropertyUInt("CHEMOTAXIS_ONLY_DIR", CHEMOTAXIS_ONLY_DIR)
+env.newPropertyArrayFloat("CHEMOTAXIS_SENSITIVITY", CHEMOTAXIS_SENSITIVITY)
+
+# Chemokinesis properties
+env.newPropertyUInt("INCLUDE_CHEMOKINESIS", INCLUDE_CHEMOKINESIS)
+env.newPropertyArrayFloat("CHEMOKINESIS_SENSITIVITY", CHEMOKINESIS_SENSITIVITY)
+env.newPropertyArrayFloat("CHEMOKINESIS_ALPHA", CHEMOKINESIS_ALPHA)
+env.newPropertyArrayFloat("CHEMOKINESIS_K", CHEMOKINESIS_K)
+env.newPropertyArrayFloat("CHEMOKINESIS_HILL_N", CHEMOKINESIS_HILL_N)
+env.newPropertyArrayFloat("CHEMOKINESIS_ADAPT_TAU", CHEMOKINESIS_ADAPT_TAU)
+env.newPropertyArrayFloat("CHEMOKINESIS_SIGNAL_SAT_MULTIPLIER", CHEMOKINESIS_SIGNAL_SAT_MULTIPLIER)
+env.newPropertyArrayFloat("CHEMOKINESIS_SIGNAL_SAT", CHEMOKINESIS_SIGNAL_SAT)
 
 # Cell migration (durotaxis/orientation alignment) properties
 env.newPropertyUInt("INCLUDE_DUROTAXIS", INCLUDE_DUROTAXIS)
@@ -1281,6 +1304,8 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableInt("marked_for_removal", 0) # 1 if the cell should be removed
     CELL_agent.newVariableFloat("fnode_birth_cooldown", 0.0) # refractory time before creating another FNODE [s]
     CELL_agent.newVariableFloat("focad_birth_cooldown", 0.0) # refractory time before creating another FOCAD [s]
+    CELL_agent.newVariableArrayFloat("chemokinesis_promotive_adapt_state", N_SPECIES) # memory of past chemokine exposure to diminish migration promoting signaling if concentration is constant
+    CELL_agent.newVariableArrayFloat("chemokinesis_inhibitory_adapt_state", N_SPECIES) # memory of past chemokine exposure to diminish migration inhibiting signaling if concentration is constant
     CELL_agent.newRTCFunctionFile("cell_spatial_location_data", cell_spatial_location_data_file).setMessageOutput("cell_spatial_location_message")
     if INCLUDE_CELL_CELL_INTERACTION:
         CELL_agent.newRTCFunctionFile("cell_cell_interaction", cell_cell_interaction_file).setMessageInput("cell_spatial_location_message")
@@ -1334,7 +1359,6 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableFloat("eps_eigvec3_x", 0.0) # third principal-strain direction
     CELL_agent.newVariableFloat("eps_eigvec3_y", 0.0)
     CELL_agent.newVariableFloat("eps_eigvec3_z", 0.0)
-    CELL_agent.newVariableArrayFloat("chemotaxis_sensitivity", N_SPECIES) # per-species chemotactic sensitivity weights
     if INCLUDE_FOCAL_ADHESIONS:  
         CELL_agent.newRTCFunctionFile("cell_bucket_location_data", cell_bucket_location_data_file).setMessageOutput("cell_bucket_location_message")
         cell_focad_update_fn = CELL_agent.newRTCFunctionFile("cell_focad_update", cell_focad_update_file)
@@ -1670,7 +1694,9 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableInt("marked_for_removal", 0)
                 instance.setVariableFloat("fnode_birth_cooldown", 0.0)
                 instance.setVariableFloat("focad_birth_cooldown", 0.0)
-                
+                instance.setVariableArrayFloat("chemokinesis_promotive_adapt_state", [r * CELL_INIT_CONCENTRATION_MULTIPLIER[cell_type_i] for r in INIT_CELL_CONCENTRATION_VALS])
+                instance.setVariableArrayFloat("chemokinesis_inhibitory_adapt_state", [r * CELL_INIT_CONCENTRATION_MULTIPLIER[cell_type_i] for r in INIT_CELL_CONCENTRATION_VALS])
+
                 anchor_pos = getRandomCoordsAroundPoint(N_ANCHOR_POINTS, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_NUCLEUS_RADIUS[cell_type_i], on_surface=True)
                 instance.setVariableArrayFloat("x_i", anchor_pos[:, 0].tolist())
                 instance.setVariableArrayFloat("y_i", anchor_pos[:, 1].tolist())
@@ -1715,7 +1741,6 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableArrayFloat("u_ref_x_i", u_ref[:, 0].tolist())
                 instance.setVariableArrayFloat("u_ref_y_i", u_ref[:, 1].tolist())
                 instance.setVariableArrayFloat("u_ref_z_i", u_ref[:, 2].tolist())
-                instance.setVariableArrayFloat("chemotaxis_sensitivity", CHEMOTAXIS_SENSITIVITY) 
                 if N_CELLS >= 100000 and ((i + 1) % cell_progress_interval == 0 or (i + 1) == N_CELLS):
                     print(f"  |-> Cells initialized: {i + 1}/{N_CELLS}")
 
