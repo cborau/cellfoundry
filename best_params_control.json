@@ -9,6 +9,7 @@
   "INCLUDE_DIFFUSION": false,
   "INCLUDE_DUROTAXIS": false,
   "INCLUDE_CHEMOTAXIS": false,
+  "INCLUDE_CHEMOKINESIS": false,
   "CHEMOTAXIS_ONLY_DIR": false,
   "VISUALISATION": false,
   "SHOW_PLOTS": false,
