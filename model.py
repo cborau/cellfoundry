@@ -24,10 +24,16 @@ import check_hard_coded_values
 from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary, apply_param_overrides, load_param_overrides_from_cli, loadCachedCellInitialization, generateCellInitializationData
 
 # TODO LIST:
-# Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
-# Prepare networks of different sizes and densities to test performance.
-# Test organoid calibration
-# Improve comments on agent variables
+# A- Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
+# B- Test organoid calibration
+# C- Implement logic for ORGANOID_ASSAY = True, which should include:
+# C1- initializing cells in a small cluster in the center of the domain instead of randomly across the whole domain. 
+# C2- new hostfunction to compute organoid metrics (e.g. radius of gyration, equivalent sphere radius, sphericity etc.) and save them in the pickle file. We can probably update CollectCellSpeedMetrics to CollectCellMetrics and compute both speed and organoid metrics there, when applicable.
+# C3- update objective functions in optimizer/objectives.py to use these metrics instead of computing them from vtk files. We might leave that logic for testing.
+# C4- create a new post-processing script to read the pickle files and plot the organoid metrics over time. 
+# D- Create a new post-processing script to:
+# D1- plot violin plots of cell speeds (vmean and veff) per cell-type at the end of the simulation from a pickle file. If a second pickle file is provided, plot side-by-side (1x2 subplot) to compare two conditions (by default, first one will be "control", and second "condition"). Allow including a target csv file (from optimizer\reference_data) with the expected speed median values (per cell type and per speed metric, check target_cell_speed.csv format) to plot as scatter points or lines for reference. If a second pickle file is provided, a second target file must be provided aswell
+# D2- if present, plot, per cell-type, cell trajectories and directionality ratios (straight distance from initial position to current position, divided by total distance traveled so far) from the .vtk files (within \result_files by default). Use a (1 x N_CELL_TYPES + 1) subplot layout. For the first N_CELL_TYPES panels, a simple 3D scatter plot of final cell positions, coloring by cell type, plotting trajectories as lines, etc. Subtract initial position to plot trajectories from a common origin. We can also plot a random subset of trajectories if there are too many cells. In the last panel, plot the directionality ratios as a line per cell-type over time (coloring by cell type). If two input paths are provided, plot the new panels underneath (i.e. in the second row of a (2 x N_CELL_TYPES + 1) subplot layout) to compare two conditions.
 
 start_time = time.time()
 
@@ -226,6 +232,7 @@ DEAD_CELLS_DISAPPEAR = False  # If True, dead CELL agents are removed; if False,
 PERIODIC_BOUNDARIES_FOR_CELLS = False
 INCLUDE_CELL_FNODE_REPULSION = False
 N_CELLS = 100
+ORGANOID_ASSAY = False  # If True, cells are initialized in a small cluster in the center of the domain to simulate an organoid. If False, they are initialized randomly in the whole domain.
 
 # Per-cell-type mechanical & morphological properties
 # Each is a list of length N_CELL_TYPES.  A scalar is broadcast to all types.

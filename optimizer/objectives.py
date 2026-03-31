@@ -1175,7 +1175,6 @@ def compute_organoid_metrics(positions: np.ndarray) -> dict[str, float]:
     dict with keys:
         ``radius_of_gyration`` : float
             RMS distance from the centroid, Rg = sqrt(mean(|r_i - r̄|²)).
-            This is the simplest and most robust spheroid size metric.
         ``max_span`` : float
             Maximum Euclidean distance between any pair of cells (diameter).
         ``equivalent_sphere_radius`` : float
