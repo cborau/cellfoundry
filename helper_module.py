@@ -2084,6 +2084,9 @@ class ModelParameterConfig:
         # Vascularization
         include_vascularization: bool = None,
         init_vascularization_concentration_vals: list = None,
+        # Organoid assay
+        organoid_assay: bool = None,
+        organoid_init_radius: float = None,
         # Misc / logging
         save_pickle: bool = None,
         show_plots: bool = None,
@@ -2283,6 +2286,8 @@ class ModelParameterConfig:
         self.MAX_EXPECTED_BOUNDARY_POS = max_expected_boundary_pos
         self.INCLUDE_VASCULARIZATION = include_vascularization
         self.INIT_VASCULARIZATION_CONCENTRATION_VALS = init_vascularization_concentration_vals
+        self.ORGANOID_ASSAY = organoid_assay
+        self.ORGANOID_INIT_RADIUS = organoid_init_radius
         self.SAVE_PICKLE = save_pickle
         self.SHOW_PLOTS = show_plots
         self.SAVE_DATA_TO_FILE = save_data_to_file
@@ -2747,6 +2752,7 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         cell_nucleus_radius=ns.get("CELL_NUCLEUS_RADIUS"),
         brownian_motion_strength=ns.get("BROWNIAN_MOTION_STRENGTH"),
         brownian_motion_strength_factor=ns.get("BROWNIAN_MOTION_STRENGTH_FACTOR"),
+        rotational_diffusion_rate=ns.get("ROTATIONAL_DIFFUSION_RATE"),
         cell_cell_repulsion_k=ns.get("CELL_CELL_REPULSION_K"),
         cell_cell_adhesion_k=ns.get("CELL_CELL_ADHESION_K"),
         cell_cell_adhesion_range=ns.get("CELL_CELL_ADHESION_RANGE"),
@@ -2834,6 +2840,8 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         max_expected_boundary_pos=ns.get("MAX_EXPECTED_BOUNDARY_POS"),
         include_vascularization=ns.get("INCLUDE_VASCULARIZATION"),
         init_vascularization_concentration_vals=ns.get("INIT_VASCULARIZATION_CONCENTRATION_VALS"),
+        organoid_assay=ns.get("ORGANOID_ASSAY"),
+        organoid_init_radius=ns.get("ORGANOID_INIT_RADIUS"),
         save_pickle=ns.get("SAVE_PICKLE"),
         show_plots=ns.get("SHOW_PLOTS"),
         save_data_to_file=ns.get("SAVE_DATA_TO_FILE"),

@@ -3,13 +3,14 @@
 # ============================================================================
 #
 # This config optimizes TWO objectives simultaneously:
-#   1. Organoid size (radius of gyration of alive cells → target 50 µm)
+#   1. Organoid size curve (radius of gyration vs time → target CSV)
 #   2. Final alive-cell count (→ target 15 cells)
 #
 # Optuna uses NSGA-II to maintain a Pareto front of trade-off solutions.
 #
-# IMPORTANT: organoid_size_error reads cell positions from VTK files,
-#            so SAVE_DATA_TO_FILE must be true in extra_overrides.
+# IMPORTANT: organoid_size_error reads ORGANOID_METRICS_OVER_TIME from
+#            the pickle, so ORGANOID_ASSAY and SAVE_PICKLE must be true.
+#            For the VTK-based variant, use organoid_size_error_vtk instead.
 #
 # Usage:
 #    python -m optimizer.optimize --config optimizer/optuna_config_organoid.yaml
@@ -29,6 +30,7 @@ objectives:
     reference: "optimizer/reference_data/target_organoid_size.csv"
     kwargs:
       metric: radius_of_gyration   # or: max_span, equivalent_sphere_radius
+      # smooth_window: 0           # optional Savitzky-Golay smoothing
 
   - function: final_cell_count_error
     reference: "optimizer/reference_data/target_cell_count.csv"
@@ -73,8 +75,9 @@ model:
     INCLUDE_CELLS: true
     INCLUDE_CELL_CYCLE: true
     INCLUDE_FOCAL_ADHESIONS: true
+    ORGANOID_ASSAY: true
+    ORGANOID_INIT_RADIUS: 50.0
     VISUALISATION: false
     SHOW_PLOTS: false
-    # VTK output IS needed for organoid_size_error (reads cell positions)
     SAVE_DATA_TO_FILE: true
     SAVE_PICKLE: true

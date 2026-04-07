@@ -1220,7 +1220,7 @@ def compute_organoid_metrics(positions: np.ndarray) -> dict[str, float]:
     }
 
 
-def organoid_size_error(results: dict, reference_path: str = None, **kwargs) -> float:
+def organoid_size_error_vtk(results: dict, reference_path: str = None, **kwargs) -> float:
     """Compare the spheroid size at the final timestep against a target.
 
     The size is measured from the point cloud of **alive** cell positions
@@ -1243,7 +1243,7 @@ def organoid_size_error(results: dict, reference_path: str = None, **kwargs) -> 
     trial_dir = kwargs.get("trial_dir")
     if trial_dir is None:
         raise ValueError(
-            "organoid_size_error requires 'trial_dir' kwarg "
+            "organoid_size_error_vtk requires 'trial_dir' kwarg "
             "(automatically provided by the optimizer). "
             "Make sure SAVE_DATA_TO_FILE is true."
         )
@@ -1282,6 +1282,150 @@ def organoid_size_error(results: dict, reference_path: str = None, **kwargs) -> 
 
 
 # ---------------------------------------------------------------------------
+# Pickle-based organoid metrics objective
+# ---------------------------------------------------------------------------
+
+def _get_organoid_metrics_frame(results: dict) -> pd.DataFrame:
+    """Extract ``ORGANOID_METRICS_OVER_TIME`` DataFrame from pickle results."""
+    metrics = results.get("ORGANOID_METRICS_OVER_TIME")
+    if metrics is None or len(metrics) == 0:
+        raise ValueError(
+            "Results must contain non-empty ORGANOID_METRICS_OVER_TIME. "
+            "Rerun the simulation with ORGANOID_ASSAY = True."
+        )
+    if not isinstance(metrics, pd.DataFrame):
+        metrics = pd.DataFrame(metrics)
+
+    required = {"step", "radius_of_gyration", "max_span", "equivalent_sphere_radius", "n_alive"}
+    missing = required.difference(metrics.columns)
+    if missing:
+        raise ValueError(
+            "ORGANOID_METRICS_OVER_TIME is missing required columns: "
+            f"{sorted(missing)}"
+        )
+    return metrics
+
+
+def organoid_size_error(results: dict, reference_path: str = None, **kwargs) -> float:
+    """Compare organoid size metrics from the pickle against a target.
+
+    Reads from the ``ORGANOID_METRICS_OVER_TIME`` DataFrame stored in the
+    pickle by the ``CollectCellMetrics`` host function — **no VTK files
+    needed**.
+
+    Parameters (common)
+    ----------
+    results : dict
+        Pickle results dictionary (must contain ``ORGANOID_METRICS_OVER_TIME``).
+    reference_path : str, optional
+        Path to a reference CSV file (Option B).
+
+    Keyword arguments
+    -----------------
+    metric : str, default ``"radius_of_gyration"``
+        Which organoid metric column to compare.  Choices:
+        ``"radius_of_gyration"``, ``"max_span"``,
+        ``"equivalent_sphere_radius"``, ``"n_alive"``.
+
+    **Option A — scalar target (single time-point):**
+
+        target_size : float  (**required**)
+            Expected value of the selected metric, in µm.
+        time_point : str | int, default ``"last"``
+            Which simulation time-point to compare against the target.
+            ``"last"`` — final recorded row (default).
+            ``"mean"`` — average over all recorded rows.
+            An integer — simulation step number (nearest row is used).
+
+    **Option B — reference CSV (time-series):**
+
+        ``reference_path`` must point to a CSV with two columns:
+
+        - ``time`` — in the same units as the simulation time step
+          (e.g. seconds when ``TIME_STEP`` is in seconds).
+        - ``target_size`` — target metric value at each time, in µm.
+
+        The simulation metric curve is linearly interpolated onto the
+        reference time grid and the error is the RMSE between the two.
+
+        smooth_window : int, default 0 (disabled)
+            Savitzky-Golay window for smoothing the simulation curve
+            before interpolation.
+        smooth_polyorder : int, default 2
+            Polynomial order for Savitzky-Golay smoothing.
+    """
+    org_df = _get_organoid_metrics_frame(results)
+
+    metric_name = kwargs.get("metric", "radius_of_gyration")
+    if metric_name not in org_df.columns:
+        raise ValueError(
+            f"Unknown metric '{metric_name}'. "
+            f"Available: {[c for c in org_df.columns if c != 'step']}"
+        )
+
+    # --- Option A: scalar target ---
+    if "target_size" in kwargs:
+        time_point = kwargs.get("time_point", "last")
+        if time_point == "last":
+            sim_value = float(org_df[metric_name].iloc[-1])
+        elif time_point == "mean":
+            sim_value = float(org_df[metric_name].mean())
+        else:
+            target_step = int(time_point)
+            idx = (org_df["step"].astype(int) - target_step).abs().idxmin()
+            sim_value = float(org_df.loc[idx, metric_name])
+
+        target = float(kwargs["target_size"])
+        error = abs(sim_value - target)
+        return error, _format_percent_text(error, target)
+
+    # --- Option B: reference CSV (time-series) ---
+    if reference_path is None:
+        raise ValueError("Provide either reference_path or target_size kwarg")
+
+    ref = _load_reference_csv(reference_path)
+    if "target_size" not in ref.columns or "time" not in ref.columns:
+        raise ValueError(
+            "Reference CSV must contain 'time' and 'target_size' columns"
+        )
+
+    ref_time = ref["time"].to_numpy(dtype=float)
+    ref_size = ref["target_size"].to_numpy(dtype=float)
+
+    # Simulation time & metric arrays
+    if "time" in org_df.columns:
+        sim_time = org_df["time"].to_numpy(dtype=float)
+    else:
+        sim_time = org_df["step"].to_numpy(dtype=float)
+
+    sim_metric = org_df[metric_name].to_numpy(dtype=float)
+
+    # Optional smoothing of the simulation curve
+    smooth_window = int(kwargs.get("smooth_window", 0))
+    smooth_polyorder = int(kwargs.get("smooth_polyorder", 2))
+    if smooth_window > 1:
+        sim_metric = _smooth_signal_savgol(
+            sim_metric,
+            smooth_window=smooth_window,
+            smooth_polyorder=smooth_polyorder,
+            label=f"organoid {metric_name}",
+        )
+
+    # Interpolate simulation onto reference time grid
+    sim_interp = _interpolate_response_to_reference_x(sim_time, sim_metric, ref_time)
+    overlap_mask = np.isfinite(sim_interp)
+    if not np.any(overlap_mask):
+        raise ValueError(
+            "No overlap between simulation time range and reference time points. "
+            f"Simulation time: [{sim_time[0]:.4g}, {sim_time[-1]:.4g}], "
+            f"Reference time: [{ref_time[0]:.4g}, {ref_time[-1]:.4g}]"
+        )
+
+    error = _rmse(sim_interp[overlap_mask], ref_size[overlap_mask])
+    return error, None
+
+
+# ---------------------------------------------------------------------------
 # Registry — maps string names (used in YAML config) to callables
 # ---------------------------------------------------------------------------
 
@@ -1299,4 +1443,5 @@ OBJECTIVE_REGISTRY = {
     "final_focad_per_cell_error": final_focad_per_cell_error,
     "cell_speed_error": cell_speed_error,
     "organoid_size_error": organoid_size_error,
+    "organoid_size_error_vtk": organoid_size_error_vtk,
 }

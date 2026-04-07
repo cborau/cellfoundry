@@ -1,0 +1,86 @@
+{
+  "_comment": "Organoid growth test config. Usage: python model.py --overrides organoid_test.json",
+  "_note_cycle": "Cell-cycle durations set explicitly (G1+S+G2+M = 600 s total). With STEPS=2000 and 10 initial cells, expect ~3 doublings → ~80 cells.",
+
+  "___ SIMULATION ___": "-------------------------------------------------------",
+  "STEPS": 2000,
+  "TIME_STEP": 1.0,
+  "SAVE_EVERY_N_STEPS": 20,
+  "VISUALISATION": false,
+  "SHOW_PLOTS": false,
+  "SAVE_DATA_TO_FILE": true,
+  "SAVE_PICKLE": true,
+  "DEBUG_PRINTING": false,
+
+  "___ ORGANOID INIT ___": "----------------------------------------------------",
+  "ORGANOID_ASSAY": true,
+  "ORGANOID_INIT_RADIUS": 20.0,
+  "N_CELLS": 10,
+
+  "___ FEATURE FLAGS ___": "----------------------------------------------------",
+  "INCLUDE_CELLS": true,
+  "INCLUDE_CELL_CELL_INTERACTION": true,
+  "INCLUDE_CELL_CYCLE": true,
+  "DEAD_CELLS_DISAPPEAR": false,
+  "PERIODIC_BOUNDARIES_FOR_CELLS": false,
+  "INCLUDE_CELL_FNODE_REPULSION": false,
+  "INCLUDE_FIBRE_NETWORK": false,
+  "INCLUDE_FOCAL_ADHESIONS": false,
+  "INCLUDE_NETWORK_REMODELING": false,
+  "INCLUDE_DIFFUSION": true,
+  "INCLUDE_CHEMOTAXIS": false,
+  "INCLUDE_CHEMOKINESIS": false,
+
+  "___ CELL MIGRATION ___": "---------------------------------------------------",
+  "CELL_SPEED_REF": [0.005, 0.005, 0.005],
+  "BROWNIAN_MOTION_STRENGTH_FACTOR": [2.5, 2.5, 2.5],
+  "ROTATIONAL_DIFFUSION_RATE": [0.001, 0.001, 0.001],
+
+  "___ CELL MECHANICS ___": "---------------------------------------------------",
+  "CELL_RADIUS": [8.0, 8.0, 8.0],
+  "CELL_K_ELAST": [2.0, 2.0, 2.0],
+  "CELL_D_DUMPING": [0.4, 0.4, 0.4],
+
+  "___ CELL CYCLE (overrides debug_acc) ___": "------------------------------------",
+  "CYCLE_PHASE_G1_DURATION": [250.0, 250.0, 250.0],
+  "CYCLE_PHASE_S_DURATION":  [200.0, 200.0, 200.0],
+  "CYCLE_PHASE_G2_DURATION": [100.0, 100.0, 100.0],
+  "CYCLE_PHASE_M_DURATION":  [50.0, 50.0, 50.0],
+
+  "___ CELL CYCLE MULTIPLIERS ___": "-------------------------------------------",
+  "DIVISION_RATE_MULTIPLIER": [1.0, 1.15, 0.85],
+  "DAMAGE_ACCUMULATION_MULTIPLIER": [1.0, 0.85, 1.25],
+  "DAMAGE_REPAIR_MULTIPLIER": [1.0, 1.10, 0.85],
+  "DAMAGE_DEATH_THRESHOLD": [1.0, 1.0, 0.80],
+
+  "___ CELL DAMAGE / DEATH ___": "----------------------------------------------",
+  "CELL_HYPOXIA_THRESHOLD": [0.03, 0.03, 0.03],
+  "CELL_NUTRIENT_THRESHOLD": [0.03, 0.03, 0.03],
+  "CELL_STRESS_THRESHOLD": [8.0, 8.0, 8.0],
+  "CELL_HYPOXIA_DAMAGE_RATE": [2.0e-4, 2.0e-4, 2.0e-4],
+  "CELL_NUTRIENT_DAMAGE_RATE": [1.5e-4, 1.5e-4, 1.5e-4],
+  "CELL_STRESS_DAMAGE_RATE": [1.0e-4, 1.0e-4, 1.0e-4],
+  "CELL_BASAL_DAMAGE_REPAIR_RATE": [5.0e-5, 5.0e-5, 5.0e-5],
+  "CELL_ACUTE_HYPOXIA_THRESHOLD": [0.005, 0.005, 0.005],
+  "CELL_ACUTE_NUTRIENT_THRESHOLD": [0.005, 0.005, 0.005],
+  "CELL_ACUTE_STRESS_THRESHOLD": [25.0, 25.0, 25.0],
+
+  "___ DIFFUSION (nutrient-limited growth) ___": "------------------------------",
+  "N_SPECIES": 2,
+  "DIFFUSION_COEFF_MULTI": [300.0, 300.0],
+  "BOUNDARY_CONC_INIT_MULTI": [
+    [2.5, 2.5, 2.5, 2.5, 2.5, 2.5],
+    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  ],
+  "BOUNDARY_CONC_FIXED_MULTI": [
+    [2.5, 2.5, 2.5, 2.5, 2.5, 2.5],
+    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  ],
+  "INIT_ECM_CONCENTRATION_VALS": [0.0, 0.0],
+  "INIT_CELL_CONCENTRATION_VALS": [2.5, 2.5],
+  "INIT_CELL_CONSUMPTION_RATES": [0.001, 0.0],
+  "INIT_CELL_PRODUCTION_RATES": [0.0, 0.0],
+  "INIT_CELL_REACTION_RATES": [0.0, 0.0],
+  "CELL_CONSUMPTION_MULTIPLIER": [1.0, 1.0, 1.0],
+  "CELL_PRODUCTION_MULTIPLIER": [1.0, 1.0, 1.0]
+}

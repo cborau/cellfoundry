@@ -25,7 +25,13 @@ Run from the repository root:
     python manual_tests/test_objectives.py --pickle result_files/output_data_0.pickle --objective final_cell_count --target-cell-count 24
 
   Real data - organoid size using a scalar target:
-    python manual_tests/test_objectives.py --pickle result_files/output_data_0.pickle --objective organoid_size --trial-dir result_files/trial_0001 --metric radius_of_gyration --target-size 140
+    python manual_tests/test_objectives.py --pickle result_files/output_data_0.pickle --objective organoid_size --metric radius_of_gyration --target-size 140
+
+  Real data - organoid size using a reference CSV with time-series targets:
+    python manual_tests/test_objectives.py --pickle result_files/output_data_0.pickle --objective organoid_size --reference optimizer/reference_data/target_organoid_size.csv --metric radius_of_gyration
+
+  Real data - organoid size (VTK-based) using a scalar target:
+    python manual_tests/test_objectives.py --pickle result_files/output_data_0.pickle --objective organoid_size_vtk --trial-dir result_files/trial_0001 --metric radius_of_gyration --target-size 140
 
 Without --pickle the script runs the synthetic smoke tests only.
 With --pickle it evaluates the chosen objective and shows objective-specific
@@ -53,6 +59,7 @@ from optimizer.objectives import (
     _filter_simulation_from_min_strain,
     _get_cell_speed_metrics_frame,
     _get_last_cell_vtk,
+    _get_organoid_metrics_frame,
     _interpolate_response_to_reference_x,
     _interpolate_to_match,
     _read_cell_positions_from_vtk,
@@ -76,6 +83,7 @@ OBJECTIVE_ALIASES = {
     "final_focad_per_cell": "final_focad_per_cell_error",
     "cell_speed": "cell_speed_error",
     "organoid_size": "organoid_size_error",
+    "organoid_size_vtk": "organoid_size_error_vtk",
 }
 
 CURVE_OBJECTIVES = {
@@ -97,6 +105,7 @@ SCALAR_OPTIONAL_REFERENCE_OBJECTIVES = {
     "poisson_ratio_error",
     "final_cell_count_error",
     "final_focad_per_cell_error",
+    "organoid_size_error_vtk",
     "organoid_size_error",
 }
 
@@ -260,6 +269,19 @@ def _make_mock_results(n_steps: int = 50) -> dict:
                 "poisson_ratio": np.linspace(0.1, 0.3, n_steps),
             }
         ),
+        "ORGANOID_METRICS_OVER_TIME": pd.DataFrame(
+            {
+                "step": np.arange(0, n_steps * 20, 20, dtype=int)[:n_steps],
+                "time": np.arange(0, n_steps * 20, 20, dtype=float)[:n_steps],
+                "n_alive": np.linspace(5, 15, n_steps).round().astype(int),
+                "radius_of_gyration": np.linspace(20.0, 80.0, n_steps),
+                "equivalent_sphere_radius": np.linspace(20.0, 80.0, n_steps) * np.sqrt(5.0 / 3.0),
+                "max_span": np.linspace(50.0, 200.0, n_steps),
+                "centroid_x": np.zeros(n_steps),
+                "centroid_y": np.zeros(n_steps),
+                "centroid_z": np.zeros(n_steps),
+            }
+        ),
     }
 
 
@@ -402,6 +424,17 @@ def _make_reference_organoid_size(tmp: Path, target_size: float) -> str:
     return str(path)
 
 
+def _make_reference_organoid_size_timeseries(tmp: Path, results: dict) -> str:
+    """Create a multi-timepoint reference CSV from mock ORGANOID_METRICS_OVER_TIME."""
+    org = pd.DataFrame(results["ORGANOID_METRICS_OVER_TIME"])
+    path = tmp / "ref_organoid_size_timeseries.csv"
+    pd.DataFrame({
+        "time": org["time"].values,
+        "target_size": org["radius_of_gyration"].values,
+    }).to_csv(path, index=False)
+    return str(path)
+
+
 # ---------------------------------------------------------------------------
 # Smoke tests
 # ---------------------------------------------------------------------------
@@ -429,6 +462,7 @@ def run_tests() -> bool:
             tmp,
             organoid_metrics["radius_of_gyration"],
         )
+        ref_organoid_ts = _make_reference_organoid_size_timeseries(tmp, results)
 
         tests = [
             (
@@ -523,8 +557,8 @@ def run_tests() -> bool:
                 ),
             ),
             (
-                "organoid_size_error (csv)",
-                lambda: OBJECTIVE_REGISTRY["organoid_size_error"](
+                "organoid_size_error_vtk (csv)",
+                lambda: OBJECTIVE_REGISTRY["organoid_size_error_vtk"](
                     results,
                     ref_organoid,
                     trial_dir=str(tmp / "trial_dir"),
@@ -559,13 +593,30 @@ def run_tests() -> bool:
                 ),
             ),
             (
-                "organoid_size_error (scalar)",
-                lambda: OBJECTIVE_REGISTRY["organoid_size_error"](
+                "organoid_size_error_vtk (scalar)",
+                lambda: OBJECTIVE_REGISTRY["organoid_size_error_vtk"](
                     results,
                     None,
                     trial_dir=str(tmp / "trial_dir"),
                     metric="radius_of_gyration",
                     target_size=organoid_metrics["radius_of_gyration"],
+                ),
+            ),
+            (
+                "organoid_size_error (scalar, last)",
+                lambda: OBJECTIVE_REGISTRY["organoid_size_error"](
+                    results,
+                    None,
+                    metric="radius_of_gyration",
+                    target_size=float(results["ORGANOID_METRICS_OVER_TIME"]["radius_of_gyration"].iloc[-1]),
+                ),
+            ),
+            (
+                "organoid_size_error (csv timeseries)",
+                lambda: OBJECTIVE_REGISTRY["organoid_size_error"](
+                    results,
+                    ref_organoid_ts,
+                    metric="radius_of_gyration",
                 ),
             ),
         ]
@@ -727,12 +778,19 @@ def _validate_inputs(
             )
         return
 
-    if objective_name == "organoid_size_error":
+    if objective_name == "organoid_size_error_vtk":
         trial_dir = kwargs.get("trial_dir")
         if trial_dir is None:
-            raise ValueError("organoid_size_error requires --trial-dir")
+            raise ValueError("organoid_size_error_vtk requires --trial-dir")
         if not Path(trial_dir).exists():
             raise ValueError(f"Trial directory not found: {trial_dir}")
+        if reference_path is None and "target_size" not in kwargs:
+            raise ValueError(
+                "organoid_size_error_vtk requires either --reference/--csv or --target-size"
+            )
+        return
+
+    if objective_name == "organoid_size_error":
         if reference_path is None and "target_size" not in kwargs:
             raise ValueError(
                 "organoid_size_error requires either --reference/--csv or --target-size"
@@ -869,11 +927,22 @@ def _build_scalar_comparison(
             target = float(kwargs["target_poisson"])
         return ["final poisson ratio"], [sim_final], [target]
 
-    if objective_name == "organoid_size_error":
+    if objective_name == "organoid_size_error_vtk":
         metric_name = str(kwargs.get("metric", "radius_of_gyration"))
         sim_value = _compute_organoid_metric_value(kwargs["trial_dir"], metric_name)
         target = (
             float(reference_df["target_size"].iloc[0])
+            if reference_df is not None
+            else float(kwargs["target_size"])
+        )
+        return [metric_name], [sim_value], [target]
+
+    if objective_name == "organoid_size_error":
+        metric_name = str(kwargs.get("metric", "radius_of_gyration"))
+        org_df = _get_organoid_metrics_frame(results)
+        sim_value = float(org_df[metric_name].iloc[-1])
+        target = (
+            float(reference_df["target_size"].iloc[-1])
             if reference_df is not None
             else float(kwargs["target_size"])
         )
@@ -1259,7 +1328,7 @@ def _print_objective_list() -> None:
         requirement = "reference csv"
         if objective_name in SCALAR_OPTIONAL_REFERENCE_OBJECTIVES:
             requirement = "reference csv or scalar target"
-        if objective_name == "organoid_size_error":
+        if objective_name == "organoid_size_error_vtk":
             requirement += " + trial_dir"
         print(f"  {objective_name:<32} {requirement}")
 

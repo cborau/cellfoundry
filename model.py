@@ -26,14 +26,6 @@ from helper_module import compute_expected_boundary_pos_from_corners, getRandomV
 # TODO LIST:
 # A- Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
 # B- Test organoid calibration
-# C- Implement logic for ORGANOID_ASSAY = True, which should include:
-# C1- initializing cells in a small cluster in the center of the domain instead of randomly across the whole domain. 
-# C2- new hostfunction to compute organoid metrics (e.g. radius of gyration, equivalent sphere radius, sphericity etc.) and save them in the pickle file. We can probably update CollectCellSpeedMetrics to CollectCellMetrics and compute both speed and organoid metrics there, when applicable.
-# C3- update objective functions in optimizer/objectives.py to use these metrics instead of computing them from vtk files. We might leave that logic for testing.
-# C4- create a new post-processing script to read the pickle files and plot the organoid metrics over time. 
-# D- Create a new post-processing script to:
-# D1- plot violin plots of cell speeds (vmean and veff) per cell-type at the end of the simulation from a pickle file. If a second pickle file is provided, plot side-by-side (1x2 subplot) to compare two conditions (by default, first one will be "control", and second "condition"). Allow including a target csv file (from optimizer\reference_data) with the expected speed median values (per cell type and per speed metric, check target_cell_speed.csv format) to plot as scatter points or lines for reference. If a second pickle file is provided, a second target file must be provided aswell
-# D2- if present, plot, per cell-type, cell trajectories and directionality ratios (straight distance from initial position to current position, divided by total distance traveled so far) from the .vtk files (within \result_files by default). Use a (1 x N_CELL_TYPES + 1) subplot layout. For the first N_CELL_TYPES panels, a simple 3D scatter plot of final cell positions, coloring by cell type, plotting trajectories as lines, etc. Subtract initial position to plot trajectories from a common origin. We can also plot a random subset of trajectories if there are too many cells. In the last panel, plot the directionality ratios as a line per cell-type over time (coloring by cell type). If two input paths are provided, plot the new panels underneath (i.e. in the second row of a (2 x N_CELL_TYPES + 1) subplot layout) to compare two conditions.
 
 start_time = time.time()
 
@@ -226,13 +218,14 @@ HETEROGENEOUS_DIFFUSION = False  # if True, diffusion coefficient is multiplied 
 N_CELL_TYPES = 3
 
 INCLUDE_CELLS = True
-INCLUDE_CELL_CELL_INTERACTION = False # If True, cells interact with each other through short-range repulsion and adhesion forces. 
-INCLUDE_CELL_CYCLE = False # If True, cells go through a simplified cell cycle with G1, S, G2 and M phases, which can affect their behavior. Also includes birth/death dynamics (WARNING: USER-DEFINED in cell_cycle.cpp).
+INCLUDE_CELL_CELL_INTERACTION = True # If True, cells interact with each other through short-range repulsion and adhesion forces. 
+INCLUDE_CELL_CYCLE = True # If True, cells go through a simplified cell cycle with G1, S, G2 and M phases, which can affect their behavior. Also includes birth/death dynamics (WARNING: USER-DEFINED in cell_cycle.cpp).
 DEAD_CELLS_DISAPPEAR = False  # If True, dead CELL agents are removed; if False, they remain inert with dead=1.
 PERIODIC_BOUNDARIES_FOR_CELLS = False
 INCLUDE_CELL_FNODE_REPULSION = False
-N_CELLS = 100
-ORGANOID_ASSAY = False  # If True, cells are initialized in a small cluster in the center of the domain to simulate an organoid. If False, they are initialized randomly in the whole domain.
+N_CELLS = 10
+ORGANOID_ASSAY = True  # If True, cells are initialized in a small cluster in the center of the domain to simulate an organoid. If False, they are initialized randomly in the whole domain.
+ORGANOID_INIT_RADIUS = 20.0  # [um] Radius of the initial cell cluster when ORGANOID_ASSAY is True. Cells are placed randomly within a sphere of this radius centered at the domain origin.
 
 # Per-cell-type mechanical & morphological properties
 # Each is a list of length N_CELL_TYPES.  A scalar is broadcast to all types.
@@ -467,6 +460,7 @@ BPOS_OVER_TIME = pd.DataFrame([BPOS(BOUNDARY_COORDS[0], BOUNDARY_COORDS[1], BOUN
 OSOT = make_dataclass("OSOT", [("strain", float)])
 OSCILLATORY_STRAIN_OVER_TIME = pd.DataFrame([OSOT(0)])
 CELL_SPEED_METRICS = pd.DataFrame()
+ORGANOID_METRICS_OVER_TIME = pd.DataFrame()
 
 # Checking for incompatible conditions
 # ----------------------------------------------------------------------
@@ -1619,6 +1613,10 @@ class initAgentPopulations(pyflamegpu.HostFunction):
             if N_CELLS == 1: # DEBUGGING. FIX CELL POSITION TO 0,0,0
                 cell_pos = np.array([[0.0, 0.0, 0.0]], dtype=float) # for testing with 1 cell. 
                 cell_orientations = np.array([[1.0, 0.0, 0.0]], dtype=float) 
+            elif ORGANOID_ASSAY:
+                cell_pos = getRandomCoordsAroundPoint(N_CELLS, 0.0, 0.0, 0.0, ORGANOID_INIT_RADIUS)
+                cell_orientations = getRandomVectors3D(N_CELLS)
+                print(f"  |-> Organoid assay: cells clustered in sphere of radius {ORGANOID_INIT_RADIUS} um at origin")
             else:
                 cached_cell_init = loadCachedCellInitialization(N_CELLS, coord_boundary, CELL_INIT_CACHE_DIR, atol=EPSILON)
                 if cached_cell_init is not None:
@@ -2090,17 +2088,70 @@ class SaveDataToFile(pyflamegpu.HostFunction):
         )
 
 
-class CollectCellSpeedMetrics(pyflamegpu.HostFunction):
+class CollectCellMetrics(pyflamegpu.HostFunction):
     def __init__(self):
         super().__init__()
 
     def run(self, FLAMEGPU):
-        global INCLUDE_CELLS, STEPS, CELL_SPEED_METRICS
+        global INCLUDE_CELLS, STEPS, CELL_SPEED_METRICS, ORGANOID_METRICS_OVER_TIME
+        global ORGANOID_ASSAY, SAVE_EVERY_N_STEPS
 
         if not INCLUDE_CELLS:
             return
 
-        if (FLAMEGPU.getStepCounter() + 1) != STEPS:
+        step = FLAMEGPU.getStepCounter() + 1
+        is_final = (step == STEPS)
+
+        # --- Organoid metrics (every SAVE_EVERY_N_STEPS and at final step) ---
+        if ORGANOID_ASSAY and (step % SAVE_EVERY_N_STEPS == 0 or step == 1 or is_final):
+            cell_agent = FLAMEGPU.agent("CELL")
+            positions = []
+            for ai in cell_agent.getPopulationData():
+                if int(ai.getVariableInt("dead")) == 0:
+                    positions.append([
+                        float(ai.getVariableFloat("x")),
+                        float(ai.getVariableFloat("y")),
+                        float(ai.getVariableFloat("z")),
+                    ])
+            pos_arr = np.array(positions) if len(positions) > 0 else np.empty((0, 3))
+            n_alive = len(pos_arr)
+            if n_alive > 0:
+                centroid = pos_arr.mean(axis=0)
+                displacements = pos_arr - centroid
+                sq_dists = np.sum(displacements ** 2, axis=1)
+                rg = float(np.sqrt(np.mean(sq_dists)))
+                equivalent_r = rg * np.sqrt(5.0 / 3.0)
+                if n_alive > 1:
+                    from scipy.spatial.distance import pdist
+                    max_span = float(pdist(pos_arr).max())
+                else:
+                    max_span = 0.0
+            else:
+                centroid = np.array([0.0, 0.0, 0.0])
+                rg = 0.0
+                equivalent_r = 0.0
+                max_span = 0.0
+
+            row = pd.DataFrame([{
+                "step": step,
+                "time": step * FLAMEGPU.environment.getPropertyFloat("TIME_STEP"),
+                "n_alive": n_alive,
+                "radius_of_gyration": rg,
+                "equivalent_sphere_radius": equivalent_r,
+                "max_span": max_span,
+                "centroid_x": float(centroid[0]),
+                "centroid_y": float(centroid[1]),
+                "centroid_z": float(centroid[2]),
+            }])
+            if len(ORGANOID_METRICS_OVER_TIME) == 0:
+                ORGANOID_METRICS_OVER_TIME = row
+            else:
+                ORGANOID_METRICS_OVER_TIME = pd.concat(
+                    [ORGANOID_METRICS_OVER_TIME, row], ignore_index=True
+                )
+
+        # --- Speed metrics (final step only) ---
+        if not is_final:
             return
 
         rows = []
@@ -2240,7 +2291,7 @@ sdf = SaveDataToFile()
 model.addStepFunction(sdf)
 
 if SAVE_PICKLE and INCLUDE_CELLS:
-    csm = CollectCellSpeedMetrics()
+    csm = CollectCellMetrics()
     model.addStepFunction(csm)
 
 if INCLUDE_FOCAL_ADHESIONS:
@@ -2592,8 +2643,8 @@ POISSON_RATIO_OVER_TIME = -1 * incL_dir1 / incL_dir2
 def manageLogs(steps, is_ensemble, idx):
     global SAVE_EVERY_N_STEPS, SAVE_PICKLE, SHOW_PLOTS, RES_PATH, MODEL_CONFIG, EXECUTION_TIME
     global BPOS_OVER_TIME, BFORCE_OVER_TIME, BFORCE_SHEAR_OVER_TIME, POISSON_RATIO_OVER_TIME, OSCILLATORY_STRAIN_OVER_TIME
-    global CELL_SPEED_METRICS
-    global INCLUDE_FIBRE_NETWORK, INCLUDE_CELLS, INCLUDE_FOCAL_ADHESIONS
+    global CELL_SPEED_METRICS, ORGANOID_METRICS_OVER_TIME
+    global INCLUDE_FIBRE_NETWORK, INCLUDE_CELLS, INCLUDE_FOCAL_ADHESIONS, ORGANOID_ASSAY
     ecm_agent_counts = [None] * len(steps)
     counter = 0
     BFORCE = make_dataclass("BFORCE",
@@ -2839,6 +2890,11 @@ def manageLogs(steps, is_ensemble, idx):
             print("FINAL CELL SPEED METRICS")
             print(CELL_SPEED_METRICS)
             print()
+        if ORGANOID_ASSAY and len(ORGANOID_METRICS_OVER_TIME) > 0:
+            print("============================")
+            print("ORGANOID METRICS OVER TIME")
+            print(ORGANOID_METRICS_OVER_TIME)
+            print()
     # Saving pickle
     print(f"[DIAG] manageLogs: SAVE_PICKLE={SAVE_PICKLE}, RES_PATH={RES_PATH}, idx={idx}")
     if SAVE_PICKLE:
@@ -2856,6 +2912,7 @@ def manageLogs(steps, is_ensemble, idx):
                          'FNODE_METRICS_OVER_TIME': FNODE_METRICS_OVER_TIME,
                          'CELL_METRICS_OVER_TIME': CELL_METRICS_OVER_TIME,
                          'CELL_SPEED_METRICS': CELL_SPEED_METRICS,
+                         'ORGANOID_METRICS_OVER_TIME': ORGANOID_METRICS_OVER_TIME,
                          'POISSON_RATIO_OVER_TIME': POISSON_RATIO_OVER_TIME,
                          'OSCILLATORY_STRAIN_OVER_TIME': OSCILLATORY_STRAIN_OVER_TIME,
                          'MODEL_CONFIG': MODEL_CONFIG,
