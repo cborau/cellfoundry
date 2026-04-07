@@ -1988,6 +1988,7 @@ class ModelParameterConfig:
         cell_nucleus_radius: float = None,
         brownian_motion_strength: float = None,
         brownian_motion_strength_factor: bool = None,
+        rotational_diffusion_rate: float = None,
         cell_cell_repulsion_k: float = None,
         cell_cell_adhesion_k: float = None,
         cell_cell_adhesion_range: float = None,
@@ -2194,6 +2195,7 @@ class ModelParameterConfig:
         self.CELL_NUCLEUS_RADIUS = cell_nucleus_radius
         self.BROWNIAN_MOTION_STRENGTH = brownian_motion_strength
         self.BROWNIAN_MOTION_STRENGTH_FACTOR = brownian_motion_strength_factor
+        self.ROTATIONAL_DIFFUSION_RATE = rotational_diffusion_rate
         self.CELL_CELL_REPULSION_K = cell_cell_repulsion_k
         self.CELL_CELL_ADHESION_K = cell_cell_adhesion_k
         self.CELL_CELL_ADHESION_RANGE = cell_cell_adhesion_range

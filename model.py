@@ -243,6 +243,7 @@ CELL_NUCLEUS_RADIUS = [r / 2 for r in CELL_RADIUS] # [um]
 CELL_SPEED_REF = [0.00041817020062396415, 0.0006199050301202626, 0.0004034913399763545] # [um/s] Another option is to define it according to grid distance ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / X. WARNING: if cell speed is too high, consider increasing N or reducing TIME_STEP.
 BROWNIAN_MOTION_STRENGTH_FACTOR = [2.5189218869227887, 2.3736333480245912, 3.116570743208639]
 BROWNIAN_MOTION_STRENGTH = [s * f for s, f in zip(CELL_SPEED_REF, BROWNIAN_MOTION_STRENGTH_FACTOR)]  # [um/s] # [um/s] Strength of random movement added to cell velocity.
+ROTATIONAL_DIFFUSION_RATE = [0.001, 0.001, 0.001]  # [rad^2/s] Rotational diffusion coefficient per cell type. Controls how fast cell orientation decorrelates (persistence time ~ 1/(2*D_rot)). Set > 0 for tortuous random-walk trajectories. e.g. D_rot = 0.001 gives a persistence time of ~500s. 
 CELL_CELL_REPULSION_K = [2.0 * k for k in CELL_K_ELAST]  # [nN/um] contact exclusion stiffness
 CELL_CELL_ADHESION_K = [0.2 * k for k in CELL_K_ELAST]  # [nN/um] weak cohesion in near-contact shell
 CELL_CELL_ADHESION_RANGE = [0.5 * r for r in CELL_RADIUS]  # [um] adhesive shell thickness outside contact
@@ -257,6 +258,7 @@ CELL_FNODE_EXCLUSION_DISTANCE = list(CELL_RADIUS)  # [um] minimum distance from 
 CELL_FNODE_DV_MAX = [0.5 * s for s in CELL_SPEED_REF]  # [um/s] cap for cell-fnode interaction velocity contribution
 print(f'Initial cell speed reference (per type): {CELL_SPEED_REF} um/s')   
 print(f'Initial Brownian motion strength (per type): {BROWNIAN_MOTION_STRENGTH} um/s')
+print(f'Rotational diffusion rate (per type): {ROTATIONAL_DIFFUSION_RATE} rad^2/s')
 
 # Per-cell-type cell cycle timing
 debug_acc = 40000
@@ -787,6 +789,7 @@ env.newPropertyArrayFloat("CELL_RADIUS", CELL_RADIUS)
 env.newPropertyArrayFloat("CELL_NUCLEUS_RADIUS", CELL_NUCLEUS_RADIUS)
 env.newPropertyArrayFloat("CELL_SPEED_REF", CELL_SPEED_REF)
 env.newPropertyArrayFloat("BROWNIAN_MOTION_STRENGTH", BROWNIAN_MOTION_STRENGTH)
+env.newPropertyArrayFloat("ROTATIONAL_DIFFUSION_RATE", ROTATIONAL_DIFFUSION_RATE)
 env.newPropertyFloat("MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION", MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION)
 env.newPropertyFloat("MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION", MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION)
 env.newPropertyArrayFloat("CELL_CELL_REPULSION_K", CELL_CELL_REPULSION_K)

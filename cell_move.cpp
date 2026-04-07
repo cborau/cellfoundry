@@ -224,6 +224,9 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   // Brownian motion
   const float BROWNIAN_MOTION_STRENGTH = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("BROWNIAN_MOTION_STRENGTH", agent_cell_type);
 
+  // Rotational diffusion
+  const float ROTATIONAL_DIFFUSION_RATE = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("ROTATIONAL_DIFFUSION_RATE", agent_cell_type);
+
   float chemotaxis_sensitivity[N_SPECIES] = {};
   for (int i = 0; i < N_SPECIES; i++) {
     chemotaxis_sensitivity[i] = FLAMEGPU->environment.getProperty<float, N_SPECIES>("CHEMOTAXIS_SENSITIVITY", i);
@@ -346,6 +349,20 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
 
     // Prevent negative persistent speed
     chemokinesis_factor = fmaxf(chemokinesis_factor, 0.0f);
+  }
+
+  // ---------------------------------------------------------------------------
+  // ROTATIONAL DIFFUSION: stochastic reorientation of the cell polarity vector.
+  // Perturbs orientation by adding noise scaled by sqrt(2 * D_rot * dt) to each
+  // component and renormalizing, which is a standard first-order discretization
+  // of rotational Brownian motion on the unit sphere.
+  // ---------------------------------------------------------------------------
+  if (ROTATIONAL_DIFFUSION_RATE > 0.0f) {
+    const float sigma_rot = sqrtf(2.0f * ROTATIONAL_DIFFUSION_RATE * TIME_STEP);
+    agent_orx += sigma_rot * FLAMEGPU->random.uniform<float>(-1.0f, 1.0f);
+    agent_ory += sigma_rot * FLAMEGPU->random.uniform<float>(-1.0f, 1.0f);
+    agent_orz += sigma_rot * FLAMEGPU->random.uniform<float>(-1.0f, 1.0f);
+    normalize3(agent_orx, agent_ory, agent_orz);
   }
 
   // Persistent self-propulsion along current orientation, modulated by chemokinesis
@@ -605,6 +622,9 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   FLAMEGPU->setVariable<float>("vz", agent_vz);
   FLAMEGPU->setVariable<float>("trajectory_length", trajectory_length);
   FLAMEGPU->setVariable<float>("trajectory_time", trajectory_time);
+  FLAMEGPU->setVariable<float>("orx", agent_orx);
+  FLAMEGPU->setVariable<float>("ory", agent_ory);
+  FLAMEGPU->setVariable<float>("orz", agent_orz);
 
   // Persist separate adaptation states for promotive and inhibitory chemokinesis
   for (int s = 0; s < N_SPECIES; s++) {
