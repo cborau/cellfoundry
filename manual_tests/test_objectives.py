@@ -24,14 +24,14 @@ Run from the repository root:
   Real data - final cell count using a scalar target:
     python manual_tests/test_objectives.py --pickle result_files/output_data_0.pickle --objective final_cell_count --target-cell-count 24
 
-  Real data - organoid size using a scalar target:
-    python manual_tests/test_objectives.py --pickle result_files/output_data_0.pickle --objective organoid_size --metric radius_of_gyration --target-size 140
+  Real data - organoid metric using a scalar target:
+    python manual_tests/test_objectives.py --pickle result_files/output_data_0.pickle --objective organoid --metric radius_of_gyration --target-metric 140
 
-  Real data - organoid size using a reference CSV with time-series targets:
-    python manual_tests/test_objectives.py --pickle result_files/output_data_0.pickle --objective organoid_size --reference optimizer/reference_data/target_organoid_size.csv --metric radius_of_gyration
+  Real data - organoid metric using a reference CSV with time-series targets:
+    python manual_tests/test_objectives.py --pickle result_files/output_data_0.pickle --objective organoid --reference optimizer/reference_data/target_organoid_size.csv --metric radius_of_gyration
 
-  Real data - organoid size (VTK-based) using a scalar target:
-    python manual_tests/test_objectives.py --pickle result_files/output_data_0.pickle --objective organoid_size_vtk --trial-dir result_files/trial_0001 --metric radius_of_gyration --target-size 140
+  Real data - organoid metric (VTK-based) using a scalar target:
+    python manual_tests/test_objectives.py --pickle result_files/output_data_0.pickle --objective organoid_vtk --trial-dir result_files/trial_0001 --metric radius_of_gyration --target-metric 140
 
 Without --pickle the script runs the synthetic smoke tests only.
 With --pickle it evaluates the chosen objective and shows objective-specific
@@ -82,8 +82,8 @@ OBJECTIVE_ALIASES = {
     "final_cell_count": "final_cell_count_error",
     "final_focad_per_cell": "final_focad_per_cell_error",
     "cell_speed": "cell_speed_error",
-    "organoid_size": "organoid_size_error",
-    "organoid_size_vtk": "organoid_size_error_vtk",
+    "organoid": "organoid_error",
+    "organoid_vtk": "organoid_error_vtk",
 }
 
 CURVE_OBJECTIVES = {
@@ -105,8 +105,8 @@ SCALAR_OPTIONAL_REFERENCE_OBJECTIVES = {
     "poisson_ratio_error",
     "final_cell_count_error",
     "final_focad_per_cell_error",
-    "organoid_size_error_vtk",
-    "organoid_size_error",
+    "organoid_error_vtk",
+    "organoid_error",
 }
 
 ALL_OBJECTIVE_CHOICES = sorted(set(OBJECTIVE_REGISTRY) | set(OBJECTIVE_ALIASES))
@@ -277,6 +277,7 @@ def _make_mock_results(n_steps: int = 50) -> dict:
                 "radius_of_gyration": np.linspace(20.0, 80.0, n_steps),
                 "equivalent_sphere_radius": np.linspace(20.0, 80.0, n_steps) * np.sqrt(5.0 / 3.0),
                 "max_span": np.linspace(50.0, 200.0, n_steps),
+                "sphericity": np.linspace(1.0, 0.8, n_steps),
                 "centroid_x": np.zeros(n_steps),
                 "centroid_y": np.zeros(n_steps),
                 "centroid_z": np.zeros(n_steps),
@@ -420,7 +421,7 @@ def _write_mock_cells_vtk(trial_dir: Path) -> dict[str, float]:
 
 def _make_reference_organoid_size(tmp: Path, target_size: float) -> str:
     path = tmp / "ref_organoid_size.csv"
-    pd.DataFrame({"target_size": [target_size]}).to_csv(path, index=False)
+    pd.DataFrame({"target_metric": [target_size]}).to_csv(path, index=False)
     return str(path)
 
 
@@ -430,7 +431,7 @@ def _make_reference_organoid_size_timeseries(tmp: Path, results: dict) -> str:
     path = tmp / "ref_organoid_size_timeseries.csv"
     pd.DataFrame({
         "time": org["time"].values,
-        "target_size": org["radius_of_gyration"].values,
+        "target_metric": org["radius_of_gyration"].values,
     }).to_csv(path, index=False)
     return str(path)
 
@@ -557,8 +558,8 @@ def run_tests() -> bool:
                 ),
             ),
             (
-                "organoid_size_error_vtk (csv)",
-                lambda: OBJECTIVE_REGISTRY["organoid_size_error_vtk"](
+                "organoid_error_vtk (csv)",
+                lambda: OBJECTIVE_REGISTRY["organoid_error_vtk"](
                     results,
                     ref_organoid,
                     trial_dir=str(tmp / "trial_dir"),
@@ -593,30 +594,39 @@ def run_tests() -> bool:
                 ),
             ),
             (
-                "organoid_size_error_vtk (scalar)",
-                lambda: OBJECTIVE_REGISTRY["organoid_size_error_vtk"](
+                "organoid_error_vtk (scalar)",
+                lambda: OBJECTIVE_REGISTRY["organoid_error_vtk"](
                     results,
                     None,
                     trial_dir=str(tmp / "trial_dir"),
                     metric="radius_of_gyration",
-                    target_size=organoid_metrics["radius_of_gyration"],
+                    target_metric=organoid_metrics["radius_of_gyration"],
                 ),
             ),
             (
-                "organoid_size_error (scalar, last)",
-                lambda: OBJECTIVE_REGISTRY["organoid_size_error"](
+                "organoid_error (scalar, last)",
+                lambda: OBJECTIVE_REGISTRY["organoid_error"](
                     results,
                     None,
                     metric="radius_of_gyration",
-                    target_size=float(results["ORGANOID_METRICS_OVER_TIME"]["radius_of_gyration"].iloc[-1]),
+                    target_metric=float(results["ORGANOID_METRICS_OVER_TIME"]["radius_of_gyration"].iloc[-1]),
                 ),
             ),
             (
-                "organoid_size_error (csv timeseries)",
-                lambda: OBJECTIVE_REGISTRY["organoid_size_error"](
+                "organoid_error (csv timeseries)",
+                lambda: OBJECTIVE_REGISTRY["organoid_error"](
                     results,
                     ref_organoid_ts,
                     metric="radius_of_gyration",
+                ),
+            ),
+            (
+                "organoid_error (sphericity, scalar)",
+                lambda: OBJECTIVE_REGISTRY["organoid_error"](
+                    results,
+                    None,
+                    metric="sphericity",
+                    target_metric=float(results["ORGANOID_METRICS_OVER_TIME"]["sphericity"].iloc[-1]),
                 ),
             ),
         ]
@@ -727,7 +737,7 @@ def _build_objective_kwargs(args: argparse.Namespace) -> dict:
         "target_poisson": args.target_poisson,
         "target_cell_count": args.target_cell_count,
         "target_focad_per_cell": args.target_focad_per_cell,
-        "target_size": args.target_size,
+        "target_metric": args.target_metric,
     }
     for key, value in optional_items.items():
         if value is not None:
@@ -778,22 +788,22 @@ def _validate_inputs(
             )
         return
 
-    if objective_name == "organoid_size_error_vtk":
+    if objective_name == "organoid_error_vtk":
         trial_dir = kwargs.get("trial_dir")
         if trial_dir is None:
-            raise ValueError("organoid_size_error_vtk requires --trial-dir")
+            raise ValueError("organoid_error_vtk requires --trial-dir")
         if not Path(trial_dir).exists():
             raise ValueError(f"Trial directory not found: {trial_dir}")
-        if reference_path is None and "target_size" not in kwargs:
+        if reference_path is None and "target_metric" not in kwargs:
             raise ValueError(
-                "organoid_size_error_vtk requires either --reference/--csv or --target-size"
+                "organoid_error_vtk requires either --reference/--csv or --target-metric"
             )
         return
 
-    if objective_name == "organoid_size_error":
-        if reference_path is None and "target_size" not in kwargs:
+    if objective_name == "organoid_error":
+        if reference_path is None and "target_metric" not in kwargs:
             raise ValueError(
-                "organoid_size_error requires either --reference/--csv or --target-size"
+                "organoid_error requires either --reference/--csv or --target-metric"
             )
         return
 
@@ -927,24 +937,24 @@ def _build_scalar_comparison(
             target = float(kwargs["target_poisson"])
         return ["final poisson ratio"], [sim_final], [target]
 
-    if objective_name == "organoid_size_error_vtk":
+    if objective_name == "organoid_error_vtk":
         metric_name = str(kwargs.get("metric", "radius_of_gyration"))
         sim_value = _compute_organoid_metric_value(kwargs["trial_dir"], metric_name)
         target = (
-            float(reference_df["target_size"].iloc[0])
+            float(reference_df["target_metric"].iloc[0])
             if reference_df is not None
-            else float(kwargs["target_size"])
+            else float(kwargs["target_metric"])
         )
         return [metric_name], [sim_value], [target]
 
-    if objective_name == "organoid_size_error":
+    if objective_name == "organoid_error":
         metric_name = str(kwargs.get("metric", "radius_of_gyration"))
         org_df = _get_organoid_metrics_frame(results)
         sim_value = float(org_df[metric_name].iloc[-1])
         target = (
-            float(reference_df["target_size"].iloc[-1])
+            float(reference_df["target_metric"].iloc[-1])
             if reference_df is not None
-            else float(kwargs["target_size"])
+            else float(kwargs["target_metric"])
         )
         return [metric_name], [sim_value], [target]
 
@@ -1479,10 +1489,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Scalar target for final_focad_per_cell_error.",
     )
     parser.add_argument(
-        "--target-size",
+        "--target-metric",
         type=float,
         default=None,
-        help="Scalar target for organoid_size_error.",
+        help="Scalar target for organoid_error / organoid_error_vtk.",
     )
     parser.add_argument(
         "--trial-dir",

@@ -56,6 +56,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--indir", default=str(DEFAULT_RESULTS_DIR), help="Directory containing cells_tXXXX.vtk (used when --source vtk)")
     parser.add_argument("--outdir", default=str(DEFAULT_OUTPUT_DIR), help="Directory for CSV/plots")
     parser.add_argument("--tag", default="latest", help="Tag suffix for output filenames")
+    parser.add_argument("--dt", type=float, default=None,
+                        help="Simulation time step in seconds. When provided, x-axis is shown in time units instead of steps.")
+    parser.add_argument("--time-unit", choices=["hours", "mins", "seconds"], default="hours",
+                        help="Time unit for x-axis when --dt is given (default: hours).")
     parser.add_argument("--show", action="store_true", help="Display figures interactively")
     return parser.parse_args()
 
@@ -182,8 +186,12 @@ def build_timeseries_from_vtk(vtk_files: list[Path]) -> pd.DataFrame:
     return df
 
 
-def build_timeseries_from_pickle(pickle_path: Path) -> pd.DataFrame:
-    """Build timeseries from CELL_METRICS_OVER_TIME stored in pickle."""
+def build_timeseries_from_pickle(pickle_path: Path) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    """Build timeseries from CELL_METRICS_OVER_TIME stored in pickle.
+
+    Returns ``(cell_df, organoid_df)`` where *organoid_df* is the
+    ``ORGANOID_METRICS_OVER_TIME`` frame (may be ``None`` if absent).
+    """
     if not pickle_path.exists():
         raise FileNotFoundError(f"Pickle file not found: {pickle_path}")
     with pickle_path.open("rb") as f:
@@ -197,7 +205,8 @@ def build_timeseries_from_pickle(pickle_path: Path) -> pd.DataFrame:
         cell_met = pd.DataFrame(cell_met)
 
     df = cell_met.copy().reset_index(drop=True)
-    df.insert(0, "step", range(1, len(df) + 1))
+    if "step" not in df.columns:
+        df.insert(0, "step", range(1, len(df) + 1))
 
     # Per-ID and per-cause columns are not available from pickle
     for col in ("new_cell_ids", "lost_cell_ids", "newly_dead_ids",
@@ -208,7 +217,13 @@ def build_timeseries_from_pickle(pickle_path: Path) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = np.nan
 
-    return df
+    # Extract ORGANOID_METRICS_OVER_TIME (for per-type curves)
+    org_raw = data.get("ORGANOID_METRICS_OVER_TIME")
+    organoid_df = None
+    if org_raw is not None and (not hasattr(org_raw, "__len__") or len(org_raw) > 0):
+        organoid_df = pd.DataFrame(org_raw) if not isinstance(org_raw, pd.DataFrame) else org_raw.copy()
+
+    return df, organoid_df
 
 
 def save_summary(df: pd.DataFrame, outdir: Path, tag: str) -> None:
@@ -229,13 +244,74 @@ def save_summary(df: pd.DataFrame, outdir: Path, tag: str) -> None:
     pd.DataFrame([summary]).to_csv(outdir / f"cell_population_summary_{tag}.csv", index=False)
 
 
-def make_plots(df: pd.DataFrame, outdir: Path, tag: str, show: bool) -> None:
-    # ---- 1. Overall population trends -----------------------------------
+# Colour palette for per-type curves
+_TYPE_COLORS = ["#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#9467bd", "#8c564b"]
+
+
+def _parse_n_alive_type(series: pd.Series) -> np.ndarray:
+    """Parse comma-separated n_alive_type column into a 2-D array (rows × types)."""
+    rows = []
+    for val in series:
+        if isinstance(val, str) and val:
+            rows.append([int(x) for x in val.split(",")])
+        else:
+            rows.append([])
+    if not rows or len(rows[0]) == 0:
+        return np.empty((len(series), 0), dtype=int)
+    return np.array(rows, dtype=int)
+
+
+def _steps_to_time(steps: np.ndarray, dt: float | None, unit: str) -> tuple[np.ndarray, str]:
+    """Convert step numbers to time values and return (values, xlabel)."""
+    if dt is None:
+        return steps.astype(float), "Step"
+    t_sec = steps * dt
+    if unit == "seconds":
+        return t_sec, "Time (s)"
+    elif unit == "mins":
+        return t_sec / 60.0, "Time (min)"
+    else:  # hours
+        return t_sec / 3600.0, "Time (h)"
+
+
+def make_plots(df: pd.DataFrame, outdir: Path, tag: str, show: bool,
+               organoid_df: pd.DataFrame | None = None,
+               dt: float | None = None, time_unit: str = "hours") -> None:
+    # Compute x values for the cell_metrics dataframe
+    steps_df = df["step"].values
+    x_df, xlabel = _steps_to_time(steps_df, dt, time_unit)
+
+    # Compute x values for the organoid dataframe (per-type alive curves)
+    x_org: np.ndarray | None = None
+    if organoid_df is not None and "n_alive_type" in organoid_df.columns:
+        if "step" in organoid_df.columns:
+            org_steps = organoid_df["step"].values
+        else:
+            org_steps = np.arange(len(organoid_df))
+        x_org, _ = _steps_to_time(org_steps, dt, time_unit)
+
+    # ---- 1. Overall population trends + per-type curves -----------------
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(df["step"], df["n_cells_total"], label="total", linewidth=2)
-    ax.plot(df["step"], df["n_cells_alive"], label="alive", linewidth=2)
-    ax.plot(df["step"], df["n_cells_dead"], label="dead", linewidth=2)
-    ax.set_xlabel("Step")
+    ax.plot(x_df, df["n_cells_total"], label="total", linewidth=2)
+    ax.plot(x_df, df["n_cells_alive"], label="alive", linewidth=2)
+    ax.plot(x_df, df["n_cells_dead"], label="dead", linewidth=2)
+
+    # Per-type alive from VTK columns
+    alive_type_cols = sorted([c for c in df.columns if c.startswith("n_alive_type_")])
+    if alive_type_cols:
+        for col in alive_type_cols:
+            ct_label = col.replace("n_alive_type_", "alive type ")
+            ci = int(col.rsplit("_", 1)[-1])
+            ax.plot(x_df, df[col], color=_TYPE_COLORS[ci % len(_TYPE_COLORS)],
+                    linewidth=1.5, linestyle="--", label=ct_label)
+    # Per-type alive from organoid_df (pickle path)
+    elif x_org is not None and organoid_df is not None and "n_alive_type" in organoid_df.columns:
+        type_arr = _parse_n_alive_type(organoid_df["n_alive_type"])
+        for ti in range(type_arr.shape[1]):
+            ax.plot(x_org, type_arr[:, ti], color=_TYPE_COLORS[ti % len(_TYPE_COLORS)],
+                    linewidth=1.5, linestyle="--", label=f"alive type {ti}")
+
+    ax.set_xlabel(xlabel)
     ax.set_ylabel("CELL count")
     ax.set_title("Cell Population Over Time")
     ax.grid(alpha=0.25)
@@ -243,14 +319,24 @@ def make_plots(df: pd.DataFrame, outdir: Path, tag: str, show: bool) -> None:
     fig.tight_layout()
     fig.savefig(outdir / f"cell_population_trends_{tag}.png", dpi=180)
 
-    # ---- 2. Per-cell-type alive population (VTK only) -------------------
-    alive_type_cols = sorted([c for c in df.columns if c.startswith("n_alive_type_")])
-    if alive_type_cols:
+    # ---- 2. Per-cell-type alive population (separate plot) --------------
+    has_type_data = bool(alive_type_cols) or (
+        organoid_df is not None and "n_alive_type" in organoid_df.columns
+    )
+    if has_type_data:
         fig, ax = plt.subplots(figsize=(10, 5))
-        for col in alive_type_cols:
-            ct_label = col.replace("n_alive_type_", "type ")
-            ax.plot(df["step"], df[col], label=ct_label, linewidth=2)
-        ax.set_xlabel("Step")
+        if alive_type_cols:
+            for col in alive_type_cols:
+                ct_label = col.replace("n_alive_type_", "type ")
+                ci = int(col.rsplit("_", 1)[-1])
+                ax.plot(x_df, df[col], color=_TYPE_COLORS[ci % len(_TYPE_COLORS)],
+                        linewidth=2, label=ct_label)
+        elif x_org is not None and organoid_df is not None and "n_alive_type" in organoid_df.columns:
+            type_arr = _parse_n_alive_type(organoid_df["n_alive_type"])
+            for ti in range(type_arr.shape[1]):
+                ax.plot(x_org, type_arr[:, ti], color=_TYPE_COLORS[ti % len(_TYPE_COLORS)],
+                        linewidth=2, label=f"type {ti}")
+        ax.set_xlabel(xlabel)
         ax.set_ylabel("Alive CELL count")
         ax.set_title("Cell Population Over Time — Per Cell Type")
         ax.grid(alpha=0.25)
@@ -258,26 +344,43 @@ def make_plots(df: pd.DataFrame, outdir: Path, tag: str, show: bool) -> None:
         fig.tight_layout()
         fig.savefig(outdir / f"cell_population_per_type_{tag}.png", dpi=180)
 
-    # ---- 3. Per-cell-type stacked area plot (VTK only) ------------------
+    # ---- 3. Per-cell-type stacked area plot -----------------------------
     if alive_type_cols:
         fig, ax = plt.subplots(figsize=(10, 5))
         labels = [col.replace("n_alive_type_", "type ") for col in alive_type_cols]
-        ax.stackplot(df["step"], *[df[col] for col in alive_type_cols], labels=labels, alpha=0.7)
-        ax.set_xlabel("Step")
+        ax.stackplot(x_df, *[df[col] for col in alive_type_cols], labels=labels, alpha=0.7)
+        ax.set_xlabel(xlabel)
         ax.set_ylabel("Alive CELL count")
         ax.set_title("Cell Population (Stacked) — Per Cell Type")
         ax.grid(alpha=0.25)
         ax.legend(loc="best")
         fig.tight_layout()
         fig.savefig(outdir / f"cell_population_stacked_{tag}.png", dpi=180)
+    elif organoid_df is not None and "n_alive_type" in organoid_df.columns:
+        type_arr = _parse_n_alive_type(organoid_df["n_alive_type"])
+        if type_arr.shape[1] > 0:
+            if x_org is None:
+                org_steps = organoid_df["step"].values if "step" in organoid_df.columns else np.arange(len(organoid_df))
+                x_org, _ = _steps_to_time(org_steps, dt, time_unit)
+            fig, ax = plt.subplots(figsize=(10, 5))
+            labels = [f"type {ti}" for ti in range(type_arr.shape[1])]
+            ax.stackplot(x_org, *[type_arr[:, ti] for ti in range(type_arr.shape[1])],
+                         labels=labels, alpha=0.7)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel("Alive CELL count")
+            ax.set_title("Cell Population (Stacked) — Per Cell Type")
+            ax.grid(alpha=0.25)
+            ax.legend(loc="best")
+            fig.tight_layout()
+            fig.savefig(outdir / f"cell_population_stacked_{tag}.png", dpi=180)
 
     # ---- 4. Events plot (VTK only) --------------------------------------
     if not df["new_cell_ids"].isna().all():
         fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(df["step"], df["new_cell_ids"], label="new_cell_ids", linewidth=2)
-        ax.plot(df["step"], df["newly_dead_ids"], label="newly_dead_ids", linewidth=2)
-        ax.plot(df["step"], df["lost_cell_ids"], label="lost_cell_ids", linewidth=2)
-        ax.set_xlabel("Step")
+        ax.plot(x_df, df["new_cell_ids"], label="new_cell_ids", linewidth=2)
+        ax.plot(x_df, df["newly_dead_ids"], label="newly_dead_ids", linewidth=2)
+        ax.plot(x_df, df["lost_cell_ids"], label="lost_cell_ids", linewidth=2)
+        ax.set_xlabel(xlabel)
         ax.set_ylabel("Events per step")
         ax.set_title("Cell Population Events Per Step")
         ax.grid(alpha=0.25)
@@ -296,6 +399,7 @@ def main() -> None:
     outdir = Path(args.outdir).resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
+    organoid_df = None
     if args.source == "vtk":
         indir = Path(args.indir)
         vtk_files = sorted(indir.glob("cells_t*.vtk"))
@@ -306,11 +410,12 @@ def main() -> None:
     else:
         pickle_path = Path(args.pickle)
         print(f"[Pickle] Loading CELL metrics from {pickle_path}")
-        df = build_timeseries_from_pickle(pickle_path)
+        df, organoid_df = build_timeseries_from_pickle(pickle_path)
 
     df.to_csv(outdir / f"cell_population_timeseries_{args.tag}.csv", index=False)
     save_summary(df, outdir, args.tag)
-    make_plots(df, outdir, args.tag, args.show)
+    make_plots(df, outdir, args.tag, args.show, organoid_df=organoid_df,
+               dt=args.dt, time_unit=args.time_unit)
     print(f"Results saved to {outdir}")
 
 

@@ -82,7 +82,7 @@ The `function` field must match a name registered in `objectives.py`.  Available
 | `matrix_remodeling_error` | Fibre remodeling metrics | RMSE |
 | `final_cell_count_error` | Final alive-cell count (scalar) | |ΔN| |
 | `final_focad_per_cell_error` | Final FOCAD per alive cell | |Δ| |
-| `organoid_size_error` | Organoid / spheroid size from VTK | |ΔR| |
+| `organoid_error` | Organoid / spheroid metrics (pickle) | |ΔR| or RMSE |
 
 > **Adding your own** — define a function with signature `f(results: dict, reference_path: str, **kwargs) -> tuple[float, str | None]` in `objectives.py` and add it to `OBJECTIVE_REGISTRY`.
 
@@ -125,7 +125,7 @@ model:
     SAVE_PICKLE: true                # required — the optimizer reads pickle output
 ```
 
-> **Tip:** set `SAVE_DATA_TO_FILE: false` unless your objective needs VTK files (e.g., `organoid_size_error`).  This skips writing large `.vtk` outputs and speeds up each trial.
+> **Tip:** set `SAVE_DATA_TO_FILE: false` unless your objective needs VTK files (e.g., `organoid_error_vtk`).  This skips writing large `.vtk` outputs and speeds up each trial.
 
 ---
 
@@ -189,9 +189,9 @@ study:
   sampler: NSGA-II
 
 objectives:
-  - function: organoid_size_error
+  - function: organoid_error
     kwargs:
-      target_size: 50.0
+      target_metric: 50.0
       metric: radius_of_gyration
   - function: final_cell_count_error
     kwargs:
@@ -294,6 +294,28 @@ strain,stress
 0.05,1.2
 ...
 ```
+
+**target_organoid_size.csv** (for `organoid_error`):
+```csv
+time,target_metric
+0,20.0
+72000,28.5
+144000,36.0
+...
+```
+
+**target_organoid_sphericity.csv** (for `organoid_error` with `metric: sphericity`):
+```csv
+time,target_metric
+0,1.00
+72000,0.97
+144000,0.93
+...
+```
+
+> **Important:** The `time` column in reference CSVs must be in the same
+> units as the simulation time — typically **seconds** (matching
+> `TIME_STEP`).  Do **not** use hours or other units.
 
 ---
 

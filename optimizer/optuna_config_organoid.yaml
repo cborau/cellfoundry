@@ -8,9 +8,9 @@
 #
 # Optuna uses NSGA-II to maintain a Pareto front of trade-off solutions.
 #
-# IMPORTANT: organoid_size_error reads ORGANOID_METRICS_OVER_TIME from
+# IMPORTANT: organoid_error reads ORGANOID_METRICS_OVER_TIME from
 #            the pickle, so ORGANOID_ASSAY and SAVE_PICKLE must be true.
-#            For the VTK-based variant, use organoid_size_error_vtk instead.
+#            For the VTK-based variant, use organoid_error_vtk instead.
 #
 # Usage:
 #    python -m optimizer.optimize --config optimizer/optuna_config_organoid.yaml
@@ -26,7 +26,7 @@ study:
 
 # --- Multiple objectives (Pareto multi-objective) -------------------------
 objectives:
-  - function: organoid_size_error
+  - function: organoid_error
     reference: "optimizer/reference_data/target_organoid_size.csv"
     kwargs:
       metric: radius_of_gyration   # or: max_span, equivalent_sphere_radius

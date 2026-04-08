@@ -14,7 +14,7 @@ Add your own objective functions here following the same signature::
 
 Then register the function name in the ``OBJECTIVE_REGISTRY`` at the bottom.
 
-For objectives that need cell spatial data (e.g., organoid size) the function
+For objectives that need cell spatial data over time not stored in the pickle, the function
 receives an extra ``trial_dir`` kwarg pointing to the trial output directory
 where VTK files are stored.
 """
@@ -1159,11 +1159,11 @@ def _get_last_cell_vtk(trial_dir: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Organoid / spheroid size metrics
+# Organoid / spheroid metrics
 # ---------------------------------------------------------------------------
 
 def compute_organoid_metrics(positions: np.ndarray) -> dict[str, float]:
-    """Compute simple size metrics for a 3-D point cloud (alive-cell centres).
+    """Compute size and shape metrics for a 3-D point cloud (alive-cell centres).
 
     Parameters
     ----------
@@ -1180,6 +1180,10 @@ def compute_organoid_metrics(positions: np.ndarray) -> dict[str, float]:
         ``equivalent_sphere_radius`` : float
             Radius of a uniform sphere that has the same Rg:
             R_eq = Rg * sqrt(5/3).
+        ``sphericity`` : float
+            Ratio of the smallest to largest eigenvalue of the position
+            covariance matrix (1.0 = perfect sphere, 0 = fully elongated).
+            Requires N ≥ 4; returns 1.0 otherwise.
         ``centroid`` : list[float]
             [x, y, z] centroid of the alive-cell cloud.
         ``n_alive`` : int
@@ -1191,6 +1195,7 @@ def compute_organoid_metrics(positions: np.ndarray) -> dict[str, float]:
             "radius_of_gyration": 0.0,
             "max_span": 0.0,
             "equivalent_sphere_radius": 0.0,
+            "sphericity": 1.0,
             "centroid": [0.0, 0.0, 0.0],
             "n_alive": 0,
         }
@@ -1211,19 +1216,28 @@ def compute_organoid_metrics(positions: np.ndarray) -> dict[str, float]:
 
     equivalent_r = rg * np.sqrt(5.0 / 3.0)
 
+    # Sphericity from covariance eigenvalues
+    if n >= 4:
+        eigvals = np.linalg.eigvalsh(np.cov(displacements.T))
+        eigvals = np.maximum(eigvals, 0.0)
+        sphericity = float(eigvals.min() / eigvals.max()) if eigvals.max() > 0 else 1.0
+    else:
+        sphericity = 1.0
+
     return {
         "radius_of_gyration": rg,
         "max_span": max_span,
         "equivalent_sphere_radius": float(equivalent_r),
+        "sphericity": sphericity,
         "centroid": centroid.tolist(),
         "n_alive": n,
     }
 
 
-def organoid_size_error_vtk(results: dict, reference_path: str = None, **kwargs) -> float:
-    """Compare the spheroid size at the final timestep against a target.
+def organoid_error_vtk(results: dict, reference_path: str = None, **kwargs) -> float:
+    """Compare an organoid metric at the final timestep against a target.
 
-    The size is measured from the point cloud of **alive** cell positions
+    The metric is measured from the point cloud of **alive** cell positions
     obtained from VTK output files.
 
     **Requires** ``SAVE_DATA_TO_FILE: true`` in model overrides so that
@@ -1233,17 +1247,18 @@ def organoid_size_error_vtk(results: dict, reference_path: str = None, **kwargs)
         - ``"radius_of_gyration"`` (default) — RMS distance from centroid
         - ``"max_span"`` — maximum inter-cell distance (diameter)
         - ``"equivalent_sphere_radius"`` — Rg * sqrt(5/3)
+        - ``"sphericity"`` — eigenvalue ratio (1 = sphere)
 
     **Option A — scalar target:**
-        Pass ``kwargs["target_size"]`` (float, in model length units [µm]).
+        Pass ``kwargs["target_metric"]`` (float).
 
     **Option B — reference CSV:**
-        CSV with a ``target_size`` column (single row).
+        CSV with a ``target_metric`` column (single row).
     """
     trial_dir = kwargs.get("trial_dir")
     if trial_dir is None:
         raise ValueError(
-            "organoid_size_error_vtk requires 'trial_dir' kwarg "
+            "organoid_error_vtk requires 'trial_dir' kwarg "
             "(automatically provided by the optimizer). "
             "Make sure SAVE_DATA_TO_FILE is true."
         )
@@ -1263,20 +1278,20 @@ def organoid_size_error_vtk(results: dict, reference_path: str = None, **kwargs)
     sim_value = metrics[metric_name]
 
     # --- Option A: scalar target ---
-    if "target_size" in kwargs:
-        target = float(kwargs["target_size"])
+    if "target_metric" in kwargs:
+        target = float(kwargs["target_metric"])
         error = abs(sim_value - target)
         return error, _format_percent_text(error, target)
 
     # --- Option B: reference CSV ---
     if reference_path is None:
-        raise ValueError("Provide either reference_path or target_size kwarg")
+        raise ValueError("Provide either reference_path or target_metric kwarg")
 
     ref = _load_reference_csv(reference_path)
-    if "target_size" not in ref.columns:
-        raise ValueError("Reference CSV must contain a 'target_size' column")
+    if "target_metric" not in ref.columns:
+        raise ValueError("Reference CSV must contain a 'target_metric' column")
 
-    target = float(ref["target_size"].iloc[0])
+    target = float(ref["target_metric"].iloc[0])
     error = abs(sim_value - target)
     return error, _format_percent_text(error, target)
 
@@ -1296,7 +1311,7 @@ def _get_organoid_metrics_frame(results: dict) -> pd.DataFrame:
     if not isinstance(metrics, pd.DataFrame):
         metrics = pd.DataFrame(metrics)
 
-    required = {"step", "radius_of_gyration", "max_span", "equivalent_sphere_radius", "n_alive"}
+    required = {"step", "radius_of_gyration", "max_span", "equivalent_sphere_radius", "n_alive", "sphericity"}
     missing = required.difference(metrics.columns)
     if missing:
         raise ValueError(
@@ -1306,8 +1321,8 @@ def _get_organoid_metrics_frame(results: dict) -> pd.DataFrame:
     return metrics
 
 
-def organoid_size_error(results: dict, reference_path: str = None, **kwargs) -> float:
-    """Compare organoid size metrics from the pickle against a target.
+def organoid_error(results: dict, reference_path: str = None, **kwargs) -> float:
+    """Compare organoid metrics from the pickle against a target.
 
     Reads from the ``ORGANOID_METRICS_OVER_TIME`` DataFrame stored in the
     pickle by the ``CollectCellMetrics`` host function — **no VTK files
@@ -1325,12 +1340,13 @@ def organoid_size_error(results: dict, reference_path: str = None, **kwargs) -> 
     metric : str, default ``"radius_of_gyration"``
         Which organoid metric column to compare.  Choices:
         ``"radius_of_gyration"``, ``"max_span"``,
-        ``"equivalent_sphere_radius"``, ``"n_alive"``.
+        ``"equivalent_sphere_radius"``, ``"sphericity"``, ``"n_alive"``.
 
     **Option A — scalar target (single time-point):**
 
-        target_size : float  (**required**)
-            Expected value of the selected metric, in µm.
+        target_metric : float  (**required**)
+            Expected value of the selected metric (µm for size metrics,
+            dimensionless for sphericity).
         time_point : str | int, default ``"last"``
             Which simulation time-point to compare against the target.
             ``"last"`` — final recorded row (default).
@@ -1343,7 +1359,7 @@ def organoid_size_error(results: dict, reference_path: str = None, **kwargs) -> 
 
         - ``time`` — in the same units as the simulation time step
           (e.g. seconds when ``TIME_STEP`` is in seconds).
-        - ``target_size`` — target metric value at each time, in µm.
+        - ``target_metric`` — target value at each time.
 
         The simulation metric curve is linearly interpolated onto the
         reference time grid and the error is the RMSE between the two.
@@ -1364,7 +1380,7 @@ def organoid_size_error(results: dict, reference_path: str = None, **kwargs) -> 
         )
 
     # --- Option A: scalar target ---
-    if "target_size" in kwargs:
+    if "target_metric" in kwargs:
         time_point = kwargs.get("time_point", "last")
         if time_point == "last":
             sim_value = float(org_df[metric_name].iloc[-1])
@@ -1375,22 +1391,22 @@ def organoid_size_error(results: dict, reference_path: str = None, **kwargs) -> 
             idx = (org_df["step"].astype(int) - target_step).abs().idxmin()
             sim_value = float(org_df.loc[idx, metric_name])
 
-        target = float(kwargs["target_size"])
+        target = float(kwargs["target_metric"])
         error = abs(sim_value - target)
         return error, _format_percent_text(error, target)
 
     # --- Option B: reference CSV (time-series) ---
     if reference_path is None:
-        raise ValueError("Provide either reference_path or target_size kwarg")
+        raise ValueError("Provide either reference_path or target_metric kwarg")
 
     ref = _load_reference_csv(reference_path)
-    if "target_size" not in ref.columns or "time" not in ref.columns:
+    if "target_metric" not in ref.columns or "time" not in ref.columns:
         raise ValueError(
-            "Reference CSV must contain 'time' and 'target_size' columns"
+            "Reference CSV must contain 'time' and 'target_metric' columns"
         )
 
     ref_time = ref["time"].to_numpy(dtype=float)
-    ref_size = ref["target_size"].to_numpy(dtype=float)
+    ref_target = ref["target_metric"].to_numpy(dtype=float)
 
     # Simulation time & metric arrays
     if "time" in org_df.columns:
@@ -1421,7 +1437,7 @@ def organoid_size_error(results: dict, reference_path: str = None, **kwargs) -> 
             f"Reference time: [{ref_time[0]:.4g}, {ref_time[-1]:.4g}]"
         )
 
-    error = _rmse(sim_interp[overlap_mask], ref_size[overlap_mask])
+    error = _rmse(sim_interp[overlap_mask], ref_target[overlap_mask])
     return error, None
 
 
@@ -1442,6 +1458,6 @@ OBJECTIVE_REGISTRY = {
     "final_cell_count_error": final_cell_count_error,
     "final_focad_per_cell_error": final_focad_per_cell_error,
     "cell_speed_error": cell_speed_error,
-    "organoid_size_error": organoid_size_error,
-    "organoid_size_error_vtk": organoid_size_error_vtk,
+    "organoid_error": organoid_error,
+    "organoid_error_vtk": organoid_error_vtk,
 }

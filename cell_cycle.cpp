@@ -143,9 +143,11 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
   const float acute_nutrient_threshold = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_ACUTE_NUTRIENT_THRESHOLD", agent_cell_type);
   const float acute_stress_threshold = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_ACUTE_STRESS_THRESHOLD", agent_cell_type);
 
-  // Proxies used for death pathways (can be remapped by user model semantics)
-  const float oxygen_proxy = agent_C_sp[0];
-  const float nutrient_proxy = agent_C_sp[1];
+  // Proxies used for death pathways (remappable via OXYGEN/NUTRIENT_SPECIES_INDEX)
+  const uint32_t oxygen_idx = FLAMEGPU->environment.getProperty<uint32_t>("OXYGEN_SPECIES_INDEX");
+  const uint32_t nutrient_idx = FLAMEGPU->environment.getProperty<uint32_t>("NUTRIENT_SPECIES_INDEX");
+  const float oxygen_proxy = agent_C_sp[oxygen_idx];
+  const float nutrient_proxy = agent_C_sp[nutrient_idx];
   const float tensile_stress_proxy = fmaxf(0.0f, agent_sig_l1);
 
   // Per-cell-type multipliers read from environment arrays

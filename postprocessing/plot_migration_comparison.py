@@ -3,12 +3,12 @@ Compare cell migration results between one or two simulation conditions.
 
 Features
 --------
-D1 – Violin plots of cell speeds (vmean, veff) per cell type from pickle files.
+1 – Violin plots of cell speeds (vmean, veff) per cell type from pickle files.
      If two pickles are given, plots side-by-side (1×2 subplots) for comparison.
      Optional target CSV with expected median values (per cell type & metric)
      is shown as horizontal reference lines.
 
-D2 – Per-cell-type 3D trajectory plots and directionality-ratio curves from
+2 – Per-cell-type 3D trajectory plots and directionality-ratio curves from
      VTK files.  Uses a (rows × N_CELL_TYPES+1) subplot layout where:
        • First N_CELL_TYPES panels: 3D scatter of final positions with
          trajectories drawn from a common origin (initial position subtracted).

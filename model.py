@@ -254,7 +254,7 @@ print(f'Initial Brownian motion strength (per type): {BROWNIAN_MOTION_STRENGTH} 
 print(f'Rotational diffusion rate (per type): {ROTATIONAL_DIFFUSION_RATE} rad^2/s')
 
 # Per-cell-type cell cycle timing
-debug_acc = 40000
+debug_acc = 1.0 # [s] If > 1.0, accelerates the cell cycle for faster testing (all durations are divided by this value). Set to 1.0 for realistic timing.
 _g1 = 10.0 * 3600 / debug_acc
 _s  = 8.0 * 3600 / debug_acc
 _g2 = 4.0 * 3600 / debug_acc
@@ -291,17 +291,21 @@ INIT_CELL_CONSUMPTION_RATES = [0.0, 0.0]  # base consumption rate of each specie
 INIT_CELL_PRODUCTION_RATES = [0.0, 0.0]  # base production rate of each species by the CELL agents 
 INIT_CELL_REACTION_RATES = [0.0, 0.0]  # base metabolic reaction rates of each species by the CELL agents 
 
+# Species index mapping for death pathways
+OXYGEN_SPECIES_INDEX = 0    # index into C_sp[] used as oxygen proxy in cell_cycle
+NUTRIENT_SPECIES_INDEX = 1  # index into C_sp[] used as nutrient proxy in cell_cycle
+
 # Per-cell-type damage and death pathway controls
 # Note: cell stress variables (sig_xx, sig_eig_1, etc.) are in [nN/um^2], numerically equivalent to [kPa].
-CELL_HYPOXIA_THRESHOLD = [0.03, 0.03, 0.03]          # [concentration units of C_sp[0]] chronic hypoxia damage threshold
-CELL_NUTRIENT_THRESHOLD = [0.03, 0.03, 0.03]         # [concentration units of C_sp[1]] chronic nutrient-deprivation threshold
+CELL_HYPOXIA_THRESHOLD = [0.03, 0.03, 0.03]          # [concentration units of C_sp[OXYGEN_SPECIES_INDEX]] chronic hypoxia damage threshold
+CELL_NUTRIENT_THRESHOLD = [0.03, 0.03, 0.03]         # [concentration units of C_sp[NUTRIENT_SPECIES_INDEX]] chronic nutrient-deprivation threshold
 CELL_STRESS_THRESHOLD = [8.0, 8.0, 8.0]              # [kPa = nN/um^2] chronic mechanical-overstress damage threshold
 CELL_HYPOXIA_DAMAGE_RATE = [2.0e-4, 2.0e-4, 2.0e-4]  # [1/s] damage accumulation rate scaling under hypoxia (hour-scale)
 CELL_NUTRIENT_DAMAGE_RATE = [1.5e-4, 1.5e-4, 1.5e-4] # [1/s] damage accumulation rate scaling under nutrient deprivation (hour-scale)
 CELL_STRESS_DAMAGE_RATE = [1.0e-4, 1.0e-4, 1.0e-4]   # [1/s] damage accumulation rate scaling under mechanical overstress (hour-scale)
 CELL_BASAL_DAMAGE_REPAIR_RATE = [5.0e-5, 5.0e-5, 5.0e-5] # [1/s] baseline damage repair rate
-CELL_ACUTE_HYPOXIA_THRESHOLD = [0.005, 0.005, 0.005]  # [concentration units of C_sp[0]] immediate death threshold
-CELL_ACUTE_NUTRIENT_THRESHOLD = [0.005, 0.005, 0.005] # [concentration units of C_sp[1]] immediate death threshold
+CELL_ACUTE_HYPOXIA_THRESHOLD = [0.005, 0.005, 0.005]  # [concentration units of C_sp[OXYGEN_SPECIES_INDEX]] immediate death threshold
+CELL_ACUTE_NUTRIENT_THRESHOLD = [0.005, 0.005, 0.005] # [concentration units of C_sp[NUTRIENT_SPECIES_INDEX]] immediate death threshold
 CELL_ACUTE_STRESS_THRESHOLD = [25.0, 25.0, 25.0]      # [kPa = nN/um^2] immediate mechanical-failure threshold
 
 # Estimate maximum CELL population for bucket bounds and id allocation.
@@ -809,6 +813,9 @@ env.newPropertyArrayFloat("DAMAGE_DEATH_THRESHOLD", DAMAGE_DEATH_THRESHOLD)
 env.newPropertyArrayFloat("CELL_CONSUMPTION_MULTIPLIER", CELL_CONSUMPTION_MULTIPLIER)
 env.newPropertyArrayFloat("CELL_PRODUCTION_MULTIPLIER", CELL_PRODUCTION_MULTIPLIER)
 env.newPropertyArrayFloat("CELL_REACTION_MULTIPLIER", CELL_REACTION_MULTIPLIER)
+# Species index mapping for death pathways
+env.newPropertyUInt("OXYGEN_SPECIES_INDEX", OXYGEN_SPECIES_INDEX)
+env.newPropertyUInt("NUTRIENT_SPECIES_INDEX", NUTRIENT_SPECIES_INDEX)
 # Per-cell-type damage/death thresholds
 env.newPropertyArrayFloat("CELL_HYPOXIA_THRESHOLD", CELL_HYPOXIA_THRESHOLD)
 env.newPropertyArrayFloat("CELL_NUTRIENT_THRESHOLD", CELL_NUTRIENT_THRESHOLD)
@@ -2094,7 +2101,7 @@ class CollectCellMetrics(pyflamegpu.HostFunction):
 
     def run(self, FLAMEGPU):
         global INCLUDE_CELLS, STEPS, CELL_SPEED_METRICS, ORGANOID_METRICS_OVER_TIME
-        global ORGANOID_ASSAY, SAVE_EVERY_N_STEPS
+        global ORGANOID_ASSAY, SAVE_EVERY_N_STEPS, N_CELL_TYPES
 
         if not INCLUDE_CELLS:
             return
@@ -2106,6 +2113,7 @@ class CollectCellMetrics(pyflamegpu.HostFunction):
         if ORGANOID_ASSAY and (step % SAVE_EVERY_N_STEPS == 0 or step == 1 or is_final):
             cell_agent = FLAMEGPU.agent("CELL")
             positions = []
+            alive_per_type = [0] * N_CELL_TYPES
             for ai in cell_agent.getPopulationData():
                 if int(ai.getVariableInt("dead")) == 0:
                     positions.append([
@@ -2113,6 +2121,9 @@ class CollectCellMetrics(pyflamegpu.HostFunction):
                         float(ai.getVariableFloat("y")),
                         float(ai.getVariableFloat("z")),
                     ])
+                    ct = int(ai.getVariableInt("cell_type"))
+                    if 0 <= ct < N_CELL_TYPES:
+                        alive_per_type[ct] += 1
             pos_arr = np.array(positions) if len(positions) > 0 else np.empty((0, 3))
             n_alive = len(pos_arr)
             if n_alive > 0:
@@ -2126,19 +2137,29 @@ class CollectCellMetrics(pyflamegpu.HostFunction):
                     max_span = float(pdist(pos_arr).max())
                 else:
                     max_span = 0.0
+                # Sphericity from eigenvalues of covariance matrix
+                if n_alive >= 4:
+                    eigvals = np.linalg.eigvalsh(np.cov(displacements.T))
+                    eigvals = np.maximum(eigvals, 0.0)
+                    sphericity = float(eigvals.min() / eigvals.max()) if eigvals.max() > 0 else 1.0
+                else:
+                    sphericity = 1.0
             else:
                 centroid = np.array([0.0, 0.0, 0.0])
                 rg = 0.0
                 equivalent_r = 0.0
                 max_span = 0.0
+                sphericity = 1.0
 
             row = pd.DataFrame([{
                 "step": step,
                 "time": step * FLAMEGPU.environment.getPropertyFloat("TIME_STEP"),
                 "n_alive": n_alive,
+                "n_alive_type": ",".join(str(c) for c in alive_per_type),
                 "radius_of_gyration": rg,
                 "equivalent_sphere_radius": equivalent_r,
                 "max_span": max_span,
+                "sphericity": sphericity,
                 "centroid_x": float(centroid[0]),
                 "centroid_y": float(centroid[1]),
                 "centroid_z": float(centroid[2]),
@@ -2641,7 +2662,7 @@ POISSON_RATIO_OVER_TIME = -1 * incL_dir1 / incL_dir2
 
 
 def manageLogs(steps, is_ensemble, idx):
-    global SAVE_EVERY_N_STEPS, SAVE_PICKLE, SHOW_PLOTS, RES_PATH, MODEL_CONFIG, EXECUTION_TIME
+    global SAVE_EVERY_N_STEPS, SAVE_PICKLE, SHOW_PLOTS, RES_PATH, MODEL_CONFIG, EXECUTION_TIME, STEPS
     global BPOS_OVER_TIME, BFORCE_OVER_TIME, BFORCE_SHEAR_OVER_TIME, POISSON_RATIO_OVER_TIME, OSCILLATORY_STRAIN_OVER_TIME
     global CELL_SPEED_METRICS, ORGANOID_METRICS_OVER_TIME
     global INCLUDE_FIBRE_NETWORK, INCLUDE_CELLS, INCLUDE_FOCAL_ADHESIONS, ORGANOID_ASSAY
@@ -2824,12 +2845,13 @@ def manageLogs(steps, is_ensemble, idx):
     if INCLUDE_CELLS:
         for step in steps:
             stepcount = step.getStepCount()
-            if stepcount % SAVE_EVERY_N_STEPS == 0 or stepcount == 1:
+            if stepcount % SAVE_EVERY_N_STEPS == 0 or stepcount == 1 or stepcount == STEPS:
                 cell_agents = step.getAgent("CELL")
                 n_cells = cell_agents.getCount()
                 n_dead = cell_agents.getSumInt("dead")
                 n_alive = n_cells - n_dead
                 step_cell_met = pd.DataFrame([{
+                    "step": stepcount,
                     "n_cells_total": n_cells,
                     "n_cells_alive": n_alive,
                     "n_cells_dead": n_dead,
