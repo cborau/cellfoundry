@@ -44,6 +44,7 @@ objective:
   reference: "optimizer/reference_data/target_cell_count.csv"
   kwargs:
     normalize: true           # average error across target rows
+    # use_relative_error: true  # average % errors (better when type populations differ in magnitude)
 
 # --- Parameters to optimize -----------------------------------------------
 #

@@ -865,7 +865,9 @@ def matrix_remodeling_error(results: dict, reference_path: str, **kwargs) -> flo
 def final_cell_count_error(results: dict, reference_path: str = None, **kwargs) -> float:
     """Compare the final cell count (total alive) against a scalar target.
 
-    Supports per-cell-type targets when VTK data is available.
+    Supports per-cell-type targets when VTK data is available or when
+    ``ORGANOID_METRICS_OVER_TIME`` contains the comma-separated
+    ``n_alive_type`` column.
 
     **Option A — scalar target (no reference CSV):**
         Pass ``kwargs["target_cell_count"]`` (int/float).
@@ -886,6 +888,11 @@ def final_cell_count_error(results: dict, reference_path: str = None, **kwargs) 
     Error is the sum of absolute differences (optionally normalised by the
     number of targets).  Set ``kwargs["normalize"] = True`` to divide by the
     number of target rows.
+
+    Set ``kwargs["use_relative_error"] = True`` to compute the *mean
+    relative error* (percentage of target) instead of absolute counts.
+    This is recommended when cell-type populations differ in magnitude
+    so that a small type is not dominated by a large one.
     """
     cell_met = results.get("CELL_METRICS_OVER_TIME")
     if cell_met is None or len(cell_met) == 0:
@@ -908,35 +915,51 @@ def final_cell_count_error(results: dict, reference_path: str = None, **kwargs) 
         raise ValueError("Reference CSV must contain a 'target_count' column")
 
     normalize = kwargs.get("normalize", False)
+    use_relative = kwargs.get("use_relative_error", False)
     total_error = 0.0
     n_targets = 0
     display_parts = []
 
     for _, row in ref.iterrows():
         ct = row.get("cell_type", -1)
+        sim_val: int | None = None
+        label: str = "all"
+
         # -1 or "all" → compare total alive
         if ct == -1 or str(ct).strip().lower() == "all":
-            target = float(row["target_count"])
-            error = abs(final_alive - target)
-            total_error += error
-            n_targets += 1
-            display_parts.append(_format_percent_detail("all", error, target))
+            sim_val = final_alive
         else:
+            label = f"type {int(ct)}"
             # Per-type columns are only present when the simulation exports
             # them (VTK path with per-type counting).  The column convention
             # is  n_alive_type_<N>.
             col_name = f"n_alive_type_{int(ct)}"
             if col_name in cell_met.columns:
                 sim_val = int(cell_met[col_name].iloc[-1])
-                target = float(row["target_count"])
-                error = abs(sim_val - target)
-                total_error += error
-                n_targets += 1
-                display_parts.append(_format_percent_detail(f"type {int(ct)}", error, target))
             else:
-                # Silently skip types we can't measure (avoids hard crash when
-                # per-type tracking is not available).
-                pass
+                # Fallback: parse the comma-separated "n_alive_type" column
+                # from ORGANOID_METRICS_OVER_TIME (format: "c0,c1,c2,...").
+                org_met = results.get("ORGANOID_METRICS_OVER_TIME")
+                if org_met is not None and len(org_met) > 0 and "n_alive_type" in org_met.columns:
+                    last_val = org_met["n_alive_type"].iloc[-1]
+                    if isinstance(last_val, str) and last_val:
+                        parts = last_val.split(",")
+                        ct_idx = int(ct)
+                        if 0 <= ct_idx < len(parts):
+                            sim_val = int(parts[ct_idx])
+
+        if sim_val is not None:
+            target = float(row["target_count"])
+            abs_err = abs(sim_val - target)
+            if use_relative:
+                error = _relative_abs_error(sim_val, target)
+            else:
+                error = abs_err
+            total_error += error
+            n_targets += 1
+            # Display: show sim vs target and % error
+            pct = (100.0 * abs_err / abs(target)) if abs(target) > 1e-12 else float('inf')
+            display_parts.append(f"{label}: {sim_val}/{int(target)} ({pct:.1f}%)")
 
     if n_targets == 0:
         raise ValueError("No usable target rows found in reference CSV")

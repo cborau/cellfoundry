@@ -3,7 +3,7 @@
 # ============================================================================
 #
 # This config optimizes TWO objectives simultaneously:
-#   1. Organoid size curve (radius of gyration vs time → target CSV)
+#   1. Organoid size curve (equivalent_sphere_radius vs time → target CSV)
 #   2. Final alive-cell count (→ target 15 cells)
 #
 # Optuna uses NSGA-II to maintain a Pareto front of trade-off solutions.
@@ -18,7 +18,7 @@
 
 study:
   name: "cellfoundry_organoid_growth"
-  n_trials: 30
+  n_trials: 200
   sampler: NSGA-II             # auto-selected for multi-obj, but explicit here
   seed: 42
   directions: [minimize, minimize]   # one per objective
@@ -27,40 +27,38 @@ study:
 # --- Multiple objectives (Pareto multi-objective) -------------------------
 objectives:
   - function: organoid_error
-    reference: "optimizer/reference_data/target_organoid_size.csv"
+    reference: "optimizer/reference_data/target_organoid_equiv_sphere.csv"
     kwargs:
-      metric: radius_of_gyration   # or: max_span, equivalent_sphere_radius
+      metric: equivalent_sphere_radius   # or: max_span, equivalent_sphere_radius, sphericity
       # smooth_window: 0           # optional Savitzky-Golay smoothing
 
   - function: final_cell_count_error
     reference: "optimizer/reference_data/target_cell_count.csv"
     kwargs:
       normalize: true              # average error across target rows
+      use_relative_error: true     # average % errors (better when type populations differ in magnitude)
 
 # --- Parameters to tune ----------------------------------------------------
 parameters:
+
   N_CELLS:
     type: int
-    low: 1
-    high: 10
+    low: 3
+    high: 42
+    log: false
 
   CELL_SPEED_REF:
     type: float
-    low: 0.1
-    high: 3.0
-    log: false
-
-  CELL_HYPOXIA_THRESHOLD:
-    type: float
-    low: 0.005
-    high: 0.1
+    low: 0.0001
+    high: 0.01
     log: true
 
-  CELL_NUTRIENT_THRESHOLD:
-    type: float
-    low: 0.005
-    high: 0.1
-    log: true
+  DIVISION_RATE_MULTIPLIER:
+    type: array_float
+    elements:
+      0: {low: 0.1, high: 10.0}
+      1: {low: 0.1, high: 10.0}
+      2: {low: 0.1, high: 10.0}
 
 
 # --- Model execution settings ----------------------------------------------
@@ -70,14 +68,26 @@ model:
   cleanup_trials: false
 
   extra_overrides:
-    STEPS: 200
-    SAVE_EVERY_N_STEPS: 20
+    STEPS: 240
+    TIME_STEP: 1800
+    SAVE_EVERY_N_STEPS: 12
     INCLUDE_CELLS: true
+    INCLUDE_CELL_CELL_INTERACTION: true
     INCLUDE_CELL_CYCLE: true
-    INCLUDE_FOCAL_ADHESIONS: true
+    INCLUDE_FOCAL_ADHESIONS: false
+    DEAD_CELLS_DISAPPEAR: false
+    PERIODIC_BOUNDARIES_FOR_CELLS: false
+    INCLUDE_CELL_FNODE_REPULSION: false
+    INCLUDE_FIBRE_NETWORK: false
+    INCLUDE_NETWORK_REMODELING: false
+    INCLUDE_DIFFUSION: false
+    INCLUDE_CHEMOTAXIS: false
+    INCLUDE_CHEMOKINESIS: false
     ORGANOID_ASSAY: true
-    ORGANOID_INIT_RADIUS: 50.0
+    ORGANOID_INIT_RADIUS: 10.0
     VISUALISATION: false
     SHOW_PLOTS: false
-    SAVE_DATA_TO_FILE: true
+    SAVE_DATA_TO_FILE: false
     SAVE_PICKLE: true
+
+

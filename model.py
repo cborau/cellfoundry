@@ -234,7 +234,7 @@ CELL_D_DUMPING = [0.4, 0.4, 0.4]  # [nN·s/um]
 CELL_RADIUS = [8.412, 8.412, 8.412] # [um]
 CELL_NUCLEUS_RADIUS = [r / 2 for r in CELL_RADIUS] # [um]
 CELL_SPEED_REF = [0.00041817020062396415, 0.0006199050301202626, 0.0004034913399763545] # [um/s] Another option is to define it according to grid distance ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / X. WARNING: if cell speed is too high, consider increasing N or reducing TIME_STEP.
-BROWNIAN_MOTION_STRENGTH_FACTOR = [2.5189218869227887, 2.3736333480245912, 3.116570743208639]
+BROWNIAN_MOTION_STRENGTH_FACTOR = [0.001, 0.001, 0.001]
 BROWNIAN_MOTION_STRENGTH = [s * f for s, f in zip(CELL_SPEED_REF, BROWNIAN_MOTION_STRENGTH_FACTOR)]  # [um/s] # [um/s] Strength of random movement added to cell velocity.
 ROTATIONAL_DIFFUSION_RATE = [0.001, 0.001, 0.001]  # [rad^2/s] Rotational diffusion coefficient per cell type. Controls how fast cell orientation decorrelates (persistence time ~ 1/(2*D_rot)). Set > 0 for tortuous random-walk trajectories. e.g. D_rot = 0.001 gives a persistence time of ~500s. 
 CELL_CELL_REPULSION_K = [2.0 * k for k in CELL_K_ELAST]  # [nN/um] contact exclusion stiffness
@@ -311,7 +311,9 @@ CELL_ACUTE_STRESS_THRESHOLD = [25.0, 25.0, 25.0]      # [kPa = nN/um^2] immediat
 # Estimate maximum CELL population for bucket bounds and id allocation.
 # Assumes worst-case synchronized proliferative expansion with the shortest cycle period across all cell types.
 _sim_time_s = STEPS * TIME_STEP
+print(f"Total simulation time: {_sim_time_s/3600:.2f} hours")
 _min_cycle_dur = min(CELL_CYCLE_DURATION) if isinstance(CELL_CYCLE_DURATION, list) else CELL_CYCLE_DURATION
+print(f"Shortest cell cycle duration across types: {_min_cycle_dur/3600:.2f} hours")
 if INCLUDE_CELLS and INCLUDE_CELL_CYCLE and _min_cycle_dur > 0.0:
     _doublings = _sim_time_s / _min_cycle_dur
     MAX_EXPECTED_N_CELLS = max(N_CELLS, int(math.ceil(N_CELLS * (2.0 ** _doublings) * 2.0))) # * 2.0 is a safety factor. 

@@ -35,6 +35,12 @@ python postprocessing/plot_organoid_metrics.py ^
     --pickle1 result_files/organoid/output_data_0.pickle ^
     --target-csv optimizer/reference_data/target_organoid_size.csv
 
+# Overlay a target CSV on the ESR axis of panel 1:
+python postprocessing/plot_organoid_metrics.py ^
+    --pickle1 result_files/organoid/output_data_0.pickle ^
+    --target-csv optimizer/reference_data/target_organoid_size.csv ^
+    --yaxis-idx 2
+
 # Overlay a target CSV on panel 2 (Sphericity):
 python postprocessing/plot_organoid_metrics.py ^
     --pickle1 result_files/organoid/output_data_0.pickle ^
@@ -163,6 +169,7 @@ def plot_organoid_metrics(
     xlim: tuple[float, float] | None = None,
     target_csv: Path | str | None = None,
     target_panel: int = 1,
+    yaxis_idx: int = 1,
 ) -> plt.Figure:
     """Create a 2×2 grid of time-series subplots for the organoid metrics.
 
@@ -181,6 +188,10 @@ def plot_organoid_metrics(
     target_panel : int, optional
         Which panel receives the target scatter (1-4, default 1).
         1 = (1,1), 2 = (1,2), 3 = (2,1), 4 = (2,2).
+    yaxis_idx : int, optional
+        When *target_panel* is 1 (dual y-axis panel), selects which axis
+        receives the scatter: 1 = Radius of gyration (left, default),
+        2 = Equivalent sphere radius (right).
     """
     ylims = ylims or {}
 
@@ -242,16 +253,20 @@ def plot_organoid_metrics(
         ax_rg.set_ylim(ylims["radius_of_gyration"])
     if xlim is not None:
         ax_rg.set_xlim(xlim)
-    # Target scatter on panel 1 (plotted on Rg axis)
+    # Target scatter on panel 1 (plotted on Rg or ESR axis)
     if target_x is not None and target_panel == 1:
         # Preserve data-driven y-limits so scatter doesn't distort dual-axis alignment
         rg_ylim = ax_rg.get_ylim()
         esr_ylim = ax_esr.get_ylim()
-        sc = ax_rg.scatter(target_x, target_y, marker="o", s=30, color="red",
-                           zorder=5, label="target")
+        target_ax = ax_esr if yaxis_idx == 2 else ax_rg
+        sc = target_ax.scatter(target_x, target_y, marker="o", s=30, color="red",
+                               zorder=5, label="target")
         ax_rg.set_ylim(rg_ylim)
         ax_esr.set_ylim(esr_ylim)
-        ln1 = ln1 + [sc]
+        if yaxis_idx == 2:
+            ln2 = ln2 + [sc]
+        else:
+            ln1 = ln1 + [sc]
     lns = ln1 + ln2
     if lns:
         ax_rg.legend(lns, [l.get_label() for l in lns], fontsize=8, loc="upper left")
@@ -411,6 +426,9 @@ def parse_args() -> argparse.Namespace:
                     help="CSV file with 'time,target_metric' columns to overlay as scatter.")
     p.add_argument("--target-panel", type=int, default=1, choices=[1, 2, 3, 4],
                     help="Panel to overlay target scatter on (1-4, default: 1).")
+    p.add_argument("--yaxis-idx", type=int, default=1, choices=[1, 2],
+                    help="For panel 1 (dual y-axis): 1 = Rg (left, default), "
+                         "2 = ESR (right).")
 
     return p.parse_args()
 
@@ -452,6 +470,7 @@ def main() -> None:
         xlim=xlim,
         target_csv=args.target_csv,
         target_panel=args.target_panel,
+        yaxis_idx=args.yaxis_idx,
     )
 
     if args.show:

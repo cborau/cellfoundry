@@ -3,7 +3,7 @@
   "_note_cycle": "Cell-cycle durations set explicitly (G1+S+G2+M = 600 s total). With STEPS=2000 and 10 initial cells, expect ~3 doublings → ~80 cells.",
 
   "___ SIMULATION ___": "-------------------------------------------------------",
-  "STEPS": 288,
+  "STEPS": 240,
   "TIME_STEP": 1800,
   "SAVE_EVERY_N_STEPS": 12,
   "VISUALISATION": false,
