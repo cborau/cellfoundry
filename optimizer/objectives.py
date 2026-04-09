@@ -1207,6 +1207,10 @@ def compute_organoid_metrics(positions: np.ndarray) -> dict[str, float]:
             Ratio of the smallest to largest eigenvalue of the position
             covariance matrix (1.0 = perfect sphere, 0 = fully elongated).
             Requires N ≥ 4; returns 1.0 otherwise.
+        ``mean_nn_distance`` : float
+            Mean nearest-neighbour distance (µm) across all alive cells.
+            A proxy for packing density — lower values indicate tighter
+            packing.  Requires N ≥ 2; returns 0.0 otherwise.
         ``centroid`` : list[float]
             [x, y, z] centroid of the alive-cell cloud.
         ``n_alive`` : int
@@ -1247,11 +1251,21 @@ def compute_organoid_metrics(positions: np.ndarray) -> dict[str, float]:
     else:
         sphericity = 1.0
 
+    # Mean nearest-neighbour distance — measures packing density
+    if n >= 2:
+        from scipy.spatial import KDTree
+        tree = KDTree(positions)
+        dd, _ = tree.query(positions, k=2)  # k=2: self + nearest
+        mean_nn_dist = float(dd[:, 1].mean())
+    else:
+        mean_nn_dist = 0.0
+
     return {
         "radius_of_gyration": rg,
         "max_span": max_span,
         "equivalent_sphere_radius": float(equivalent_r),
         "sphericity": sphericity,
+        "mean_nn_distance": mean_nn_dist,
         "centroid": centroid.tolist(),
         "n_alive": n,
     }
@@ -1271,6 +1285,7 @@ def organoid_error_vtk(results: dict, reference_path: str = None, **kwargs) -> f
         - ``"max_span"`` — maximum inter-cell distance (diameter)
         - ``"equivalent_sphere_radius"`` — Rg * sqrt(5/3)
         - ``"sphericity"`` — eigenvalue ratio (1 = sphere)
+        - ``"mean_nn_distance"`` — mean nearest-neighbour distance (packing)
 
     **Option A — scalar target:**
         Pass ``kwargs["target_metric"]`` (float).
@@ -1334,7 +1349,7 @@ def _get_organoid_metrics_frame(results: dict) -> pd.DataFrame:
     if not isinstance(metrics, pd.DataFrame):
         metrics = pd.DataFrame(metrics)
 
-    required = {"step", "radius_of_gyration", "max_span", "equivalent_sphere_radius", "n_alive", "sphericity"}
+    required = {"step", "radius_of_gyration", "max_span", "equivalent_sphere_radius", "n_alive", "sphericity", "mean_nn_distance"}
     missing = required.difference(metrics.columns)
     if missing:
         raise ValueError(
@@ -1363,7 +1378,8 @@ def organoid_error(results: dict, reference_path: str = None, **kwargs) -> float
     metric : str, default ``"radius_of_gyration"``
         Which organoid metric column to compare.  Choices:
         ``"radius_of_gyration"``, ``"max_span"``,
-        ``"equivalent_sphere_radius"``, ``"sphericity"``, ``"n_alive"``.
+        ``"equivalent_sphere_radius"``, ``"sphericity"``, ``"mean_nn_distance"``,
+        ``"n_alive"``.
 
     **Option A — scalar target (single time-point):**
 

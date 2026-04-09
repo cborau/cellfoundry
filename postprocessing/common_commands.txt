@@ -1,0 +1,3 @@
+python .\postprocessing\plot_organoid_metrics.py --pickle1 .\result_files\output_data_0.pickle --target-csv .\optimizer\reference_data\target_organoid_equiv_sphere.csv --yaxis-idx 2 --show
+python tools/remove_anchors_from_cell_vtks.py 
+python .\postprocessing\plot_organoid_metrics.py --pickle1 .\optimizer\optuna_organoid_results\trial_00271\output_data_0.pickle --target-csv .\optimizer\reference_data\target_organoid_equiv_sphere.csv --yaxis-idx 2 --show

@@ -2849,7 +2849,7 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
     )
 
 
-def recompute_derived_params(ns: dict) -> None:
+def recompute_derived_params(ns: dict, pinned: set | None = None) -> None:
     """Re-compute derived parameters from base values after applying overrides.
 
     Call this after injecting parameter overrides into the model namespace so
@@ -2861,8 +2861,20 @@ def recompute_derived_params(ns: dict) -> None:
     explicitly.
 
     Handles both scalar and list (per-cell-type) parameters transparently.
+
+    Parameters
+    ----------
+    ns : dict
+        Model namespace (typically ``globals()`` from model.py).
+    pinned : set of str, optional
+        Parameter names that were explicitly overridden and must **not** be
+        recomputed.  For example, if the optimizer tunes
+        ``CELL_CELL_DV_MAX`` independently of ``CELL_SPEED_REF``, pass
+        ``{"CELL_CELL_DV_MAX"}`` so the derived ``0.5 * CELL_SPEED_REF``
+        formula does not clobber the tuned value.
     """
     import math
+    pinned = pinned or set()
 
     # Helper: element-wise list operations
     def _is_list(v):
@@ -2921,21 +2933,27 @@ def recompute_derived_params(ns: dict) -> None:
     if "CELL_SPEED_REF" in ns:
         cs = ns["CELL_SPEED_REF"]
         # Use BROWNIAN_MOTION_STRENGTH_FACTOR if present, else default to 2.0
-        if "BROWNIAN_MOTION_STRENGTH_FACTOR" in ns:
-            f = ns["BROWNIAN_MOTION_STRENGTH_FACTOR"]
-            def _mult(a, b):
-                return a * b 
-            ns["BROWNIAN_MOTION_STRENGTH"] = _map2(_mult, cs, f)
-        else:
-            print("Warning: BROWNIAN_MOTION_STRENGTH_FACTOR not found; defaulting to 2.0 for Brownian motion strength calculation.")
-            ns["BROWNIAN_MOTION_STRENGTH"] = _map1(lambda s: s * 2.0, cs)
-        ns["CELL_CELL_DV_MAX"] = _map1(lambda s: 0.5 * s, cs)
-        ns["CELL_FNODE_DV_MAX"] = _map1(lambda s: 0.5 * s, cs)
+        if "BROWNIAN_MOTION_STRENGTH" not in pinned:
+            if "BROWNIAN_MOTION_STRENGTH_FACTOR" in ns:
+                f = ns["BROWNIAN_MOTION_STRENGTH_FACTOR"]
+                def _mult(a, b):
+                    return a * b 
+                ns["BROWNIAN_MOTION_STRENGTH"] = _map2(_mult, cs, f)
+            else:
+                print("Warning: BROWNIAN_MOTION_STRENGTH_FACTOR not found; defaulting to 2.0 for Brownian motion strength calculation.")
+                ns["BROWNIAN_MOTION_STRENGTH"] = _map1(lambda s: s * 2.0, cs)
+        if "CELL_CELL_DV_MAX" not in pinned:
+            ns["CELL_CELL_DV_MAX"] = _map1(lambda s: 0.5 * s, cs)
+        if "CELL_FNODE_DV_MAX" not in pinned:
+            ns["CELL_FNODE_DV_MAX"] = _map1(lambda s: 0.5 * s, cs)
     if "CELL_K_ELAST" in ns:
         ck = ns["CELL_K_ELAST"]
-        ns["CELL_CELL_REPULSION_K"] = _map1(lambda k: 2.0 * k, ck)
-        ns["CELL_CELL_ADHESION_K"] = _map1(lambda k: 0.2 * k, ck)
-        ns["CELL_FNODE_REPULSION_K"] = _map1(lambda k: 0.5 * k, ck)
+        if "CELL_CELL_REPULSION_K" not in pinned:
+            ns["CELL_CELL_REPULSION_K"] = _map1(lambda k: 2.0 * k, ck)
+        if "CELL_CELL_ADHESION_K" not in pinned:
+            ns["CELL_CELL_ADHESION_K"] = _map1(lambda k: 0.2 * k, ck)
+        if "CELL_FNODE_REPULSION_K" not in pinned:
+            ns["CELL_FNODE_REPULSION_K"] = _map1(lambda k: 0.5 * k, ck)
 
     # --- Cycle phase starts (per-type lists or scalars) ---
     g1 = ns.get("CYCLE_PHASE_G1_DURATION")
@@ -3040,7 +3058,15 @@ def apply_param_overrides(ns: dict, overrides: dict) -> None:
                 ns[key] = val
         else:
             print(f"WARNING: override key '{key}' not found in model parameters, ignoring")
-    recompute_derived_params(ns)
+
+    # Collect base parameter names that were explicitly overridden so that
+    # recompute_derived_params does not clobber them.  Element-wise keys
+    # like "CELL_CELL_DV_MAX[0]" are mapped to their base name.
+    pinned: set[str] = set()
+    for key in overrides:
+        m = _idx_re.match(key)
+        pinned.add(m.group(1) if m else key)
+    recompute_derived_params(ns, pinned=pinned)
 
 
 def load_param_overrides_from_cli(argv=None):

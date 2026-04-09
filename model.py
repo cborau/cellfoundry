@@ -239,7 +239,7 @@ BROWNIAN_MOTION_STRENGTH = [s * f for s, f in zip(CELL_SPEED_REF, BROWNIAN_MOTIO
 ROTATIONAL_DIFFUSION_RATE = [0.001, 0.001, 0.001]  # [rad^2/s] Rotational diffusion coefficient per cell type. Controls how fast cell orientation decorrelates (persistence time ~ 1/(2*D_rot)). Set > 0 for tortuous random-walk trajectories. e.g. D_rot = 0.001 gives a persistence time of ~500s. 
 CELL_CELL_REPULSION_K = [2.0 * k for k in CELL_K_ELAST]  # [nN/um] contact exclusion stiffness
 CELL_CELL_ADHESION_K = [0.2 * k for k in CELL_K_ELAST]  # [nN/um] weak cohesion in near-contact shell
-CELL_CELL_ADHESION_RANGE = [0.5 * r for r in CELL_RADIUS]  # [um] adhesive shell thickness outside contact
+CELL_CELL_ADHESION_RANGE = [1.0 * r for r in CELL_RADIUS]  # [um] adhesive shell thickness outside contact
 # Search radius for the cell-cell spatial message.
 # Must cover the farthest distance at which two cells can interact:
 #   contact distance (r1 + r2) + adhesion shell (max of CELL_CELL_ADHESION_RANGE)
@@ -2146,12 +2146,21 @@ class CollectCellMetrics(pyflamegpu.HostFunction):
                     sphericity = float(eigvals.min() / eigvals.max()) if eigvals.max() > 0 else 1.0
                 else:
                     sphericity = 1.0
+                # Mean nearest-neighbour distance
+                if n_alive >= 2:
+                    from scipy.spatial import KDTree
+                    tree = KDTree(pos_arr)
+                    dd, _ = tree.query(pos_arr, k=2)
+                    mean_nn_dist = float(dd[:, 1].mean())
+                else:
+                    mean_nn_dist = 0.0
             else:
                 centroid = np.array([0.0, 0.0, 0.0])
                 rg = 0.0
                 equivalent_r = 0.0
                 max_span = 0.0
                 sphericity = 1.0
+                mean_nn_dist = 0.0
 
             row = pd.DataFrame([{
                 "step": step,
@@ -2162,6 +2171,7 @@ class CollectCellMetrics(pyflamegpu.HostFunction):
                 "equivalent_sphere_radius": equivalent_r,
                 "max_span": max_span,
                 "sphericity": sphericity,
+                "mean_nn_distance": mean_nn_dist,
                 "centroid_x": float(centroid[0]),
                 "centroid_y": float(centroid[1]),
                 "centroid_z": float(centroid[2]),

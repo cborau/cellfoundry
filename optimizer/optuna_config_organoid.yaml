@@ -2,15 +2,24 @@
 # CellFoundry — Organoid Growth Multi-Objective Optimization
 # ============================================================================
 #
-# This config optimizes TWO objectives simultaneously:
+# This config optimizes THREE objectives simultaneously:
 #   1. Organoid size curve (equivalent_sphere_radius vs time → target CSV)
-#   2. Final alive-cell count (→ target 15 cells)
+#   2. Final alive-cell count (→ target CSV)
+#   3. Packing density (mean_nn_distance → keep cells tightly packed)
 #
 # Optuna uses NSGA-II to maintain a Pareto front of trade-off solutions.
 #
+# KEY INSIGHT: CELL_CELL_DV_MAX (the velocity cap on repulsion-driven
+# displacement) defaults to 0.5 * CELL_SPEED_REF. When CELL_SPEED_REF is
+# small, cells cannot push each other apart even under strong overlap.
+# This is why increasing division rate alone did not grow the organoid:
+# newborn cells pile up but repulsion is capped at ~0.5 * CELL_SPEED_REF
+# µm/s, i.e. < 1 µm/step — far too slow to resolve overlaps with R=20 µm
+# cells.  Making CELL_CELL_DV_MAX independently tunable decouples
+# motility from mechanical expansion.
+#
 # IMPORTANT: organoid_error reads ORGANOID_METRICS_OVER_TIME from
 #            the pickle, so ORGANOID_ASSAY and SAVE_PICKLE must be true.
-#            For the VTK-based variant, use organoid_error_vtk instead.
 #
 # Usage:
 #    python -m optimizer.optimize --config optimizer/optuna_config_organoid.yaml
@@ -18,7 +27,7 @@
 
 study:
   name: "cellfoundry_organoid_growth"
-  n_trials: 200
+  n_trials: 2
   sampler: NSGA-II             # auto-selected for multi-obj, but explicit here
   seed: 42
   directions: [minimize, minimize]   # one per objective
@@ -29,14 +38,20 @@ objectives:
   - function: organoid_error
     reference: "optimizer/reference_data/target_organoid_equiv_sphere.csv"
     kwargs:
-      metric: equivalent_sphere_radius   # or: max_span, equivalent_sphere_radius, sphericity
-      # smooth_window: 0           # optional Savitzky-Golay smoothing
+      metric: equivalent_sphere_radius
 
-  - function: final_cell_count_error
-    reference: "optimizer/reference_data/target_cell_count.csv"
+  # - function: final_cell_count_error
+  #   reference: "optimizer/reference_data/target_cell_count.csv"
+  #   kwargs:
+  #     normalize: true
+  #     use_relative_error: true
+
+  # penalise spread-out configs — force compact, tightly-packed growth
+  - function: organoid_error
     kwargs:
-      normalize: true              # average error across target rows
-      use_relative_error: true     # average % errors (better when type populations differ in magnitude)
+      metric: mean_nn_distance
+      target_metric: 40.0          # ≈ 2 × CELL_RADIUS → tight contact packing
+      time_point: "last"
 
 # --- Parameters to tune ----------------------------------------------------
 parameters:
@@ -52,13 +67,61 @@ parameters:
     low: 0.0001
     high: 0.01
     log: true
+  
+  ROTATIONAL_DIFFUSION_RATE:
+    type: float
+    low: 0.0001
+    high: 0.01
+    log: true
 
+  # DIVISION_RATE_MULTIPLIER:
+  #   type: array_float
+  #   elements:
+  #     0: {low: 1.0, high: 100.0}
+  #     1: {low: 1.0, high: 100.0}
+  #     2: {low: 1.0, high: 100.0}
   DIVISION_RATE_MULTIPLIER:
-    type: array_float
-    elements:
-      0: {low: 0.1, high: 10.0}
-      1: {low: 0.1, high: 10.0}
-      2: {low: 0.1, high: 10.0}
+    type: float
+    low: 1.0
+    high: 100.0
+    log: true
+
+  # --- Critical for decoupling motility from mechanical expansion ----------
+  # By default CELL_CELL_DV_MAX = 0.5 * CELL_SPEED_REF, which starves
+  # repulsion displacement when speed is low.  Sweeping it independently
+  # lets repulsion push cells outward regardless of self-propulsion speed.
+  CELL_CELL_DV_MAX:
+    type: float
+    low: 0.0001
+    high: 0.01
+    log: true
+
+  # Adhesion keeps cells cohesive; sweep to balance repulsion vs cohesion
+  CELL_CELL_ADHESION_K:
+    type: float
+    low: 0.1
+    high: 100.0
+    log: false
+
+  CELL_CELL_REPULSION_K:
+    type: float
+    low: 0.1
+    high: 100.0
+    log: false
+
+  # G1 duration dominates the cell cycle (~10 h default); shortening it
+  # accelerates proliferation more directly than DIVISION_RATE_MULTIPLIER
+  # CYCLE_PHASE_G1_DURATION:
+  #   type: array_float
+  #   elements:
+  #     0: {low: 7200.0, high: 72000.0}
+  #     1: {low: 7200.0, high: 72000.0}
+  #     2: {low: 7200.0, high: 72000.0}
+  CYCLE_PHASE_G1_DURATION:
+    type: float
+    low: 7200.0
+    high: 36000.0
+    log: false
 
 
 # --- Model execution settings ----------------------------------------------
@@ -68,8 +131,8 @@ model:
   cleanup_trials: false
 
   extra_overrides:
-    STEPS: 240
-    TIME_STEP: 1800
+    STEPS: 2400
+    TIME_STEP: 180
     SAVE_EVERY_N_STEPS: 12
     INCLUDE_CELLS: true
     INCLUDE_CELL_CELL_INTERACTION: true
@@ -84,7 +147,8 @@ model:
     INCLUDE_CHEMOTAXIS: false
     INCLUDE_CHEMOKINESIS: false
     ORGANOID_ASSAY: true
-    ORGANOID_INIT_RADIUS: 10.0
+    ORGANOID_INIT_RADIUS: 20.0
+    CELL_RADIUS: [20.0, 20.0, 20.0]
     VISUALISATION: false
     SHOW_PLOTS: false
     SAVE_DATA_TO_FILE: false
