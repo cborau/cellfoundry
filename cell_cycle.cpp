@@ -306,13 +306,11 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
         FLAMEGPU->setVariable<float, N_SPECIES>("C_sp", i, agent_C_sp[i]);
       }
 
-      const float shift_parent_x = parent_new_x - old_agent_x;
-      const float shift_parent_y = parent_new_y - old_agent_y;
-      const float shift_parent_z = parent_new_z - old_agent_z;
+      const float new_nucleus_radius = CELL_NUCLEUS_RADIUS / 2;
       for (int i = 0; i < N_ANCHOR_POINTS; i++) {
-        FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("x_i", i, agent_x_i[i] + shift_parent_x);
-        FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("y_i", i, agent_y_i[i] + shift_parent_y);
-        FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("z_i", i, agent_z_i[i] + shift_parent_z);
+        FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("x_i", i, parent_new_x + new_nucleus_radius * agent_u_ref_x_i[i]);
+        FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("y_i", i, parent_new_y + new_nucleus_radius * agent_u_ref_y_i[i]);
+        FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("z_i", i, parent_new_z + new_nucleus_radius * agent_u_ref_z_i[i]);
       }
 
       agent_completed_cycles += 1;
@@ -391,13 +389,11 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
       FLAMEGPU->agent_out.setVariable<float>("focad_birth_cooldown", fmaxf(0.0f, agent_focad_birth_cooldown));
       FLAMEGPU->agent_out.setVariable<float>("damage", damage_share);
 
-      const float shift_daughter_x = daughter_x - old_agent_x;
-      const float shift_daughter_y = daughter_y - old_agent_y;
-      const float shift_daughter_z = daughter_z - old_agent_z;
+      const float daughter_nucleus_radius = CELL_NUCLEUS_RADIUS / 2;
       for (int i = 0; i < N_ANCHOR_POINTS; i++) {
-        FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("x_i", i, agent_x_i[i] + shift_daughter_x);
-        FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("y_i", i, agent_y_i[i] + shift_daughter_y);
-        FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("z_i", i, agent_z_i[i] + shift_daughter_z);
+        FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("x_i", i, daughter_x + daughter_nucleus_radius * agent_u_ref_x_i[i]);
+        FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("y_i", i, daughter_y + daughter_nucleus_radius * agent_u_ref_y_i[i]);
+        FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("z_i", i, daughter_z + daughter_nucleus_radius * agent_u_ref_z_i[i]);
         FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("u_ref_x_i", i, agent_u_ref_x_i[i]);
         FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("u_ref_y_i", i, agent_u_ref_y_i[i]);
         FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("u_ref_z_i", i, agent_u_ref_z_i[i]);
@@ -450,6 +446,19 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
     FLAMEGPU->setVariable<float>("radius", fminf(agent_radius, CELL_RADIUS));
     FLAMEGPU->setVariable<float>("nucleus_radius", fminf(agent_nucleus_radius, CELL_NUCLEUS_RADIUS));
   }
+  // Recompute anchor positions from u_ref at current nucleus_radius.
+  // Required because nucleus_radius changes continuously (growth + division)
+  // and cell_focad_update (which handles this) only runs when focal adhesions are enabled.
+  agent_nucleus_radius = FLAMEGPU->getVariable<float>("nucleus_radius");
+  agent_x = FLAMEGPU->getVariable<float>("x");
+  agent_y = FLAMEGPU->getVariable<float>("y");
+  agent_z = FLAMEGPU->getVariable<float>("z");
+  for (int i = 0; i < N_ANCHOR_POINTS; i++) {
+    FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("x_i", i, agent_x + agent_nucleus_radius * agent_u_ref_x_i[i]);
+    FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("y_i", i, agent_y + agent_nucleus_radius * agent_u_ref_y_i[i]);
+    FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("z_i", i, agent_z + agent_nucleus_radius * agent_u_ref_z_i[i]);
+  }
+
   FLAMEGPU->setVariable<float>("vx", agent_vx);
   FLAMEGPU->setVariable<float>("vy", agent_vy);
   FLAMEGPU->setVariable<float>("vz", agent_vz);

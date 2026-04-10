@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import pathlib
 import pickle
+
 import sys
+import argparse
 from collections.abc import Mapping, Sequence
 
 try:
@@ -136,7 +138,17 @@ def load_pickle(pickle_path: pathlib.Path):
 
 
 def main() -> None:
-    pickle_path = DEFAULT_PICKLE_PATH
+
+    parser = argparse.ArgumentParser(description="Summarize contents of a pickle file.")
+    parser.add_argument(
+        "--pickle",
+        type=str,
+        default=str(DEFAULT_PICKLE_PATH),
+        help=f"Path to pickle file (default: {DEFAULT_PICKLE_PATH})",
+    )
+    args = parser.parse_args()
+
+    pickle_path = pathlib.Path(args.pickle)
 
     if not pickle_path.exists():
         raise FileNotFoundError(f"Pickle file not found: {pickle_path}")

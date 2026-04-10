@@ -131,7 +131,15 @@ def load_organoid_metrics(results: dict[str, Any]) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 # Colour palette for per-type curves
-TYPE_COLORS = ["#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#9467bd", "#8c564b"]
+# TYPE_COLORS = ["#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#9467bd", "#8c564b"]
+
+TYPE_COLORS  = [
+    "#b6d73a",  # lime 
+    "#3bb29f",  # teal 
+    "#8a00a8",  # purple 
+    "#ff7f0e",  # orange
+    "#1f77b4",  # blue  
+]
 
 # Default colours for two conditions
 COLORS_1 = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
