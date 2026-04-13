@@ -18,9 +18,9 @@
 
 study:
   name: "cellfoundry_cell_speed_tgfb_chemokinesis"
-  n_trials: 500
+  n_trials: 200
   sampler: TPE
-  seed: 42
+  seed: 20
   direction: minimize
   storage: "sqlite:///cellfoundry_cell_speed.db"
 
@@ -35,71 +35,23 @@ objective:
     min_trajectory_time: 1.0
 
 parameters:
-  # CELL_SPEED_REF:
-  #   type: array_float
-  #   elements:
-  #     0: {low: 0.0001, high: 0.005}
-  #     1: {low: 0.0001, high: 0.005}
-  #     2: {low: 0.0001, high: 0.005}
-
-  # BROWNIAN_MOTION_STRENGTH_FACTOR:
-  #   type: array_float
-  #   elements:
-  #     0: {low: 0.0, high: 10.0}
-  #     1: {low: 0.0, high: 10.0}
-  #     2: {low: 0.0, high: 10.0}
-
-  ROTATIONAL_DIFFUSION_RATE:
+  BROWNIAN_MOTION_STRENGTH_FACTOR:
     type: array_float
     elements:
-      0: {low: 0.0001, high: 0.001}
-      1: {low: 0.0001, high: 0.001}
-      2: {low: 0.0001, high: 0.001}
-
-  CHEMOKINESIS_SENSITIVITY:
-    type: array_float
-    elements:
-      0: {low: -100.0, high: 100.0}
+      0: {low: 2.5, high: 3.8}
+      1: {low: 1.5, high: 2.6}
+      2: {low: 3.2, high: 4.3}
 
   CHEMOKINESIS_ALPHA:
     type: array_float
     elements:
-      0: {low: 0.0, high: 1.0}
-      1: {low: 0.0, high: 1.0}
-      2: {low: 0.0, high: 1.0}
+      0: {low: -0.3, high: 0.4}
+      1: {low: -1.0, high: -0.3}
+      2: {low: 0.0, high: 0.6}
 
-  CHEMOKINESIS_K:
-    type: array_float
-    elements:
-      0: {low: 0.1, high: 10.0}
-      1: {low: 0.1, high: 10.0}
-      2: {low: 0.1, high: 10.0}
-
-  # CHEMOKINESIS_HILL_N:
-  #   type: array_float
-  #   elements:
-  #     0: {low: 1.0, high: 4.0}
-  #     1: {low: 1.0, high: 4.0}
-  #     2: {low: 1.0, high: 4.0}
-
-  # CHEMOKINESIS_ADAPT_TAU:
-  #   type: array_float
-  #   elements:
-  #     0: {low: 1.0, high: 300.0}
-  #     1: {low: 1.0, high: 300.0}
-  #     2: {low: 1.0, high: 300.0}
-
-  # CHEMOKINESIS_SIGNAL_SAT:
-  #   type: array_float
-  #   elements:
-  #     0: {low: 0.0, high: 50.0}
-
-  # CHEMOKINESIS_SIGNAL_SAT_MULTIPLIER:
-  #   type: array_float
-  #   elements:
-  #     0: {low: 0.0, high: 1.0}
-  #     1: {low: 0.0, high: 1.0}
-  #     2: {low: 0.0, high: 1.0}
+  # Other chemokinesis params (SENSITIVITY, K, HILL_N, SAT, SAT_MULT, ADAPT_TAU)
+  # are fixed in extra_overrides below. With constant uniform C=2.5, they are
+  # degenerate with ALPHA — optimizing them just adds redundant search dimensions.
 
 
 model:
@@ -112,6 +64,7 @@ model:
     SAVE_EVERY_N_STEPS: 20
     PERIODIC_BOUNDARIES_FOR_CELLS: false # if True, veff has no meaning, so should be removed from the target file.
     INCLUDE_CELLS: true
+    N_CELLS: 100
     ORGANOID_ASSAY: false
     INCLUDE_CELL_CYCLE: false
     INCLUDE_FIBRE_NETWORK: false
@@ -127,8 +80,7 @@ model:
     # One diffusing species at constant 2.5; metabolism OFF
     N_SPECIES: 2
     CELL_SPEED_REF: [0.00039467864789234224,0.0006043654028727149,0.00032985670642352277] # values from best trial in optuna_config_cell_speed_control.yaml
-    BROWNIAN_MOTION_STRENGTH_FACTOR: [2.7345157865818357,2.371752746142436,3.5304819148493047]
-    ROTATIONAL_DIFFUSION_RATE: [0.0003757389100327902,0.0006028399869074992,0.0003342841399542819]
+    ROTATIONAL_DIFFUSION_RATE: [0.0003757389100327902, 0.0006028399869074992, 0.0003342841399542819] # fixed from control; analytical solutions feasible at 0.001-0.005
     INIT_ECM_CONCENTRATION_VALS: [2.5, 0.0]
     INIT_CELL_CONCENTRATION_VALS: [2.5, 0.0]
     BOUNDARY_CONC_INIT_MULTI: [[2.5, 2.5, 2.5, 2.5, 2.5, 2.5], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]
@@ -136,3 +88,9 @@ model:
     INIT_CELL_CONSUMPTION_RATES: [0.0, 0.0]
     INIT_CELL_PRODUCTION_RATES: [0.0, 0.0]
     INIT_CELL_REACTION_RATES: [0.0, 0.0]
+    # Fix chemokinesis signal chain to a clean constant (no adaptation decay)
+    CHEMOKINESIS_SENSITIVITY: [1.0, 0.0]        # species 0 is promotive
+    CHEMOKINESIS_ADAPT_TAU: [1000000.0, 1000000.0, 1000000.0] # disable adaptation for constant stimulus
+    CHEMOKINESIS_SIGNAL_SAT: [50.0, 50.0]        # effectively no saturation
+    CHEMOKINESIS_SIGNAL_SAT_MULTIPLIER: [1.0, 1.0, 1.0]
+    CELL_INIT_CONCENTRATION_MULTIPLIER: [0.0, 0.0, 0.0]  # start cells unadapted so chemokinesis_factor != 1
