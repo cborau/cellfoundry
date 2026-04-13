@@ -1,3 +1,7 @@
 python .\postprocessing\plot_organoid_metrics.py --pickle1 .\result_files\output_data_0.pickle --target-csv .\optimizer\reference_data\target_organoid_equiv_sphere.csv --yaxis-idx 2 --show
 python tools/remove_anchors_from_cell_vtks.py 
 python .\postprocessing\plot_organoid_metrics.py --pickle1 .\optimizer\optuna_organoid_results\trial_00271\output_data_0.pickle --target-csv .\optimizer\reference_data\target_organoid_equiv_sphere.csv --yaxis-idx 2 --show
+python postprocessing/plot_migration_results.py --pickle result_files\output_data_0.pickle --target optimizer\reference_data\target_cell_speed_control.csv
+python postprocessing/plot_migration_results.py --pickle .\optimizer\optuna_cell_speed_control_results\trial_00718\output_data_0.pickle --target optimizer\reference_data\target_cell_speed_control.csv
+python postprocessing/plot_migration_comparison.py --pickle1 result_files\output_data_0.pickle --target1 optimizer\reference_data\target_cell_speed_control.csv
+python postprocessing/plot_migration_comparison.py --pickle1 result_files\output_data_0.pickle --pickle2 result_files\output_data_0.pickle --target1 optimizer\reference_data\target_cell_speed_control.csv --target2 optimizer\reference_data\target_cell_speed_control.csv --vtk-dir1 result_files\ --vtk-dir2 result_files\

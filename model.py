@@ -85,7 +85,7 @@ BOUNDARY_STIFFNESS_VALUE = 10.0  # nN/um
 BOUNDARY_DUMPING_VALUE = 5.0
 BOUNDARY_STIFFNESS = [BOUNDARY_STIFFNESS_VALUE * x for x in RELATIVE_BOUNDARY_STIFFNESS]
 BOUNDARY_DUMPING = [BOUNDARY_DUMPING_VALUE * x for x in RELATIVE_BOUNDARY_STIFFNESS]
-CLAMP_AGENT_TOUCHING_BOUNDARY = [0, 0, 1, 1, 0, 0]# +X,-X,+Y,-Y,+Z,-Z [bool] - shear assay
+CLAMP_AGENT_TOUCHING_BOUNDARY = [1, 1, 1, 1, 1, 1]# +X,-X,+Y,-Y,+Z,-Z [bool] - shear assay
 #CLAMP_AGENT_TOUCHING_BOUNDARY = [1, 1, 1, 1, 1, 1]# +X,-X,+Y,-Y,+Z,-Z [bool]
 ALLOW_AGENT_SLIDING = [0, 0, 0, 0, 0, 0]# +X,-X,+Y,-Y,+Z,-Z [bool]
 
@@ -164,12 +164,12 @@ MAX_CONNECTIVITY = 8 # must match hard-coded C++ values
 # They depend on collagen type/concentration, crosslinking, architecture and coarse-graining choices.
 FIBRE_SEGMENT_K_ELAST = 0.08  # [nN/um] Effective fibre-segment stiffness (baseline for tuning)
 FIBRE_SEGMENT_D_DUMPING = 0.0  # [nN*s/um] Effective fibre-segment damping (baseline for tuning)
-FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE = 45 # WARNING: must match the value used in network generation
+FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE = 5 # WARNING: must match the value used in network generation
 FIBRE_SECTION_AREA_UM2 = 0.05  # [um^2] Approximate collagen-fibre cross-section used for effective stress normalization
 FIBRE_NODE_BOUNDARY_INTERACTION_RADIUS = 0.05
 FIBRE_NODE_BOUNDARY_EQUILIBRIUM_DISTANCE = 0.0
 MAX_SEARCH_RADIUS_FNODES = FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE / 10.0 # must me smaller than FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
-FIBRE_NODE_REPULSION_K = 0.0 * FIBRE_SEGMENT_K_ELAST  # [nN/um] Short-range FNODE-FNODE exclusion stiffness (kept below segment stiffness)
+FIBRE_NODE_REPULSION_K = 0.2 * FIBRE_SEGMENT_K_ELAST  # [nN/um] Short-range FNODE-FNODE exclusion stiffness (kept below segment stiffness)
 # WARNING: THESE VARIABLES SIZE DEPENDS ON N_CELL_TYPES (DEFINED BELOW IN THE CELL PARAMETERS SECTION)
 # FNODE remodeling (degradation/deposition + birth/death)
 INCLUDE_NETWORK_REMODELING = False

@@ -1,0 +1,126 @@
+{
+  "_comment": "SHOWCASE: Cell migration with focal adhesions & fibre network deformation.",
+  "_note": "100 cells migrating in a fibre network. Focal adhesions ON, nuclei deformation exaggerated. Diffusion, cell cycle, chemotaxis/kinesis OFF.",
+
+  "___ SIMULATION ___": "-------------------------------------------------------",
+  "STEPS": 3000,
+  "TIME_STEP": 1.0,
+  "SAVE_EVERY_N_STEPS": 10,
+  "VISUALISATION": false,
+  "SHOW_PLOTS": false,
+  "SAVE_DATA_TO_FILE": true,
+  "SAVE_PICKLE": true,
+  "DEBUG_PRINTING": false,
+
+  "___ DOMAIN ___": "-----------------------------------------------------------",
+  "BOUNDARY_COORDS": [500.0, -500.0, 500.0, -500.0, 500.0, -500.0],
+
+  "___ CELL INIT ___": "-------------------------------------------------------",
+  "ORGANOID_ASSAY": false,
+  "N_CELLS": 100,
+
+  "___ FEATURE FLAGS ___": "----------------------------------------------------",
+  "INCLUDE_CELLS": true,
+  "INCLUDE_CELL_CELL_INTERACTION": true,
+  "INCLUDE_CELL_CYCLE": false,
+  "DEAD_CELLS_DISAPPEAR": false,
+  "PERIODIC_BOUNDARIES_FOR_CELLS": false,
+
+  "INCLUDE_FIBRE_NETWORK": true,
+  "NETWORK_FILE": "network_medium_density.pkl",
+  "INCLUDE_CELL_FNODE_REPULSION": true,
+  "INCLUDE_NETWORK_REMODELING": false,
+
+  "INCLUDE_FOCAL_ADHESIONS": true,
+  "INCLUDE_LINC_COUPLING": true,
+
+  "INCLUDE_DIFFUSION": false,
+  "INCLUDE_CHEMOTAXIS": false,
+  "INCLUDE_CHEMOKINESIS": false,
+  "INCLUDE_DUROTAXIS": false,
+
+  "___ CELL SIZE ___": "-------------------------------------------------------",
+  "CELL_RADIUS": [10.0, 10.0, 10.0],
+  "CELL_NUCLEUS_RADIUS": [5.0, 5.0, 5.0],
+
+  "___ CELL MIGRATION ___": "---------------------------------------------------",
+  "CELL_SPEED_REF": [0.08, 0.08, 0.08],
+  "BROWNIAN_MOTION_STRENGTH_FACTOR": [0.5, 0.5, 0.5],
+  "ROTATIONAL_DIFFUSION_RATE": [0.005, 0.005, 0.005],
+
+  "___ CELL MECHANICS ___": "---------------------------------------------------",
+  "CELL_K_ELAST": [2.0, 2.0, 2.0],
+  "CELL_D_DUMPING": [0.4, 0.4, 0.4],
+
+  "___ CELL-CELL INTERACTION ___": "--------------------------------------------",
+  "CELL_CELL_REPULSION_K": [4.0, 4.0, 4.0],
+  "CELL_CELL_ADHESION_K": [0.2, 0.2, 0.2],
+  "CELL_CELL_DV_MAX": [0.01, 0.01, 0.01],
+
+  "___ CELL-FNODE REPULSION ___": "---------------------------------------------",
+  "CELL_FNODE_REPULSION_K": [1.0, 1.0, 1.0],
+  "CELL_FNODE_DV_MAX": [0.01, 0.01, 0.01],
+
+  "___ FIBRE NETWORK MECHANICS ___": "------------------------------------------",
+  "FIBRE_SEGMENT_K_ELAST": 0.04,
+  "FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE": 5,
+  "FIBRE_NODE_REPULSION_K": 0.02,
+  "BUCKLING_COEFF_D0": 0.15,
+  "STRAIN_STIFFENING_COEFF_DS": 0.85,
+  "CRITICAL_STRAIN": 0.1,
+  "MAX_STRAIN_K_FACTOR": 12.0,
+
+  "___ FOCAL ADHESION GEOMETRY & MECHANICS (exaggerated for visible deformation) ___": "",
+  "INIT_N_FOCAD_PER_CELL": 12,
+  "N_ANCHOR_POINTS": 50,
+  "ENABLE_FOCAD_BIRTH": true,
+  "FOCAD_K_FA": [15.0, 15.0, 15.0],
+  "FOCAD_F_MAX": [0.0, 0.0, 0.0],
+  "FOCAD_V_C": [0.4, 0.4, 0.4],
+  "MAX_SEARCH_RADIUS_FOCAD": 15.0,
+
+  "___ FOCAL ADHESION BINDING KINETICS ___": "-----------------------------------",
+  "FOCAD_K_ON": [8.0, 8.0, 8.0],
+  "FOCAD_K_OFF_0": [0.0001, 0.0001, 0.0001],
+  "FOCAD_F_C": [5.0, 5.0, 5.0],
+  "USE_CATCH_BOND": true,
+  "CATCH_BOND_CATCH_SCALE": [4.0, 4.0, 4.0],
+  "CATCH_BOND_SLIP_SCALE": [0.2, 0.2, 0.2],
+  "CATCH_BOND_F_CATCH": [2.0, 2.0, 2.0],
+  "CATCH_BOND_F_SLIP": [4.0, 4.0, 4.0],
+
+  "___ FOCAL ADHESION REINFORCEMENT ___": "--------------------------------------",
+  "FOCAD_K_REINF": [0.005, 0.005, 0.005],
+  "FOCAD_F_REINF": [1.0, 1.0, 1.0],
+  "FOCAD_K_FA_MAX": [80.0, 80.0, 80.0],
+  "FOCAD_K_FA_DECAY": [0.0, 0.0, 0.0],
+
+  "___ FOCAL ADHESION STATE TRANSITIONS ___": "-----------------------------------",
+  "FOCAD_F_MATURE": [0.5, 0.5, 0.5],
+  "FOCAD_T_NASCENT_MAX": [120.0, 120.0, 120.0],
+  "FOCAD_T_DETACHED_GRACE": [30.0, 30.0, 30.0],
+  "FOCAD_T_DISASSEMBLY": [20.0, 20.0, 20.0],
+
+  "___ FOCAD POLARITY ___": "---------------------------------------------------",
+  "FOCAD_POLARITY_KON_FRONT_GAIN": [2.0, 2.0, 2.0],
+  "FOCAD_POLARITY_KOFF_FRONT_REDUCTION": [0.5, 0.5, 0.5],
+  "FOCAD_POLARITY_KOFF_REAR_GAIN": [1.5, 1.5, 1.5],
+
+  "___ FOCAD BIRTH ___": "------------------------------------------------------",
+  "FOCAD_BIRTH_N_MIN": [2.0, 2.0, 2.0],
+  "FOCAD_BIRTH_N_MAX": [36.0, 36.0, 36.0],
+  "FOCAD_BIRTH_K_0": [0.005, 0.005, 0.005],
+  "FOCAD_BIRTH_K_MAX": [0.05, 0.05, 0.05],
+  "FOCAD_BIRTH_REFRACTORY": [15.0, 15.0, 15.0],
+
+  "___ LINC COMPLEX (exaggerated for visible nucleus deformation) ___": "--------",
+  "LINC_K_ELAST": [3.0, 3.0, 3.0],
+  "LINC_D_DUMPING": [0.0, 0.0, 0.0],
+  "LINC_REST_LENGTH": [0.0, 0.0, 0.0],
+
+  "___ NUCLEUS MECHANICS (softened for exaggerated deformation) ___": "-----------",
+  "NUCLEUS_E": [0.3, 0.3, 0.3],
+  "NUCLEUS_NU": [0.48, 0.48, 0.48],
+  "NUCLEUS_TAU": [0.1, 0.1, 0.1],
+  "NUCLEUS_EPS_CLAMP": [0.60, 0.60, 0.60]
+}

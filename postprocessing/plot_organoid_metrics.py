@@ -46,6 +46,11 @@ python postprocessing/plot_organoid_metrics.py ^
     --pickle1 result_files/organoid/output_data_0.pickle ^
     --target-csv optimizer/reference_data/target_organoid_sphericity.csv ^
     --target-panel 2
+
+# Overlay target cell counts as horizontal lines on panel 4:
+python postprocessing/plot_organoid_metrics.py ^
+    --pickle1 result_files/organoid/output_data_0.pickle ^
+    --target-cell-count-csv optimizer/reference_data/target_cell_count.csv
 """
 
 from __future__ import annotations
@@ -178,6 +183,7 @@ def plot_organoid_metrics(
     target_csv: Path | str | None = None,
     target_panel: int = 1,
     yaxis_idx: int = 1,
+    target_cell_count_csv: Path | str | None = None,
 ) -> plt.Figure:
     """Create a 2×2 grid of time-series subplots for the organoid metrics.
 
@@ -200,6 +206,10 @@ def plot_organoid_metrics(
         When *target_panel* is 1 (dual y-axis panel), selects which axis
         receives the scatter: 1 = Radius of gyration (left, default),
         2 = Equivalent sphere radius (right).
+    target_cell_count_csv : path, optional
+        CSV file with ``cell_type,target_count`` columns.  Per-type rows
+        (cell_type >= 0) are drawn as dashed horizontal lines on panel 4
+        using the matching TYPE_COLORS colour.
     """
     ylims = ylims or {}
 
@@ -235,22 +245,22 @@ def plot_organoid_metrics(
     color_esr = "#2ca02c"
     if "radius_of_gyration" in df1.columns:
         ln1 = ax_rg.plot(x1, df1["radius_of_gyration"].values, color=color_rg,
-                         linewidth=1.5, label=f"Rg — {label1}")
+                         linewidth=1.5, label=("Rg" if not label1 else f"Rg — {label1}"))
     else:
         ln1 = []
     ax_esr = ax_rg.twinx()
     if "equivalent_sphere_radius" in df1.columns:
         ln2 = ax_esr.plot(x1, df1["equivalent_sphere_radius"].values, color=color_esr,
-                          linewidth=1.5, linestyle="--", label=f"Equiv. R — {label1}")
+                          linewidth=1.5, linestyle="--", label=("Equiv. R" if not label1 else f"Equiv. R — {label1}"))
     else:
         ln2 = []
     if df2 is not None:
         if "radius_of_gyration" in df2.columns:
             ln1 += ax_rg.plot(x2, df2["radius_of_gyration"].values, color=color_rg,
-                              linewidth=1.5, linestyle=":", alpha=0.7, label=f"Rg — {label2}")
+                              linewidth=1.5, linestyle=":", alpha=0.7, label=("Rg" if not label2 else f"Rg — {label2}"))
         if "equivalent_sphere_radius" in df2.columns:
             ln2 += ax_esr.plot(x2, df2["equivalent_sphere_radius"].values, color=color_esr,
-                               linewidth=1.5, linestyle=":", alpha=0.7, label=f"Equiv. R — {label2}")
+                               linewidth=1.5, linestyle=":", alpha=0.7, label=("Equiv. R" if not label2 else f"Equiv. R — {label2}"))
     ax_rg.set_xlabel(xlabel, fontsize=11)
     ax_rg.set_ylabel("Radius of gyration (µm)", fontsize=11, color=color_rg)
     ax_esr.set_ylabel("Equiv. sphere radius (µm)", fontsize=11, color=color_esr)
@@ -322,22 +332,24 @@ def plot_organoid_metrics(
     # --- (2,2) Number of alive cells (total + per type) ---
     ax_n = axes[1, 1]
     if "n_alive" in df1.columns:
-        ax_n.plot(x1, df1["n_alive"].values, color=COLORS_1[3], linewidth=2, label=f"total — {label1}")
+        ax_n.plot(x1, df1["n_alive"].values, color=COLORS_1[3], linewidth=2,
+                  label=(f"total — {label1}" if label1 else "total"))
     # Per-type curves from n_alive_type column
     if "n_alive_type" in df1.columns:
         type_arr1 = _parse_n_alive_type(df1["n_alive_type"])
         for ti in range(type_arr1.shape[1]):
             ax_n.plot(x1, type_arr1[:, ti], color=TYPE_COLORS[ti % len(TYPE_COLORS)],
-                      linewidth=1.2, label=f"type {ti} — {label1}")
+                      linewidth=1.2, label=(f"type {ti} — {label1}" if label1 else f"type {ti}"))
     if df2 is not None:
         if "n_alive" in df2.columns:
             ax_n.plot(x2, df2["n_alive"].values, color=COLORS_2[3], linewidth=2,
-                      linestyle="--", label=f"total — {label2}")
+                      linestyle="--", label=(f"total — {label2}" if label2 else "total"))
         if "n_alive_type" in df2.columns:
             type_arr2 = _parse_n_alive_type(df2["n_alive_type"])
             for ti in range(type_arr2.shape[1]):
                 ax_n.plot(x2, type_arr2[:, ti], color=TYPE_COLORS[ti % len(TYPE_COLORS)],
-                          linewidth=1.2, linestyle="--", alpha=0.7, label=f"type {ti} — {label2}")
+                          linewidth=1.2, linestyle="--", alpha=0.7,
+                          label=(f"type {ti} — {label2}" if label2 else f"type {ti}"))
     if target_x is not None and target_panel == 4:
         ax_n.scatter(target_x, target_y, marker="o", s=30, color="red",
                      zorder=5, label="target")
@@ -349,6 +361,20 @@ def plot_organoid_metrics(
     if xlim is not None:
         ax_n.set_xlim(xlim)
     ax_n.legend(fontsize=8, loc="best")
+
+    # Dashed horizontal lines for target cell counts per type
+    if target_cell_count_csv is not None:
+        tgt_cc = pd.read_csv(target_cell_count_csv)
+        if "cell_type" not in tgt_cc.columns or "target_count" not in tgt_cc.columns:
+            raise ValueError("Target cell count CSV must contain 'cell_type' and 'target_count' columns.")
+        for _, row in tgt_cc.iterrows():
+            ct = int(row["cell_type"])
+            if ct < 0:
+                continue  # skip aggregate row
+            clr = TYPE_COLORS[ct % len(TYPE_COLORS)]
+            ax_n.axhline(row["target_count"], color=clr, linestyle="--",
+                         linewidth=1.2, alpha=0.8, label=f"target type {ct}")
+        ax_n.legend(fontsize=8, loc="best")
 
     # Secondary y-axis: scatter points at final time showing percentage of total
     if "n_alive" in df1.columns and len(df1) > 0:
@@ -377,7 +403,14 @@ def plot_organoid_metrics(
                 ax_pct.scatter(x_final, pct, marker="o", s=40, color=clr,
                                zorder=5, edgecolors="black", linewidths=0.5)
 
-    fig.tight_layout()
+    fig.subplots_adjust(
+        top=0.981,
+        bottom=0.089,
+        left=0.111,
+        right=0.908,
+        hspace=0.238,
+        wspace=0.584,
+    )
     return fig
 
 
@@ -437,6 +470,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--yaxis-idx", type=int, default=1, choices=[1, 2],
                     help="For panel 1 (dual y-axis): 1 = Rg (left, default), "
                          "2 = ESR (right).")
+    p.add_argument("--target-cell-count-csv", type=str, default=None,
+                    help="CSV with 'cell_type,target_count' columns; draws dashed "
+                         "horizontal lines on panel 4 for each cell type.")
 
     return p.parse_args()
 
@@ -479,7 +515,9 @@ def main() -> None:
         target_csv=args.target_csv,
         target_panel=args.target_panel,
         yaxis_idx=args.yaxis_idx,
+        target_cell_count_csv=args.target_cell_count_csv,
     )
+        
 
     if args.show:
         plt.show()
@@ -488,8 +526,12 @@ def main() -> None:
         out_dir.mkdir(parents=True, exist_ok=True)
         out_name = args.output if args.output else "organoid_metrics.png"
         out_path = out_dir / out_name
-        fig.savefig(str(out_path), dpi=args.dpi, bbox_inches="tight")
+        fig.savefig(str(out_path), dpi=args.dpi)
         print(f"Saved: {out_path}")
+        
+    w, h = fig.get_size_inches()
+    print(f"{w:.2f} x {h:.2f} inches after manual resize")   
+        
     plt.close(fig)
 
 

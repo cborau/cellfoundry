@@ -1,0 +1,83 @@
+{
+  "_comment": "SHOWCASE: Cell-driven ECM reinforcement, degradation, creation & removal.",
+  "_note": "Cells actively degrade, deposit, and birth/remove fibre nodes. Focal adhesions OFF, diffusion OFF, cell cycle OFF.",
+
+  "___ SIMULATION ___": "-------------------------------------------------------",
+  "STEPS": 3000,
+  "TIME_STEP": 1.0,
+  "SAVE_EVERY_N_STEPS": 10,
+  "VISUALISATION": false,
+  "SHOW_PLOTS": false,
+  "SAVE_DATA_TO_FILE": true,
+  "SAVE_PICKLE": true,
+  "DEBUG_PRINTING": false,
+
+  "___ DOMAIN ___": "-----------------------------------------------------------",
+  "BOUNDARY_COORDS": [500.0, -500.0, 500.0, -500.0, 500.0, -500.0],
+
+  "___ CELL INIT ___": "-------------------------------------------------------",
+  "ORGANOID_ASSAY": false,
+  "N_CELLS": 50,
+
+  "___ FEATURE FLAGS ___": "----------------------------------------------------",
+  "INCLUDE_CELLS": true,
+  "INCLUDE_CELL_CELL_INTERACTION": true,
+  "INCLUDE_CELL_CYCLE": false,
+  "DEAD_CELLS_DISAPPEAR": false,
+  "PERIODIC_BOUNDARIES_FOR_CELLS": false,
+
+  "INCLUDE_FIBRE_NETWORK": true,
+  "NETWORK_FILE": "network_medium_density.pkl",
+  "INCLUDE_CELL_FNODE_REPULSION": true,
+  "INCLUDE_NETWORK_REMODELING": true,
+
+  "INCLUDE_FOCAL_ADHESIONS": false,
+  "INCLUDE_LINC_COUPLING": false,
+
+  "INCLUDE_DIFFUSION": false,
+  "INCLUDE_CHEMOTAXIS": false,
+  "INCLUDE_CHEMOKINESIS": false,
+  "INCLUDE_DUROTAXIS": false,
+
+  "___ CELL SIZE ___": "-------------------------------------------------------",
+  "CELL_RADIUS": [10.0, 10.0, 10.0],
+
+  "___ CELL MIGRATION ___": "---------------------------------------------------",
+  "CELL_SPEED_REF": [0.05, 0.05, 0.05],
+  "BROWNIAN_MOTION_STRENGTH_FACTOR": [0.3, 0.3, 0.3],
+  "ROTATIONAL_DIFFUSION_RATE": [0.003, 0.003, 0.003],
+
+  "___ CELL MECHANICS ___": "---------------------------------------------------",
+  "CELL_K_ELAST": [2.0, 2.0, 2.0],
+  "CELL_D_DUMPING": [0.4, 0.4, 0.4],
+
+  "___ CELL-CELL INTERACTION ___": "--------------------------------------------",
+  "CELL_CELL_REPULSION_K": [4.0, 4.0, 4.0],
+  "CELL_CELL_ADHESION_K": [0.2, 0.2, 0.2],
+  "CELL_CELL_DV_MAX": [0.005, 0.005, 0.005],
+
+  "___ CELL-FNODE REPULSION ___": "---------------------------------------------",
+  "CELL_FNODE_REPULSION_K": [1.0, 1.0, 1.0],
+  "CELL_FNODE_DV_MAX": [0.005, 0.005, 0.005],
+
+  "___ FIBRE NETWORK MECHANICS ___": "------------------------------------------",
+  "FIBRE_SEGMENT_K_ELAST": 0.06,
+  "FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE": 5,
+  "FIBRE_NODE_REPULSION_K": 0.02,
+  "BUCKLING_COEFF_D0": 0.15,
+  "STRAIN_STIFFENING_COEFF_DS": 0.85,
+  "CRITICAL_STRAIN": 0.1,
+  "MAX_STRAIN_K_FACTOR": 12.0,
+
+  "___ NETWORK REMODELING: DEGRADATION & DEPOSITION (aggressive rates) ___": "---",
+  "FNODE_DEGRADATION_RATE": [5.0e-3, 5.0e-3, 5.0e-3],
+  "FNODE_DEPOSITION_RATE": [2.0e-3, 2.0e-3, 2.0e-3],
+  "FNODE_CELL_DEGRADATION_RADIUS": 5.0,
+
+  "___ FNODE BIRTH (cell-driven ECM creation, aggressive) ___": "----------------",
+  "FNODE_BIRTH_K_0": [5.0, 5.0, 5.0],
+  "FNODE_BIRTH_K_MAX": [5.0, 5.0, 5.0],
+  "FNODE_BIRTH_RADIUS": [3.0, 3.0, 3.0],
+  "FNODE_BIRTH_LINK_MAX_DISTANCE": [12.0, 12.0, 12.0],
+  "FNODE_BIRTH_REFRACTORY": [10.0, 10.0, 10.0]
+}

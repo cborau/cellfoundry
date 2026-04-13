@@ -42,12 +42,19 @@ parameters:
   #     1: {low: 0.0001, high: 0.005}
   #     2: {low: 0.0001, high: 0.005}
 
-  BROWNIAN_MOTION_STRENGTH_FACTOR:
+  # BROWNIAN_MOTION_STRENGTH_FACTOR:
+  #   type: array_float
+  #   elements:
+  #     0: {low: 0.0, high: 10.0}
+  #     1: {low: 0.0, high: 10.0}
+  #     2: {low: 0.0, high: 10.0}
+
+  ROTATIONAL_DIFFUSION_RATE:
     type: array_float
     elements:
-      0: {low: 0.0, high: 10.0}
-      1: {low: 0.0, high: 10.0}
-      2: {low: 0.0, high: 10.0}
+      0: {low: 0.0001, high: 0.001}
+      1: {low: 0.0001, high: 0.001}
+      2: {low: 0.0001, high: 0.001}
 
   CHEMOKINESIS_SENSITIVITY:
     type: array_float
@@ -60,32 +67,39 @@ parameters:
       0: {low: 0.0, high: 1.0}
       1: {low: 0.0, high: 1.0}
       2: {low: 0.0, high: 1.0}
-  
-  # CHEMOKINESIS_K:
+
+  CHEMOKINESIS_K:
+    type: array_float
+    elements:
+      0: {low: 0.1, high: 10.0}
+      1: {low: 0.1, high: 10.0}
+      2: {low: 0.1, high: 10.0}
+
+  # CHEMOKINESIS_HILL_N:
+  #   type: array_float
+  #   elements:
+  #     0: {low: 1.0, high: 4.0}
+  #     1: {low: 1.0, high: 4.0}
+  #     2: {low: 1.0, high: 4.0}
+
+  # CHEMOKINESIS_ADAPT_TAU:
+  #   type: array_float
+  #   elements:
+  #     0: {low: 1.0, high: 300.0}
+  #     1: {low: 1.0, high: 300.0}
+  #     2: {low: 1.0, high: 300.0}
+
+  # CHEMOKINESIS_SIGNAL_SAT:
+  #   type: array_float
+  #   elements:
+  #     0: {low: 0.0, high: 50.0}
+
+  # CHEMOKINESIS_SIGNAL_SAT_MULTIPLIER:
   #   type: array_float
   #   elements:
   #     0: {low: 0.0, high: 1.0}
   #     1: {low: 0.0, high: 1.0}
   #     2: {low: 0.0, high: 1.0}
-
-  CHEMOKINESIS_SIGNAL_SAT:
-    type: array_float
-    elements:
-      0: {low: 0.0, high: 50.0}
-
-  CHEMOKINESIS_SIGNAL_SAT_MULTIPLIER:
-    type: array_float
-    elements:
-      0: {low: 0.0, high: 1.0}
-      1: {low: 0.0, high: 1.0}
-      2: {low: 0.0, high: 1.0}
-
-
-  # DIFFUSION_COEFF_MULTI:
-  #   type: array_float
-  #   elements:
-  #     0: {low: 10.0, high: 3000.0}
-  #   log: true
 
 
 model:
@@ -98,6 +112,7 @@ model:
     SAVE_EVERY_N_STEPS: 20
     PERIODIC_BOUNDARIES_FOR_CELLS: false # if True, veff has no meaning, so should be removed from the target file.
     INCLUDE_CELLS: true
+    ORGANOID_ASSAY: false
     INCLUDE_CELL_CYCLE: false
     INCLUDE_FIBRE_NETWORK: false
     INCLUDE_FOCAL_ADHESIONS: false
@@ -105,8 +120,19 @@ model:
     INCLUDE_DUROTAXIS: false
     INCLUDE_CHEMOTAXIS: false
     INCLUDE_CHEMOKINESIS: true
-    CHEMOTAXIS_ONLY_DIR: false
     VISUALISATION: false
     SHOW_PLOTS: false
     SAVE_DATA_TO_FILE: false
     SAVE_PICKLE: true
+    # One diffusing species at constant 2.5; metabolism OFF
+    N_SPECIES: 2
+    CELL_SPEED_REF: [0.00039467864789234224,0.0006043654028727149,0.00032985670642352277] # values from best trial in optuna_config_cell_speed_control.yaml
+    BROWNIAN_MOTION_STRENGTH_FACTOR: [2.7345157865818357,2.371752746142436,3.5304819148493047]
+    ROTATIONAL_DIFFUSION_RATE: [0.0003757389100327902,0.0006028399869074992,0.0003342841399542819]
+    INIT_ECM_CONCENTRATION_VALS: [2.5, 0.0]
+    INIT_CELL_CONCENTRATION_VALS: [2.5, 0.0]
+    BOUNDARY_CONC_INIT_MULTI: [[2.5, 2.5, 2.5, 2.5, 2.5, 2.5], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]
+    BOUNDARY_CONC_FIXED_MULTI: [[2.5, 2.5, 2.5, 2.5, 2.5, 2.5], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]
+    INIT_CELL_CONSUMPTION_RATES: [0.0, 0.0]
+    INIT_CELL_PRODUCTION_RATES: [0.0, 0.0]
+    INIT_CELL_REACTION_RATES: [0.0, 0.0]

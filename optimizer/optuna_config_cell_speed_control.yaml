@@ -37,9 +37,10 @@ parameters:
   CELL_SPEED_REF:
     type: array_float
     elements:
-      0: {low: 0.0001, high: 0.005}
-      1: {low: 0.0001, high: 0.005}
-      2: {low: 0.0001, high: 0.005}
+      0: {low: 0.0001, high: 0.001}
+      1: {low: 0.0001, high: 0.001}
+      2: {low: 0.0001, high: 0.001}
+    log: true
 
   BROWNIAN_MOTION_STRENGTH_FACTOR:
     type: array_float
@@ -48,18 +49,13 @@ parameters:
       1: {low: 0.0, high: 10.0}
       2: {low: 0.0, high: 10.0}
 
-  # CHEMOTAXIS_CHI:
-  #   type: array_float
-  #   elements:
-  #     0: {low: 0.0, high: 10.0}
-  #     1: {low: 0.0, high: 10.0}
-  #     2: {low: 0.0, high: 10.0}
-
-  # DIFFUSION_COEFF_MULTI:
-  #   type: array_float
-  #   elements:
-  #     0: {low: 10.0, high: 3000.0}
-  #   log: true
+  ROTATIONAL_DIFFUSION_RATE:
+    type: array_float
+    elements:
+      0: {low: 0.0001, high: 0.001}
+      1: {low: 0.0001, high: 0.001}
+      2: {low: 0.0001, high: 0.001}
+    log: true
 
 
 model:
@@ -70,14 +66,17 @@ model:
   extra_overrides:
     STEPS: 200
     SAVE_EVERY_N_STEPS: 20
+    N_CELLS: 100
     PERIODIC_BOUNDARIES_FOR_CELLS: false # if True, veff has no meaning, so should be removed from the target file.
     INCLUDE_CELLS: true
+    ORGANOID_ASSAY: false
     INCLUDE_CELL_CYCLE: false
     INCLUDE_FIBRE_NETWORK: false
     INCLUDE_FOCAL_ADHESIONS: false
-    INCLUDE_DIFFUSION: true
+    INCLUDE_DIFFUSION: false
     INCLUDE_DUROTAXIS: false
-    INCLUDE_CHEMOTAXIS: false 
+    INCLUDE_CHEMOTAXIS: false
+    INCLUDE_CHEMOKINESIS: false
     VISUALISATION: false
     SHOW_PLOTS: false
     SAVE_DATA_TO_FILE: false
