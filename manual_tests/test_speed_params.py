@@ -18,7 +18,7 @@ print(f'chemokinesis_factor range = [{1-h_const:.3f}, {1+h_const:.3f}]')
 print()
 
 T = 200.0  # total sim time
-dt = 1.0   # timestep
+dt = 10.0   # timestep
 
 def compute_solution(type_i, D_rot):
     tau = 1.0 / (2.0 * D_rot)
