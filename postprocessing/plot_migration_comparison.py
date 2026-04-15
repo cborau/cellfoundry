@@ -38,7 +38,7 @@ python postprocessing/plot_migration_comparison.py
     --target2 optimizer/reference_data/target_cell_speed_chemokinesis.csv 
     --vtk-dir1 result_files/speed_control 
     --vtk-dir2 result_files/speed_chemokinesis 
-    --max-trajectories 50
+    --max-trajectories 100
 """
 
 from __future__ import annotations
@@ -60,6 +60,7 @@ if "--show" not in sys.argv:
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.ticker import ScalarFormatter
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -130,6 +131,33 @@ def load_target_csv(path: Path | None) -> pd.DataFrame | None:
     if "cell_type" not in df.columns:
         return None
     return df
+
+
+def _set_panel_title(ax: plt.Axes, title: str, show_title: bool, **kwargs: Any) -> None:
+    ax.set_title(title if show_title else "", **kwargs)
+
+
+def _format_large_yaxis(ax: plt.Axes) -> None:
+    y_min, y_max = ax.get_ylim()
+    formatter = ScalarFormatter(useMathText=True)
+    max_abs = max(abs(y_min), abs(y_max))
+    if max_abs != 0 and (max_abs >= 1000 or max_abs < 0.01):
+        formatter.set_scientific(True)
+        formatter.set_powerlimits((-3, 3))
+    else:
+        formatter.set_scientific(False)
+    ax.yaxis.set_major_formatter(formatter)
+
+
+def _apply_layout(fig: plt.Figure, hspace: float, wspace: float, *, top: float = 0.95) -> None:
+    fig.subplots_adjust(
+        left=0.07,
+        right=0.945,
+        bottom=0.08,
+        top=top,
+        hspace=hspace,
+        wspace=wspace,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -367,6 +395,8 @@ def _plot_violin_panel(
     title: str,
     show_legend: bool = True,
     type_labels: list[str] | None = None,
+    xlabel: str = "Cell type",
+    show_title: bool = True,
 ) -> None:
     """Draw violin + strip + mean/median + optional target for one speed metric."""
     cell_types = sorted(metrics["cell_type"].dropna().astype(int).unique().tolist())
@@ -435,10 +465,11 @@ def _plot_violin_panel(
     else:
         tick_labels = [str(ct) for ct in cell_types]
     ax.set_xticks(positions, tick_labels)
-    ax.set_xlabel("Cell type", fontsize=12)
+    ax.set_xlabel(xlabel, fontsize=12)
     ax.set_ylabel(ylabel, fontsize=12)
-    ax.set_title(title, fontsize=13, fontweight="bold")
-    ax.tick_params(labelsize=11)
+    _set_panel_title(ax, title, show_title, fontsize=13, fontweight="bold")
+    ax.tick_params(axis='y', labelsize=11)
+    ax.tick_params(axis='x', labelsize=8)  # violin x-tick labelsize
     ax.grid(True, alpha=0.25)
     if show_legend:
         ax.legend(loc="best", fontsize=10)
@@ -516,7 +547,7 @@ def create_trajectory_figure(
     traj_data2: dict[str, Any] | None = None,
     dir_data2: dict[str, Any] | None = None,
     label2: str | None = None,
-    max_trajectories: int = 50,
+    max_trajectories: int = 100,
     time_step: float | None = None,
 ) -> plt.Figure:
     """
@@ -636,8 +667,8 @@ def create_trajectory_figure(
         ratios = dir_data["ratios"]
         ts = dir_data["timesteps"]
         if time_step is not None:
-            x_vals = ts.astype(float) * time_step
-            x_label = "Time [s]"
+            x_vals = ts.astype(float) * time_step / 3600.0
+            x_label = "Time [h]"
         else:
             x_vals = ts.astype(float)
             x_label = "Timestep"
@@ -696,6 +727,9 @@ def create_combined_figure(
     ymax_veff: float | None = None,
     figsize: tuple[float, float] = (20, 15),
     type_labels: list[str] | None = None,
+    show_titles: bool = True,
+    hspace: float = 0.35,
+    wspace: float = 0.42,
 ) -> plt.Figure:
     """
     Create a single combined migration figure.
@@ -729,7 +763,7 @@ def create_combined_figure(
         n_rows = 1
 
     fig = plt.figure(figsize=figsize)
-    gs = fig.add_gridspec(n_rows, n_cols, hspace=0.35, wspace=0.35)
+    gs = fig.add_gridspec(n_rows, n_cols)
 
     # --- Auto-detect ymax ---
     all_vmean = metrics1["vmean"].to_numpy(dtype=float)
@@ -743,27 +777,41 @@ def create_combined_figure(
         ymax_veff = float(np.nanmax(all_veff[np.isfinite(all_veff)])) * 1.10
 
     # === Row 0: Violin panels ===
-    ax_v1 = fig.add_subplot(gs[0, 0])
-    ax_v2 = fig.add_subplot(gs[0, 1])
-    _plot_violin_panel(ax_v1, metrics1, "vmean", "vmean [µm/s]", target1,
-                       f"vmean — {label1}", show_legend=True, type_labels=type_labels)
-    _plot_violin_panel(ax_v2, metrics1, "veff", "veff [µm/s]", target1,
-                       f"veff — {label1}", show_legend=False, type_labels=type_labels)
-    ax_v1.set_ylim(0, ymax_vmean)
-    ax_v2.set_ylim(0, ymax_veff)
-
+    # If two conditions, swap panel order to: vmean1, vmean2, veff1, veff2
     if two_cond:
-        ax_v3 = fig.add_subplot(gs[0, 2])
-        ax_v4 = fig.add_subplot(gs[0, 3])
-        _plot_violin_panel(ax_v3, metrics2, "vmean", "vmean [µm/s]", target2,
-                           f"vmean — {label2}", show_legend=False, type_labels=type_labels)
+        ax_v1 = fig.add_subplot(gs[0, 0])  # vmean1
+        ax_v2 = fig.add_subplot(gs[0, 1])  # vmean2
+        ax_v3 = fig.add_subplot(gs[0, 2])  # veff1
+        ax_v4 = fig.add_subplot(gs[0, 3])  # veff2
+        _plot_violin_panel(ax_v1, metrics1, "vmean", "vmean [µm/s]", target1,
+                           f"vmean — {label1}", show_legend=True, type_labels=type_labels, xlabel=label1, show_title=show_titles)
+        _plot_violin_panel(ax_v2, metrics2, "vmean", "vmean [µm/s]", target2,
+                           f"vmean — {label2}", show_legend=False, type_labels=type_labels, xlabel=label2, show_title=show_titles)
+        _plot_violin_panel(ax_v3, metrics1, "veff", "veff [µm/s]", target1,
+                           f"veff — {label1}", show_legend=False, type_labels=type_labels, xlabel=label1, show_title=show_titles)
         _plot_violin_panel(ax_v4, metrics2, "veff", "veff [µm/s]", target2,
-                           f"veff — {label2}", show_legend=False, type_labels=type_labels)
-        ax_v3.set_ylim(0, ymax_vmean)
+                           f"veff — {label2}", show_legend=False, type_labels=type_labels, xlabel=label2, show_title=show_titles)
+        ax_v1.set_ylim(0, ymax_vmean)
+        ax_v2.set_ylim(0, ymax_vmean)
+        ax_v3.set_ylim(0, ymax_veff)
         ax_v4.set_ylim(0, ymax_veff)
-
+        _format_large_yaxis(ax_v1)
+        _format_large_yaxis(ax_v2)
+        _format_large_yaxis(ax_v3)
+        _format_large_yaxis(ax_v4)
+    else:
+        ax_v1 = fig.add_subplot(gs[0, 0])
+        ax_v2 = fig.add_subplot(gs[0, 1])
+        _plot_violin_panel(ax_v1, metrics1, "vmean", "vmean [µm/s]", target1,
+                           f"vmean — {label1}", show_legend=True, type_labels=type_labels, xlabel=label1, show_title=show_titles)
+        _plot_violin_panel(ax_v2, metrics1, "veff", "veff [µm/s]", target1,
+                           f"veff — {label1}", show_legend=False, type_labels=type_labels, xlabel=label1, show_title=show_titles)
+        ax_v1.set_ylim(0, ymax_vmean)
+        ax_v2.set_ylim(0, ymax_veff)
+        _format_large_yaxis(ax_v1)
+        _format_large_yaxis(ax_v2)
     if not has_traj:
-        fig.tight_layout()
+        _apply_layout(fig, hspace, wspace)
         return fig
 
     # === Precompute trajectory data ===
@@ -820,9 +868,12 @@ def create_combined_figure(
         cell_types_map = traj_data["cell_types"]
         pc = precomputed[ds_idx]
 
-        # 3D trajectory panels
+        # Directionality ratio panel (first column)
+        ax_dir = fig.add_subplot(gs[row, 0])
+
+        # 3D trajectory panels (shifted to columns 1+)
         for col_idx, ct in enumerate(all_types):
-            ax = fig.add_subplot(gs[row, col_idx], projection="3d")
+            ax = fig.add_subplot(gs[row, col_idx + 1], projection="3d")
             color = _color_for(ct)
 
             # White background
@@ -855,17 +906,13 @@ def create_combined_figure(
             n_shown = len(pc["sampled_ids_by_type"].get(ct, []))
             n_total = len(pc["ids_by_type"].get(ct, []))
             subset_info = f" ({n_shown}/{n_total})" if n_shown < n_total else ""
-            ax.set_title(f"{label} — {type_lbl}{subset_info}",
-                         fontsize=11, fontweight="bold")
-
-        # Directionality ratio panel
-        dir_col = min(n_types, n_cols - 1)
-        ax_dir = fig.add_subplot(gs[row, dir_col])
+            _set_panel_title(ax, f"{label} — {type_lbl}{subset_info}", show_titles,
+                             fontsize=11, fontweight="bold")
         ratios = dir_data["ratios"]
         ts = dir_data["timesteps"]
         if time_step is not None:
-            x_vals = ts.astype(float) * time_step
-            x_label = "Time [s]"
+            x_vals = ts.astype(float) * time_step / 3600.0
+            x_label = "Time [h]"
         else:
             x_vals = ts.astype(float)
             x_label = "Timestep"
@@ -895,15 +942,13 @@ def create_combined_figure(
         ax_dir.set_xlabel(x_label, fontsize=12)
         ax_dir.set_ylabel("Directionality ratio", fontsize=12)
         ax_dir.set_ylim(-0.05, 1.05)
-        ax_dir.set_title(f"{label} — directionality",
+        _set_panel_title(ax_dir, f"{label} — directionality", show_titles,
                          fontsize=11, fontweight="bold")
         ax_dir.tick_params(labelsize=11)
         ax_dir.grid(True, alpha=0.25)
         ax_dir.legend(loc="best", fontsize=10)
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", UserWarning)
-        fig.tight_layout()
+    _apply_layout(fig, hspace, wspace)
     return fig
 
 
@@ -956,6 +1001,11 @@ def parse_args() -> argparse.Namespace:
                    help="Resolution for saved figure (default: 600)")
     p.add_argument("--type-labels", nargs="+", default=None,
                    help="Custom labels for cell types, e.g. --type-labels Epithelial Mesenchymal Stem")
+    p.add_argument("--no-titles", action="store_true", help="Remove subplot titles from all panels.")
+    p.add_argument("--hspace", type=float, default=0.35,
+                   help="Vertical spacing between subplot rows (default: 0.35)")
+    p.add_argument("--wspace", type=float, default=0.42,
+                   help="Horizontal spacing between subplot columns (default: 0.42)")
     return p.parse_args()
 
 
@@ -1005,17 +1055,21 @@ def main() -> None:
 
     # === Create combined figure ===
     print("Creating combined migration figure …")
+    show_titles = not args.no_titles
     fig = create_combined_figure(
         metrics1, target1, args.label1,
-        metrics2, target2, args.label2,
-        traj1, dir1,
-        traj2, dir2,
+        metrics2, target2, args.label2 if metrics2 is not None else None,
+        traj_data1=traj1, dir_data1=dir1,
+        traj_data2=traj2, dir_data2=dir2,
         max_trajectories=args.max_trajectories,
         time_step=time_step,
         ymax_vmean=args.ymax_vmean,
         ymax_veff=args.ymax_veff,
         figsize=tuple(args.figsize),
         type_labels=args.type_labels,
+        show_titles=show_titles,
+        hspace=args.hspace,
+        wspace=args.wspace,
     )
 
     # === Save / show ===
@@ -1025,13 +1079,15 @@ def main() -> None:
     fig.savefig(str(out_path), dpi=args.dpi)
     print(f"Saved → {out_path}")
 
-    w, h = fig.get_size_inches()
-    print(f"{w:.2f} x {h:.2f} inches after manual resize")
+    
 
     if args.show:
         plt.show()
     else:
         plt.close("all")
+
+    w, h = fig.get_size_inches()
+    print(f"{w:.2f} x {h:.2f} inches after manual resize")
 
     print("Done.")
 

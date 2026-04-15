@@ -9,3 +9,13 @@ python postprocessing\plot_migration_comparison.py --pickle1 result_files\output
 python manual_tests\test_objectives.py --pickle result_files\output_data_0.pickle --reference optimizer\reference_data\target_cell_speed_control.csv --objective cell_speed --population-stat median
 python manual_tests\test_objectives.py --pickle result_files\output_data_0.pickle --reference optimizer\reference_data\target_cell_speed_tgfb.csv --objective cell_speed --population-stat median
 python postprocessing\plot_migration_comparison.py --pickle1 result_files\speed_control\output_data_0.pickle --pickle2 result_files\speed_chemokinesis\output_data_0.pickle --target1 optimizer\reference_data\target_cell_speed_control.csv --target2 optimizer\reference_data\target_cell_speed_tgfb.csv --vtk-dir1 result_files\speed_control --vtk-dir2 result_files\speed_chemokinesis
+python postprocessing\plot_migration_comparison.py `
+    --pickle1 result_files\speed_control\output_data_0.pickle `
+    --pickle2 result_files\speed_chemokinesis\output_data_0.pickle `
+    --target1 optimizer\reference_data\target_cell_speed_control.csv `
+    --target2 optimizer\reference_data\target_cell_speed_tgfb.csv `
+    --vtk-dir1 result_files\speed_control `
+    --vtk-dir2 result_files\speed_chemokinesis `
+    --label1 Basal --label2 TGFβ1 `
+    --type-labels shControl shSMAD2 shSMAD3 `
+    --figsize 10 7 --dpi 600 --show --no-titles
