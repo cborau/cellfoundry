@@ -2409,8 +2409,11 @@ if INCLUDE_CELLS:
     model.newLayer("L8_CELL_Movement").addAgentFunction("CELL", "cell_move")
 if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L8_FNODE_Movement").addAgentFunction("FNODE", "fnode_move")
-if INCLUDE_FOCAL_ADHESIONS:
-    model.newLayer("L8_FOCAD_Movement").addAgentFunction("FOCAD", "focad_move")
+    if INCLUDE_FOCAL_ADHESIONS:
+        # Re-broadcast FNODE positions after movement so focad_move reads
+        # the current-step FNODE coordinates instead of stale L1 data.
+        model.newLayer("L8_FNODE_Locations_Post_Move").addAgentFunction("FNODE", "fnode_bucket_location_data")
+        model.newLayer("L8_FOCAD_Movement").addAgentFunction("FOCAD", "focad_move")
 # If boundaries are not moving, the ECM grid does not need to be updated
 if MOVING_BOUNDARIES:
     model.newLayer("L8_BCORNER_Movement").addAgentFunction("BCORNER", "bcorner_move")

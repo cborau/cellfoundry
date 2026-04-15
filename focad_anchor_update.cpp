@@ -136,8 +136,16 @@ FLAMEGPU_AGENT_FUNCTION(focad_anchor_update, flamegpu::MessageBucket, flamegpu::
   FLAMEGPU->setVariable<float>("y_i", agent_y_i);
   FLAMEGPU->setVariable<float>("z_i", agent_z_i);
 
-  //FLAMEGPU->setVariable<int>("anchor_id", agent_anchor_id);
-  FLAMEGPU->setVariable<int>("anchor_id", -1); // Reset anchor_id to -1 to allow dynamic re-assignment at each step, or keep it fixed after first assignment.
+  // Keep anchor assignment stable while the FOCAD is attached to an FNODE.
+  // Resetting to -1 every step caused the anchor to be re-searched via closest-
+  // distance each step, producing anchor jumping, force-direction instability,
+  // spurious detachments and push/pull oscillations on FNODEs.
+  const int agent_attached = FLAMEGPU->getVariable<int>("attached");
+  if (agent_attached != 0 && best_anchor_id >= 0) {
+    FLAMEGPU->setVariable<int>("anchor_id", best_anchor_id);
+  } else {
+    FLAMEGPU->setVariable<int>("anchor_id", -1); // Allow re-search when detached
+  }
 
   return flamegpu::ALIVE;
 }

@@ -3,9 +3,9 @@
   "_note": "100 cells migrating in a fibre network. Focal adhesions ON, nuclei deformation exaggerated. Diffusion, cell cycle, chemotaxis/kinesis OFF.",
 
   "___ SIMULATION ___": "-------------------------------------------------------",
-  "STEPS": 3000,
+  "STEPS": 100,
   "TIME_STEP": 1.0,
-  "SAVE_EVERY_N_STEPS": 10,
+  "SAVE_EVERY_N_STEPS": 1,
   "VISUALISATION": false,
   "SHOW_PLOTS": false,
   "SAVE_DATA_TO_FILE": true,
@@ -28,7 +28,7 @@
 
   "INCLUDE_FIBRE_NETWORK": true,
   "NETWORK_FILE": "network_medium_density.pkl",
-  "INCLUDE_CELL_FNODE_REPULSION": true,
+  "INCLUDE_CELL_FNODE_REPULSION": false,
   "INCLUDE_NETWORK_REMODELING": false,
 
   "INCLUDE_FOCAL_ADHESIONS": true,
@@ -63,7 +63,7 @@
 
   "___ FIBRE NETWORK MECHANICS ___": "------------------------------------------",
   "FIBRE_SEGMENT_K_ELAST": 0.04,
-  "FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE": 5,
+  "FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE": 45,
   "FIBRE_NODE_REPULSION_K": 0.02,
   "BUCKLING_COEFF_D0": 0.15,
   "STRAIN_STIFFENING_COEFF_DS": 0.85,
@@ -76,7 +76,7 @@
   "ENABLE_FOCAD_BIRTH": true,
   "FOCAD_K_FA": [15.0, 15.0, 15.0],
   "FOCAD_F_MAX": [0.0, 0.0, 0.0],
-  "FOCAD_V_C": [0.4, 0.4, 0.4],
+  "FOCAD_V_C": [0.1, 0.1, 0.1],
   "MAX_SEARCH_RADIUS_FOCAD": 15.0,
 
   "___ FOCAL ADHESION BINDING KINETICS ___": "-----------------------------------",
@@ -121,6 +121,6 @@
   "___ NUCLEUS MECHANICS (softened for exaggerated deformation) ___": "-----------",
   "NUCLEUS_E": [0.3, 0.3, 0.3],
   "NUCLEUS_NU": [0.48, 0.48, 0.48],
-  "NUCLEUS_TAU": [0.1, 0.1, 0.1],
-  "NUCLEUS_EPS_CLAMP": [0.60, 0.60, 0.60]
+  "NUCLEUS_TAU": [5.0, 5.0, 5.0],
+  "NUCLEUS_EPS_CLAMP": [0.25, 0.25, 0.25]
 }
