@@ -688,6 +688,7 @@ fnode_fnode_bucket_interaction_file = "fnode_fnode_bucket_interaction.cpp"
 fnode_remodel_file = "fnode_remodel.cpp"
 fnode_apply_remodel_updates_file = "fnode_apply_remodel_updates.cpp"
 fnode_move_file = "fnode_move.cpp"
+fnode_bucket_location_data_postmove_file = "fnode_bucket_location_data_postmove.cpp"
 fnode_focad_interaction_file = "fnode_focad_interaction.cpp"
 fnode_cell_repulsion_file = "fnode_cell_repulsion.cpp"
 
@@ -992,6 +993,19 @@ if INCLUDE_FIBRE_NETWORK:
     FNODE_bucket_location_message.newVariableArrayFloat("equilibrium_distance", MAX_CONNECTIVITY) # each segment can have a different equilibrium distance depending on the rest length assigned during network generation
     FNODE_bucket_location_message.newVariableArrayInt("linked_nodes", MAX_CONNECTIVITY) # store the index of the linked nodes, which is a proxy for the bucket id
 
+    # Lightweight post-move bucket used only by focad_move (L8) so that
+    # attached FOCADs read the FNODE position after fnode_move instead of
+    # the stale L1 pre-move data.
+    FNODE_bucket_location_message_postmove = model.newMessageBucket("fnode_bucket_location_message_postmove")
+    FNODE_bucket_location_message_postmove.setBounds(8 + 1, 8 + max_expected_fnodes)
+    FNODE_bucket_location_message_postmove.newVariableInt("id")
+    FNODE_bucket_location_message_postmove.newVariableFloat("x")
+    FNODE_bucket_location_message_postmove.newVariableFloat("y")
+    FNODE_bucket_location_message_postmove.newVariableFloat("z")
+    FNODE_bucket_location_message_postmove.newVariableFloat("vx")
+    FNODE_bucket_location_message_postmove.newVariableFloat("vy")
+    FNODE_bucket_location_message_postmove.newVariableFloat("vz")
+
 
 ECM_grid_location_message = model.newMessageArray3D("ecm_grid_location_message")
 ECM_grid_location_message.setDimensions(ECM_AGENTS_PER_DIR[0], ECM_AGENTS_PER_DIR[1], ECM_AGENTS_PER_DIR[2])
@@ -1208,9 +1222,12 @@ if INCLUDE_FIBRE_NETWORK:
     FNODE_agent.newVariableUInt8("clamped_bz_pos")
     FNODE_agent.newVariableUInt8("clamped_bz_neg")
     FNODE_agent.newVariableUInt8("unstable_move", 0)
+    FNODE_agent.newVariableInt("focad_attached", 0)
+    FNODE_agent.newVariableInt("focad_id", -1)
 
     FNODE_agent.newRTCFunctionFile("fnode_spatial_location_data", fnode_spatial_location_data_file).setMessageOutput("fnode_spatial_location_message")
     FNODE_agent.newRTCFunctionFile("fnode_bucket_location_data", fnode_bucket_location_data_file).setMessageOutput("fnode_bucket_location_message")
+    FNODE_agent.newRTCFunctionFile("fnode_bucket_location_data_postmove", fnode_bucket_location_data_postmove_file).setMessageOutput("fnode_bucket_location_message_postmove")
     FNODE_agent.newRTCFunctionFile("fnode_boundary_interaction", fnode_boundary_interaction_file)
     FNODE_agent.newRTCFunctionFile("fnode_update_links", fnode_update_links_file).setMessageInput("fnode_bucket_location_message")
     FNODE_agent.newRTCFunctionFile("fnode_fnode_spatial_interaction", fnode_fnode_spatial_interaction_file).setMessageInput("fnode_spatial_location_message")
@@ -1447,7 +1464,7 @@ if INCLUDE_FOCAL_ADHESIONS:
     faf = FOCAD_agent.newRTCFunctionFile("focad_fnode_interaction", focad_fnode_interaction_file)
     faf.setMessageInput("fnode_spatial_location_message")
     faf.setAllowAgentDeath(True) # WARNING: if this flag is not set, the function will not be able to actually kill the agent (eventhough the function returns flamegpu::DEAD), which will cause errors in the logic of the model.
-    FOCAD_agent.newRTCFunctionFile("focad_move", focad_move_file).setMessageInput("fnode_bucket_location_message")        
+    FOCAD_agent.newRTCFunctionFile("focad_move", focad_move_file).setMessageInput("fnode_bucket_location_message_postmove")        
     # Now that the agent exists, set it as the output agent of the cell_focad_update function, which allows focal adhesion agents to be created and destroyed by that function based on the state of the cell and the local environment.
     cell_focad_update_fn.setAgentOutput(FOCAD_agent)
 
@@ -1604,6 +1621,8 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableUInt8("clamped_by_neg", 0)
                 instance.setVariableUInt8("clamped_bz_pos", 0)
                 instance.setVariableUInt8("clamped_bz_neg", 0)
+                instance.setVariableInt("focad_id", -1) # id of the attached focal adhesion if attached (-1 if none attached)
+                instance.setVariableInt("focad_attached", 0) # 1 if a focal adhesion is attached to this fibre node, else 0
                 instance.setVariableArrayFloat("linked_nodes", linked_nodes.tolist())            
 
 
@@ -2350,7 +2369,6 @@ if INCLUDE_CELLS:
     model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_spatial_location_data")
     if INCLUDE_FOCAL_ADHESIONS:
         model.newLayer("L1_CELL_Locations_2").addAgentFunction("CELL", "cell_bucket_location_data")  # these functions share data of the same agent, so must be in separate layers
-        model.newLayer("L1_FOCAD_Update_Anchors").addAgentFunction("FOCAD", "focad_anchor_update")
 if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L1_FNODE_Locations_1").addAgentFunction("FNODE", "fnode_spatial_location_data")
     # These functions share data of the same agent, so must be in separate layers
@@ -2407,12 +2425,19 @@ if INCLUDE_CELLS and INCLUDE_FIBRE_NETWORK and INCLUDE_CELL_FNODE_REPULSION:
 # L8_Agent_Movement
 if INCLUDE_CELLS:
     model.newLayer("L8_CELL_Movement").addAgentFunction("CELL", "cell_move")
+    if INCLUDE_FOCAL_ADHESIONS:
+        # Re-broadcast CELL bucket after movement so FOCAD anchor update
+        # reads post-move anchor positions instead of stale L1 data.
+        model.newLayer("L8_CELL_Bucket_Post_Move").addAgentFunction("CELL", "cell_bucket_location_data")
 if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L8_FNODE_Movement").addAgentFunction("FNODE", "fnode_move")
     if INCLUDE_FOCAL_ADHESIONS:
-        # Re-broadcast FNODE positions after movement so focad_move reads
-        # the current-step FNODE coordinates instead of stale L1 data.
-        model.newLayer("L8_FNODE_Locations_Post_Move").addAgentFunction("FNODE", "fnode_bucket_location_data")
+        # Broadcast FNODE post-move positions into dedicated message list
+        # so focad_move reads current-step coordinates.
+        model.newLayer("L8_FNODE_Locations_Post_Move").addAgentFunction("FNODE", "fnode_bucket_location_data_postmove")
+        # Sync FOCAD anchor (x_i) with post-move cell position before focad_move,
+        # so the ori vector (x_i - x) is consistent at step end.
+        model.newLayer("L8_FOCAD_Anchor_Post_Move").addAgentFunction("FOCAD", "focad_anchor_update")
         model.newLayer("L8_FOCAD_Movement").addAgentFunction("FOCAD", "focad_move")
 # If boundaries are not moving, the ECM grid does not need to be updated
 if MOVING_BOUNDARIES:

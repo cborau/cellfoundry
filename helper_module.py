@@ -792,6 +792,9 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
         secreted = list()
         linked_nodes_all = list()
         k_elast = list()
+        orig_ids = list()
+        focad_attached = list()
+        focad_id = list()
 
         av = agent.getPopulationData()
         for ai in av:
@@ -809,7 +812,10 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             secreted.append(ai.getVariableInt("secreted"))
             linked_nodes_all.append(ai.getVariableArrayFloat("linked_nodes"))
             k_elast.append(ai.getVariableFloat("k_elast"))
+            focad_attached.append(ai.getVariableInt("focad_attached"))
+            focad_id.append(ai.getVariableInt("focad_id"))
         if len(ids) > 0:
+            orig_ids = ids.copy()
             min_id = min(ids)
             ids = [fid - min_id for fid in ids if fid > 0]
             for i in range(len(linked_nodes_all)):
@@ -817,6 +823,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
 
         sorted_indices = np.argsort(ids)
         ids = [ids[i] for i in sorted_indices]
+        orig_ids = [orig_ids[i] for i in sorted_indices]
         coords = [coords[i] for i in sorted_indices]
         velocity = [velocity[i] for i in sorted_indices]
         force = [force[i] for i in sorted_indices]
@@ -825,6 +832,8 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
         reinforcement = [reinforcement[i] for i in sorted_indices]
         secreted = [secreted[i] for i in sorted_indices]
         linked_nodes_all = [linked_nodes_all[i] for i in sorted_indices]
+        focad_attached = [focad_attached[i] for i in sorted_indices]
+        focad_id = [focad_id[i] for i in sorted_indices]
 
         n_fnodes = len(ids)
         id_to_point_idx = {fid: i for i, fid in enumerate(ids)}
@@ -951,6 +960,13 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
                 file.write("0 \n")
             for _ in range(8):
                 file.write("1 \n")
+                
+            file.write("SCALARS orig_ids int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for oi in orig_ids:
+                file.write("{} \n".format(oi))
+            for ci in range(8):
+                file.write("{} \n".format(ci))
 
             file.write("SCALARS k_elast float 1\n")
             file.write("LOOKUP_TABLE default\n")
@@ -986,6 +1002,20 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
                 file.write("{} \n".format(s_ai))
             for _ in range(8):
                 file.write("0 \n")
+
+            file.write("SCALARS focad_attached int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for fa_ai in focad_attached:
+                file.write("{} \n".format(fa_ai))
+            for _ in range(8):
+                file.write("0 \n")
+
+            file.write("SCALARS focad_id int 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for fi_ai in focad_id:
+                file.write("{} \n".format(fi_ai))
+            for _ in range(8):
+                file.write("-1 \n")
 
             file.write("VECTORS velocity float\n")
             for v_ai in velocity:
@@ -1217,6 +1247,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
         focad_x_i = list()
         focad_y_i = list()
         focad_z_i = list()
+        focad_fnode_id = list()
 
         file_name = 'focad_t{:04d}.vtk'.format(stepCounter)
         file_path = res_path / file_name
@@ -1275,6 +1306,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             focad_k_off_0_eff_front.append(ai.getVariableFloat("k_off_0_eff_front"))
             focad_k_off_0_eff_rear.append(ai.getVariableFloat("k_off_0_eff_rear"))
             focad_linc_prev_total_length.append(ai.getVariableFloat("linc_prev_total_length"))
+            focad_fnode_id.append(ai.getVariableInt("fnode_id"))
 
         with open(str(file_path), 'w') as file:
             for line in save_context["focaladhesionsdata"]:
@@ -1425,6 +1457,11 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             file.write("LOOKUP_TABLE default\n")
             for v in focad_z_i:
                 file.write("{:.6f} \n".format(v))
+
+            file.write("SCALARS fnode_id float 1\n")
+            file.write("LOOKUP_TABLE default\n")
+            for fnid in focad_fnode_id:
+                file.write("{:.6f} \n".format(fnid))
 
             file.write("VECTORS velocity float\n")
             for v_ai in focad_velocity:

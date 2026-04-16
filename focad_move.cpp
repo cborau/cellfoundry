@@ -30,6 +30,7 @@ FLAMEGPU_AGENT_FUNCTION(focad_move, flamegpu::MessageBucket, flamegpu::MessageNo
   uint8_t agent_active = FLAMEGPU->getVariable<uint8_t>("active");
   int agent_fnode_id = FLAMEGPU->getVariable<int>("fnode_id");
   int agent_attached = FLAMEGPU->getVariable<int>("attached");
+  int DEBUG_PRINTING = FLAMEGPU->environment.getProperty<int>("DEBUG_PRINTING");
 
   const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
   const float MAX_SEARCH_RADIUS_FOCAD = FLAMEGPU->environment.getProperty<float>("MAX_SEARCH_RADIUS_FOCAD");
@@ -117,6 +118,11 @@ FLAMEGPU_AGENT_FUNCTION(focad_move, flamegpu::MessageBucket, flamegpu::MessageNo
         agent_vx = message_vx;
         agent_vy = message_vy;
         agent_vz = message_vz;
+
+        if (DEBUG_PRINTING == 1) {
+          printf("[focad_move] FOCAD %d  attached to FNODE %d  bucket_pos=(%.6f, %.6f, %.6f)  setting FOCAD to same\n",
+                 agent_id, agent_fnode_id, message_x, message_y, message_z);
+        }
 
         FLAMEGPU->setVariable<float>("x", agent_x);
         FLAMEGPU->setVariable<float>("y", agent_y);

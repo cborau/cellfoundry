@@ -38,6 +38,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_focad_interaction, flamegpu::MessageSpatial3D, fla
   float best_fx = 0.0f;
   float best_fy = 0.0f;
   float best_fz = 0.0f;
+  int best_focad_id = -1;
 
   int found = 0;
 
@@ -67,6 +68,7 @@ FLAMEGPU_AGENT_FUNCTION(fnode_focad_interaction, flamegpu::MessageSpatial3D, fla
       best_fx = message.getVariable<float>("fx");
       best_fy = message.getVariable<float>("fy");
       best_fz = message.getVariable<float>("fz");
+      best_focad_id = message.getVariable<int>("id");
       found = 1;
     }
   }
@@ -75,7 +77,12 @@ FLAMEGPU_AGENT_FUNCTION(fnode_focad_interaction, flamegpu::MessageSpatial3D, fla
     agent_fx += best_fx;
     agent_fy += best_fy;
     agent_fz += best_fz;
+    FLAMEGPU->setVariable<int>("focad_attached", 1);
+    FLAMEGPU->setVariable<int>("focad_id", best_focad_id);
     // printf("fnode_focad_interaction -- FNODE %d found relevant FOCAD with force (%.4f, %.4f, %.4f)\n", agent_id, best_fx, best_fy, best_fz);
+  } else {
+    FLAMEGPU->setVariable<int>("focad_attached", 0);
+    FLAMEGPU->setVariable<int>("focad_id", -1);
   }
 
   FLAMEGPU->setVariable<float>("fx", agent_fx);

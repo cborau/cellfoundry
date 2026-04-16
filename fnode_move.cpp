@@ -460,6 +460,15 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
  
   //printf("ECM move ID: %d clamps after -> (%d, %d, %d, %d, %d, %d)\n", id, clamped_bx_pos, clamped_bx_neg, clamped_by_pos, clamped_by_neg, clamped_bz_pos, clamped_bz_neg);
 
+  if (DEBUG_PRINTING == 1) {
+    int _focad_attached = FLAMEGPU->getVariable<int>("focad_attached");
+    if (_focad_attached == 1) {
+      int _focad_id = FLAMEGPU->getVariable<int>("focad_id");
+      printf("[fnode_move] FNODE %d (FOCAD %d attached)  pre=(%.6f, %.6f, %.6f)  post=(%.6f, %.6f, %.6f)  v=(%.6f, %.6f, %.6f)\n",
+             id, _focad_id, prev_agent_x, prev_agent_y, prev_agent_z, agent_x, agent_y, agent_z, agent_vx, agent_vy, agent_vz);
+    }
+  }
+
   //Update the agents position and velocity
   FLAMEGPU->setVariable<float>("x",agent_x);
   FLAMEGPU->setVariable<float>("y",agent_y);

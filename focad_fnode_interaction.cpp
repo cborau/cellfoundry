@@ -318,6 +318,12 @@ FLAMEGPU_AGENT_FUNCTION(focad_fnode_interaction, flamegpu::MessageSpatial3D, fla
   const float dz = message_z - agent_z_i;
   const float ell = sqrtf(dx*dx + dy*dy + dz*dz);  
 
+  // If the FNODE overshot past the rest length (explicit-Euler overshoot),
+  // the myosin motor takes up the slack so the arm never goes limp.
+  if (agent_attached && ell < agent_rest_length) {
+    agent_rest_length = ell;
+  }
+
   float Fmag = 0.0f;
   if (INCLUDE_LINC_COUPLING) {
     // -----------------------------
