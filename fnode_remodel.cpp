@@ -17,15 +17,17 @@ FLAMEGPU_AGENT_FUNCTION(fnode_remodel, flamegpu::MessageSpatial3D, flamegpu::Mes
   if (INCLUDE_NETWORK_REMODELING == 0) {
     return flamegpu::ALIVE;
   }
-
+  int DEBUG_PRINTING = FLAMEGPU->environment.getProperty<int>("DEBUG_PRINTING");
   const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
   const uint8_t N_CELL_TYPES = 3; // WARNING: must match the value in the main python script.
-  // Per-cell-type degradation / deposition rates
+  // Per-cell-type degradation / deposition rates and cell radii
   float FNODE_DEGRADATION_RATE[N_CELL_TYPES];
   float FNODE_DEPOSITION_RATE[N_CELL_TYPES];
+  float CELL_RADIUS[N_CELL_TYPES];
   for (int ct = 0; ct < N_CELL_TYPES; ct++) {
     FNODE_DEGRADATION_RATE[ct] = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FNODE_DEGRADATION_RATE", ct);
     FNODE_DEPOSITION_RATE[ct]  = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("FNODE_DEPOSITION_RATE", ct);
+    CELL_RADIUS[ct]            = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_RADIUS", ct);
   }
   const float FNODE_CELL_DEGRADATION_RADIUS = FLAMEGPU->environment.getProperty<float>("FNODE_CELL_DEGRADATION_RADIUS");
 
@@ -51,8 +53,16 @@ FLAMEGPU_AGENT_FUNCTION(fnode_remodel, flamegpu::MessageSpatial3D, flamegpu::Mes
     const float r2 = dx * dx + dy * dy + dz * dz;
     if (r2 <= r2max) {
       const int ct = message.getVariable<int>("cell_type");
-      deg_sum += fmaxf(0.0f, FNODE_DEGRADATION_RATE[ct]);
-      dep_sum += fmaxf(0.0f, FNODE_DEPOSITION_RATE[ct]);
+      // Distance-dependent weight: full effect at distance <= CELL_RADIUS, zero at FNODE_CELL_DEGRADATION_RADIUS
+      const float dist = sqrtf(r2);
+      const float cr = CELL_RADIUS[ct];
+      float weight = 1.0f;
+      if (dist > cr && FNODE_CELL_DEGRADATION_RADIUS > cr) {
+        weight = (FNODE_CELL_DEGRADATION_RADIUS - dist) / (FNODE_CELL_DEGRADATION_RADIUS - cr);
+      }
+      weight = fminf(1.0f, fmaxf(0.0f, weight));
+      deg_sum += weight * fmaxf(0.0f, FNODE_DEGRADATION_RATE[ct]);
+      dep_sum += weight * fmaxf(0.0f, FNODE_DEPOSITION_RATE[ct]);
     }
   }
 
@@ -73,7 +83,9 @@ FLAMEGPU_AGENT_FUNCTION(fnode_remodel, flamegpu::MessageSpatial3D, flamegpu::Mes
   const float net_degradation = degradation - reinforcement;
   if (net_degradation >= 1.0f) {
     FLAMEGPU->setVariable<int>("marked_for_removal", 1);
-    printf("FNODE %d at (%f, %f, %f) is marked for removal due to degradation (deg=%.3f, reinf=%.3f)\n", id, agent_x, agent_y, agent_z, degradation, reinforcement);
+    if (DEBUG_PRINTING == 1) {
+      printf("[fnode_remodel] FNODE %d at (%.3f, %.3f, %.3f) marked for removal (deg=%.3f, reinf=%.3f)\n", id, agent_x, agent_y, agent_z, degradation, reinforcement);
+    }
   } else {
     FLAMEGPU->setVariable<int>("marked_for_removal", 0);
   }

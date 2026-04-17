@@ -2934,39 +2934,53 @@ def recompute_derived_params(ns: dict, pinned: set | None = None) -> None:
 
     # --- Boundary stiffness / damping arrays ---
     if "RELATIVE_BOUNDARY_STIFFNESS" in ns and "BOUNDARY_STIFFNESS_VALUE" in ns:
-        ns["BOUNDARY_STIFFNESS"] = [ns["BOUNDARY_STIFFNESS_VALUE"] * r for r in ns["RELATIVE_BOUNDARY_STIFFNESS"]]
+        if "BOUNDARY_STIFFNESS" not in pinned:
+            ns["BOUNDARY_STIFFNESS"] = [ns["BOUNDARY_STIFFNESS_VALUE"] * r for r in ns["RELATIVE_BOUNDARY_STIFFNESS"]]
     if "RELATIVE_BOUNDARY_STIFFNESS" in ns and "BOUNDARY_DUMPING_VALUE" in ns:
-        ns["BOUNDARY_DUMPING"] = [ns["BOUNDARY_DUMPING_VALUE"] * r for r in ns["RELATIVE_BOUNDARY_STIFFNESS"]]
-    ns["MOVING_BOUNDARIES"] = (
-        any(r != 0.0 for r in ns.get("BOUNDARY_DISP_RATES_PARALLEL", [0]))
-        or any(r != 0.0 for r in ns.get("BOUNDARY_DISP_RATES", [0]))
-    )
+        if "BOUNDARY_DUMPING" not in pinned:
+            ns["BOUNDARY_DUMPING"] = [ns["BOUNDARY_DUMPING_VALUE"] * r for r in ns["RELATIVE_BOUNDARY_STIFFNESS"]]
+    if "MOVING_BOUNDARIES" not in pinned:
+        ns["MOVING_BOUNDARIES"] = (
+            any(r != 0.0 for r in ns.get("BOUNDARY_DISP_RATES_PARALLEL", [0]))
+            or any(r != 0.0 for r in ns.get("BOUNDARY_DISP_RATES", [0]))
+        )
 
     # --- Oscillatory ---
     if ns.get("OSCILLATORY_SHEAR_ASSAY") and "MAX_STRAIN" in ns and "BOUNDARY_COORDS" in ns:
         bc = ns["BOUNDARY_COORDS"]
-        ns["OSCILLATORY_AMPLITUDE"] = ns["MAX_STRAIN"] * (bc[2] - bc[3])
-        ns["OSCILLATORY_W"] = 2 * math.pi * ns.get("OSCILLATORY_FREQ", 0.05) * ns.get("TIME_STEP", 0.1)
+        if "OSCILLATORY_AMPLITUDE" not in pinned:
+            ns["OSCILLATORY_AMPLITUDE"] = ns["MAX_STRAIN"] * (bc[2] - bc[3])
+        if "OSCILLATORY_W" not in pinned:
+            ns["OSCILLATORY_W"] = 2 * math.pi * ns.get("OSCILLATORY_FREQ", 0.05) * ns.get("TIME_STEP", 0.1)
 
     # --- Fibre network derived ---
     if "FIBRE_SEGMENT_K_ELAST" in ns:
-        ns["FIBRE_NODE_REPULSION_K"] = 0.2 * ns["FIBRE_SEGMENT_K_ELAST"]
+        if "FIBRE_NODE_REPULSION_K" not in pinned:
+            ns["FIBRE_NODE_REPULSION_K"] = 0.2 * ns["FIBRE_SEGMENT_K_ELAST"]
     if "FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE" in ns:
         eq = ns["FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE"]
-        ns["FNODE_CELL_DEGRADATION_RADIUS"] = 0.75 * eq
+        if "FNODE_CELL_DEGRADATION_RADIUS" not in pinned:
+            ns["FNODE_CELL_DEGRADATION_RADIUS"] = 0.75 * eq
         _nct = ns["N_CELL_TYPES"]
-        ns["FNODE_BIRTH_RADIUS"] = [0.5 * eq] * _nct
-        ns["FNODE_BIRTH_LINK_MAX_DISTANCE"] = [2.0 * eq] * _nct
-        ns["MAX_SEARCH_RADIUS_FNODES"] = eq / 10.0
+        if "FNODE_BIRTH_RADIUS" not in pinned:
+            ns["FNODE_BIRTH_RADIUS"] = [0.5 * eq] * _nct
+        if "FNODE_BIRTH_LINK_MAX_DISTANCE" not in pinned:
+            ns["FNODE_BIRTH_LINK_MAX_DISTANCE"] = [2.0 * eq] * _nct
+        if "MAX_SEARCH_RADIUS_FNODES" not in pinned:
+            ns["MAX_SEARCH_RADIUS_FNODES"] = eq / 10.0
 
     # --- Cell derived (per-type lists or scalars) ---
     if "CELL_RADIUS" in ns:
         cr = ns["CELL_RADIUS"]
-        ns["CELL_NUCLEUS_RADIUS"] = _map1(lambda r: r / 2, cr)
-        ns["CELL_FNODE_EXCLUSION_DISTANCE"] = list(cr) if _is_list(cr) else cr
-        ns["CELL_CELL_ADHESION_RANGE"] = _map1(lambda r: 0.5 * r, cr)
+        if "CELL_NUCLEUS_RADIUS" not in pinned:
+            ns["CELL_NUCLEUS_RADIUS"] = _map1(lambda r: r / 2, cr)
+        if "CELL_FNODE_EXCLUSION_DISTANCE" not in pinned:
+            ns["CELL_FNODE_EXCLUSION_DISTANCE"] = list(cr) if _is_list(cr) else cr
+        if "CELL_CELL_ADHESION_RANGE" not in pinned:
+            ns["CELL_CELL_ADHESION_RANGE"] = _map1(lambda r: 0.5 * r, cr)
         _max_cr = max(cr) if _is_list(cr) else cr
-        ns["MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION"] = 3.0 * _max_cr
+        if "MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION" not in pinned:
+            ns["MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION"] = 3.0 * _max_cr
     if "CELL_SPEED_REF" in ns:
         cs = ns["CELL_SPEED_REF"]
         # Use BROWNIAN_MOTION_STRENGTH_FACTOR if present, else default to 2.0
@@ -2999,41 +3013,56 @@ def recompute_derived_params(ns: dict, pinned: set | None = None) -> None:
     m = ns.get("CYCLE_PHASE_M_DURATION")
     if all(v is not None for v in (g1, s, g2, m)):
         if _is_list(g1):
-            ns["CYCLE_PHASE_G1_START"] = [0.0] * len(g1)
-            ns["CYCLE_PHASE_S_START"] = list(g1)
-            ns["CYCLE_PHASE_G2_START"] = [a + b for a, b in zip(g1, s)]
-            ns["CYCLE_PHASE_M_START"] = [a + b + c for a, b, c in zip(g1, s, g2)]
-            ns["CELL_CYCLE_DURATION"] = [a + b + c + d for a, b, c, d in zip(g1, s, g2, m)]
+            if "CYCLE_PHASE_G1_START" not in pinned:
+                ns["CYCLE_PHASE_G1_START"] = [0.0] * len(g1)
+            if "CYCLE_PHASE_S_START" not in pinned:
+                ns["CYCLE_PHASE_S_START"] = list(g1)
+            if "CYCLE_PHASE_G2_START" not in pinned:
+                ns["CYCLE_PHASE_G2_START"] = [a + b for a, b in zip(g1, s)]
+            if "CYCLE_PHASE_M_START" not in pinned:
+                ns["CYCLE_PHASE_M_START"] = [a + b + c for a, b, c in zip(g1, s, g2)]
+            if "CELL_CYCLE_DURATION" not in pinned:
+                ns["CELL_CYCLE_DURATION"] = [a + b + c + d for a, b, c, d in zip(g1, s, g2, m)]
         else:
-            ns["CYCLE_PHASE_G1_START"] = 0.0
-            ns["CYCLE_PHASE_S_START"] = g1
-            ns["CYCLE_PHASE_G2_START"] = g1 + s
-            ns["CYCLE_PHASE_M_START"] = g1 + s + g2
-            ns["CELL_CYCLE_DURATION"] = g1 + s + g2 + m
+            if "CYCLE_PHASE_G1_START" not in pinned:
+                ns["CYCLE_PHASE_G1_START"] = 0.0
+            if "CYCLE_PHASE_S_START" not in pinned:
+                ns["CYCLE_PHASE_S_START"] = g1
+            if "CYCLE_PHASE_G2_START" not in pinned:
+                ns["CYCLE_PHASE_G2_START"] = g1 + s
+            if "CYCLE_PHASE_M_START" not in pinned:
+                ns["CYCLE_PHASE_M_START"] = g1 + s + g2
+            if "CELL_CYCLE_DURATION" not in pinned:
+                ns["CELL_CYCLE_DURATION"] = g1 + s + g2 + m
 
     # --- Cell concentration mass (reference copy; actual per-agent mass uses per-type volume at init) ---
     if "INIT_CELL_CONCENTRATION_VALS" in ns:
-        ns["INIT_CELL_CONC_MASS_VALS"] = list(ns["INIT_CELL_CONCENTRATION_VALS"])
+        if "INIT_CELL_CONC_MASS_VALS" not in pinned:
+            ns["INIT_CELL_CONC_MASS_VALS"] = list(ns["INIT_CELL_CONCENTRATION_VALS"])
 
     # --- FOCAD derived (scalar env property; per-agent values use actual cell-type radii at init) ---
     if "CELL_RADIUS" in ns:
         cr = ns["CELL_RADIUS"]
-        if _is_list(cr):
-            # Reference rest length = shortest across types (conservative for min-rest-length floor)
-            rl_vals = [r - r / 2 for r in cr]
-            ns["FOCAD_REST_LENGTH_0"] = min(rl_vals)
-        else:
-            ns["FOCAD_REST_LENGTH_0"] = cr - cr / 2
-        ns["FOCAD_MIN_REST_LENGTH"] = ns["FOCAD_REST_LENGTH_0"] / 10.0
+        if "FOCAD_REST_LENGTH_0" not in pinned:
+            if _is_list(cr):
+                # Reference rest length = shortest across types (conservative for min-rest-length floor)
+                rl_vals = [r - r / 2 for r in cr]
+                ns["FOCAD_REST_LENGTH_0"] = min(rl_vals)
+            else:
+                ns["FOCAD_REST_LENGTH_0"] = cr - cr / 2
+        if "FOCAD_MIN_REST_LENGTH" not in pinned:
+            ns["FOCAD_MIN_REST_LENGTH"] = ns["FOCAD_REST_LENGTH_0"] / 10.0
     if "INIT_N_FOCAD_PER_CELL" in ns:
         _nct = ns["N_CELL_TYPES"]
-        ns["FOCAD_BIRTH_N_MAX"] = [float(3 * ns["INIT_N_FOCAD_PER_CELL"])] * _nct
+        if "FOCAD_BIRTH_N_MAX" not in pinned:
+            ns["FOCAD_BIRTH_N_MAX"] = [float(3 * ns["INIT_N_FOCAD_PER_CELL"])] * _nct
 
     # --- MAX_FOCAD_ARM_LENGTH uses max CELL_RADIUS ---
     if "CELL_RADIUS" in ns:
         cr = ns["CELL_RADIUS"]
         _max_cr = max(cr) if _is_list(cr) else cr
-        ns["MAX_FOCAD_ARM_LENGTH"] = 3 * _max_cr
+        if "MAX_FOCAD_ARM_LENGTH" not in pinned:
+            ns["MAX_FOCAD_ARM_LENGTH"] = 3 * _max_cr
 
     # --- Max expected N cells ---
     steps = ns.get("STEPS", 0)
@@ -3044,11 +3073,12 @@ def recompute_derived_params(ns: dict, pinned: set | None = None) -> None:
         _min_cycle = min(cycle_dur) if cycle_dur else 0
     else:
         _min_cycle = cycle_dur
-    if ns.get("INCLUDE_CELLS") and ns.get("INCLUDE_CELL_CYCLE") and _min_cycle > 0:
-        doublings = (steps * dt) / _min_cycle
-        ns["MAX_EXPECTED_N_CELLS"] = max(n_cells, int(math.ceil(n_cells * (2.0 ** doublings) * 2.0)))
-    else:
-        ns["MAX_EXPECTED_N_CELLS"] = n_cells + 1
+    if "MAX_EXPECTED_N_CELLS" not in pinned:
+        if ns.get("INCLUDE_CELLS") and ns.get("INCLUDE_CELL_CYCLE") and _min_cycle > 0:
+            doublings = (steps * dt) / _min_cycle
+            ns["MAX_EXPECTED_N_CELLS"] = max(n_cells, int(math.ceil(n_cells * (2.0 ** doublings) * 2.0)))
+        else:
+            ns["MAX_EXPECTED_N_CELLS"] = n_cells + 1
 
 
 def apply_param_overrides(ns: dict, overrides: dict) -> None:
