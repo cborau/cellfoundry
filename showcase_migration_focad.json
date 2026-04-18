@@ -32,7 +32,7 @@
   "INCLUDE_NETWORK_REMODELING": false,
 
   "INCLUDE_FOCAL_ADHESIONS": true,
-  "INCLUDE_LINC_COUPLING": true,
+  "INCLUDE_LINC_COUPLING": false,
 
   "INCLUDE_DIFFUSION": false,
   "INCLUDE_CHEMOTAXIS": false,
@@ -44,9 +44,9 @@
   "CELL_NUCLEUS_RADIUS": [5.0, 5.0, 5.0],
 
   "___ CELL MIGRATION ___": "---------------------------------------------------",
-  "CELL_SPEED_REF": [0.08, 0.08, 0.08],
-  "BROWNIAN_MOTION_STRENGTH_FACTOR": [0.5, 0.5, 0.5],
-  "ROTATIONAL_DIFFUSION_RATE": [0.005, 0.005, 0.005],
+  "CELL_SPEED_REF": [0.5, 0.5, 0.5],
+  "BROWNIAN_MOTION_STRENGTH_FACTOR": [2.0, 2.0, 2.0],
+  "ROTATIONAL_DIFFUSION_RATE": [0.05, 0.05, 0.05],
 
   "___ CELL MECHANICS ___": "---------------------------------------------------",
   "CELL_K_ELAST": [2.0, 2.0, 2.0],
@@ -71,17 +71,20 @@
   "MAX_STRAIN_K_FACTOR": 12.0,
 
   "___ FOCAL ADHESION GEOMETRY & MECHANICS (exaggerated for visible deformation) ___": "",
-  "INIT_N_FOCAD_PER_CELL": 12,
+  "INIT_N_FOCAD_PER_CELL": 6,
   "N_ANCHOR_POINTS": 50,
-  "ENABLE_FOCAD_BIRTH": true,
-  "FOCAD_K_FA": [15.0, 15.0, 15.0],
-  "FOCAD_F_MAX": [0.0, 0.0, 0.0],
-  "FOCAD_V_C": [0.1, 0.1, 0.1],
+  "ENABLE_FOCAD_BIRTH": false,
+  "FOCAD_K_FA": [0.1, 0.1, 0.1],
+  "FOCAD_F_MAX": [1.0, 1.0, 1.0],
+  "FOCAD_V_C": [3.0, 3.0, 3.0],
   "MAX_SEARCH_RADIUS_FOCAD": 15.0,
+  "FOCAD_REST_LENGTH_0": 7.5,
+  "FOCAD_MIN_REST_LENGTH": 5.0,
+
 
   "___ FOCAL ADHESION BINDING KINETICS ___": "-----------------------------------",
   "FOCAD_K_ON": [8.0, 8.0, 8.0],
-  "FOCAD_K_OFF_0": [0.0001, 0.0001, 0.0001],
+  "FOCAD_K_OFF_0": [0.0, 0.0, 0.0],
   "FOCAD_F_C": [5.0, 5.0, 5.0],
   "USE_CATCH_BOND": true,
   "CATCH_BOND_CATCH_SCALE": [4.0, 4.0, 4.0],
@@ -90,16 +93,16 @@
   "CATCH_BOND_F_SLIP": [4.0, 4.0, 4.0],
 
   "___ FOCAL ADHESION REINFORCEMENT ___": "--------------------------------------",
-  "FOCAD_K_REINF": [0.005, 0.005, 0.005],
+  "FOCAD_K_REINF": [0.0, 0.0, 0.0],
   "FOCAD_F_REINF": [1.0, 1.0, 1.0],
   "FOCAD_K_FA_MAX": [80.0, 80.0, 80.0],
   "FOCAD_K_FA_DECAY": [0.0, 0.0, 0.0],
 
   "___ FOCAL ADHESION STATE TRANSITIONS ___": "-----------------------------------",
   "FOCAD_F_MATURE": [0.5, 0.5, 0.5],
-  "FOCAD_T_NASCENT_MAX": [120.0, 120.0, 120.0],
-  "FOCAD_T_DETACHED_GRACE": [30.0, 30.0, 30.0],
-  "FOCAD_T_DISASSEMBLY": [20.0, 20.0, 20.0],
+  "FOCAD_T_NASCENT_MAX": [1e12, 1e12, 1e12],
+  "FOCAD_T_DETACHED_GRACE": [1e12, 1e12, 1e12],
+  "FOCAD_T_DISASSEMBLY": [1e12, 1e12, 1e12],
 
   "___ FOCAD POLARITY ___": "---------------------------------------------------",
   "FOCAD_POLARITY_KON_FRONT_GAIN": [2.0, 2.0, 2.0],
@@ -107,8 +110,8 @@
   "FOCAD_POLARITY_KOFF_REAR_GAIN": [1.5, 1.5, 1.5],
 
   "___ FOCAD BIRTH ___": "------------------------------------------------------",
-  "FOCAD_BIRTH_N_MIN": [2.0, 2.0, 2.0],
-  "FOCAD_BIRTH_N_MAX": [36.0, 36.0, 36.0],
+  "FOCAD_BIRTH_N_MIN": [1.0, 1.0, 1.0],
+  "FOCAD_BIRTH_N_MAX": [8.0, 8.0, 8.0],
   "FOCAD_BIRTH_K_0": [0.005, 0.005, 0.005],
   "FOCAD_BIRTH_K_MAX": [0.05, 0.05, 0.05],
   "FOCAD_BIRTH_REFRACTORY": [15.0, 15.0, 15.0],
@@ -122,5 +125,5 @@
   "NUCLEUS_E": [0.3, 0.3, 0.3],
   "NUCLEUS_NU": [0.48, 0.48, 0.48],
   "NUCLEUS_TAU": [5.0, 5.0, 5.0],
-  "NUCLEUS_EPS_CLAMP": [0.25, 0.25, 0.25]
+  "NUCLEUS_EPS_CLAMP": [0.5, 0.5, 0.5]
 }
