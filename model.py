@@ -21,7 +21,7 @@ import os
 import pickle
 import matplotlib.pyplot as plt
 import check_hard_coded_values
-from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary, apply_param_overrides, load_param_overrides_from_cli, loadCachedCellInitialization, generateCellInitializationData
+from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary, apply_param_overrides, load_param_overrides_from_cli, loadCachedCellInitialization, generateCellInitializationData, recompute_derived_params
 
 # TODO LIST:
 # A- Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
@@ -36,7 +36,7 @@ start_time = time.time()
 ENSEMBLE = False
 ENSEMBLE_RUNS = 0
 VISUALISATION = False  # Change to false if pyflamegpu has not been built with visualisation support
-DEBUG_PRINTING = False
+DEBUG_PRINTING = True
 ABORT_ON_UNSTABLE_FNODE_MOVE = False  # If True, abort when any FNODE moves farther than one segment rest length in a single step.
 PAUSE_EVERY_STEP = False  # If True, the visualization stops every step until P is pressed
 SAVE_PICKLE = True  # If True, dumps model configuration into a pickle file for post-processing
@@ -147,8 +147,8 @@ if OSCILLATORY_SHEAR_ASSAY:
 # +====================================================================+
 # | FIBRE NETWORK PARAMETERS                                           |
 # +====================================================================+
-INCLUDE_FIBRE_NETWORK = False
-NETWORK_FILE = 'mini_network.pkl'  # path to the .pkl file with node_coords + connectivity
+INCLUDE_FIBRE_NETWORK = True
+NETWORK_FILE = 'network_medium_density.pkl'  # path to the .pkl file with node_coords + connectivity
 ALLOW_IRREGULAR_NETWORK = False  # default: False, meaning that all boundaries must have network nodes attached (e.g. a network going from -y to y and touching the other boundaries should have this variable set to True)
 
 # Fitting parameters for the fiber strain-stiffening phenomena
@@ -192,9 +192,9 @@ FNODE_BIRTH_REFRACTORY = [20.0, 20.0, 20.0]  # [s]
 # +====================================================================+
 # | DIFFUSION PARAMETERS                                               |
 # +====================================================================+
-INCLUDE_DIFFUSION = False
+INCLUDE_DIFFUSION = True
 N_SPECIES = 2  # number of diffusing species.WARNING: make sure that the value coincides with the one declared in TODO
-DIFFUSION_COEFF_MULTI = [300.0, 300.0]  # diffusion coefficient in [um^2/s] per specie
+DIFFUSION_COEFF_MULTI = [5.0, 5.0]  # diffusion coefficient in [um^2/s] per specie
 BOUNDARY_CONC_INIT_MULTI = [[2.5, 2.5, 2.5, 2.5, 2.5, 2.5],
                             # initial concentration at each surface (+X,-X,+Y,-Y,+Z,-Z) [ng/ml]. -1.0 means no condition assigned. All agents are assigned 0 by default.
                             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
@@ -202,7 +202,7 @@ BOUNDARY_CONC_INIT_MULTI = [[2.5, 2.5, 2.5, 2.5, 2.5, 2.5],
 BOUNDARY_CONC_FIXED_MULTI = [[2.5, 2.5, 2.5, 2.5, 2.5, 2.5],
                              # concentration boundary conditions at each surface. WARNING: -1.0 means initial condition prevails. Don't use 0.0 as initial condition if that value is not fixed. Use -1.0 instead
                              [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
-HETEROGENEOUS_DIFFUSION = False  # if True, diffusion coefficient is multiplied by (1 - local ECM density) to simulate hindered diffusion through the ECM. WARNING: this is a very simple approximation of the phenomenon and highly depends on grid density (N). 
+HETEROGENEOUS_DIFFUSION = True  # if True, diffusion coefficient is multiplied by (1 - local ECM density) to simulate hindered diffusion through the ECM. WARNING: this is a very simple approximation of the phenomenon and highly depends on grid density (N). 
 # +====================================================================+
 # | CELL PARAMETERS                                                    |
 # +====================================================================+
@@ -223,15 +223,15 @@ INCLUDE_CELL_CYCLE = True # If True, cells go through a simplified cell cycle wi
 DEAD_CELLS_DISAPPEAR = False  # If True, dead CELL agents are removed; if False, they remain inert with dead=1.
 PERIODIC_BOUNDARIES_FOR_CELLS = False
 INCLUDE_CELL_FNODE_REPULSION = False
-N_CELLS = 10
-ORGANOID_ASSAY = True  # If True, cells are initialized in a small cluster in the center of the domain to simulate an organoid. If False, they are initialized randomly in the whole domain.
+N_CELLS = 100
+ORGANOID_ASSAY = False  # If True, cells are initialized in a small cluster in the center of the domain to simulate an organoid. If False, they are initialized randomly in the whole domain.
 ORGANOID_INIT_RADIUS = 20.0  # [um] Radius of the initial cell cluster when ORGANOID_ASSAY is True. Cells are placed randomly within a sphere of this radius centered at the domain origin.
 
 # Per-cell-type mechanical & morphological properties
 # Each is a list of length N_CELL_TYPES.  A scalar is broadcast to all types.
 CELL_K_ELAST = [2.0, 2.0, 2.0]  # [nN/um]
 CELL_D_DUMPING = [0.4, 0.4, 0.4]  # [nN·s/um]
-CELL_RADIUS = [8.412, 8.412, 8.412] # [um]
+CELL_RADIUS = [5.0, 5.0, 5.0] # [um]
 CELL_NUCLEUS_RADIUS = [r / 2 for r in CELL_RADIUS] # [um]
 CELL_SPEED_REF = [0.00041817020062396415, 0.0006199050301202626, 0.0004034913399763545] # [um/s] Another option is to define it according to grid distance ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / X. WARNING: if cell speed is too high, consider increasing N or reducing TIME_STEP.
 BROWNIAN_MOTION_STRENGTH_FACTOR = [0.001, 0.001, 0.001]
@@ -521,6 +521,9 @@ if INCLUDE_FIBRE_NETWORK:
         N_FIBRES = n_fib
     else:
         N_FIBRES = None
+    # FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE may have been updated by load_fibre_network
+    # (matched to the network file's EDGE_LENGTH). Recompute derived params.
+    recompute_derived_params(globals(), pinned=set(_PARAM_OVERRIDES.keys()) if _PARAM_OVERRIDES else None)
 else: 
     N_NODES = None
     NODE_COORDS = None

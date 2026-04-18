@@ -75,6 +75,7 @@ FLAMEGPU_DEVICE_FUNCTION void vec3Normalize(float &x, float &y, float &z) {
  * Purpose:
  *   Compute local FNODE crowding around each ECM voxel and downscale diffusion
  *   coefficients to represent heterogeneous transport in dense regions.
+ *   Only called if HETEROGENEOUS_DIFFUSION is true in the model config.
  *
  * Inputs:
  *   - Spatial FNODE messages around each ECM position
@@ -91,7 +92,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_Dsp_update, flamegpu::MessageSpatial3D, flamegpu::Me
   const uint8_t N_SPECIES = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
   float D_sp[N_SPECIES] = {}; 
   for (int i = 0; i < N_SPECIES; i++) {
-    D_sp[i] = FLAMEGPU->getVariable<float, N_SPECIES>("D_sp", i);
+    D_sp[i] = FLAMEGPU->environment.getProperty<float>("DIFFUSION_COEFF_MULTI", i); // Read base value each step to avoid compounding reduction
   }
   // ECM agent position
   float agent_x = FLAMEGPU->getVariable<float>("x");
@@ -129,7 +130,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_Dsp_update, flamegpu::MessageSpatial3D, flamegpu::Me
   const float rho = (float)n_fibre / avg;
   
   // Tunables (use manual_tests/test_diff_reduction.py to find optimal values for a given problem)
-  const float alpha = 1.0f;     // strength of reduction
+  const float alpha = 4.0f;     // strength of reduction
   const float m_min = 0.05f;    // floor multiplier so diffusion never fully stops
 
   // Saturating mapping
