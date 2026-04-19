@@ -1,10 +1,9 @@
 """
-Compare migration metrics, directionality, and diffusion-profile evolution for two simulation conditions in a single 3x4 figure.
+Compare migration metrics, directionality, and diffusion-profile evolution for two simulation conditions in a single 2x4 figure.
 
 The figure layout is fixed as follows:
-  - Row 1: vmean (condition 1), vmean (condition 2), veff (condition 1), veff (condition 2)
-  - Row 2: directionality ratio (condition 1), directionality ratio (condition 2), blank, blank
-  - Row 3: scalar-profile evolution from ecm_data_t*.vtk in vtk-dir1, scalar-profile evolution from ecm_data_t*.vtk in vtk-dir2, blank, blank
+  - Row 1: vmean (condition 1), veff (condition 1), directionality ratio (condition 1), scalar-profile evolution (condition 1)
+  - Row 2: vmean (condition 2), veff (condition 2), directionality ratio (condition 2), scalar-profile evolution (condition 2)
 
 The script reads:
   - pickle files for CELL_SPEED_METRICS
@@ -16,7 +15,7 @@ Both conditions are required for this comparison layout.
 
 Example call (one line)
 -----------------------
-python postprocessing\plot_migration_diff_profiles_comparison.py --pickle1 result_files\homogeneous_diff\output_data_0.pickle --pickle2 result_files\heterogeneous_diff\output_data_0.pickle --vtk-dir1 result_files\homogeneous_diff --vtk-dir2 result_files\heterogeneous_diff --scalar-name concentration_species_0 --scalar-ylabel "[TGF-$\beta$1 ng/mL]" --x1 0.0 --y1 -500.0 --z1 0.0 --x2 0.0 --y2 0.0 --z2 0.0 --label1 hom --label2 het --type-labels shControl shSMAD2 shSMAD3 --figsize 10 7 --dpi 600 --show --no-titles
+python postprocessing\plot_migration_diff_profiles_comparison.py --pickle1 result_files\homogeneous_diff\output_data_0.pickle --pickle2 result_files\heterogeneous_diff\output_data_0.pickle --vtk-dir1 result_files\homogeneous_diff --vtk-dir2 result_files\heterogeneous_diff --scalar-name concentration_species_0 --scalar-ylabel "[TGF-$\beta$1 ng/mL]" --x1 0.0 --y1 -500.0 --z1 0.0 --x2 0.0 --y2 0.0 --z2 0.0 --label1 Homog.Diff --label2 Heter.Diff --type-labels shControl shSMAD2 shSMAD3 --figsize 10.47 4.75 --dpi 600 --show --no-titles
 """
 
 from __future__ import annotations
@@ -37,7 +36,10 @@ if "--show" not in sys.argv:
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import Normalize
 from matplotlib.ticker import ScalarFormatter
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -496,6 +498,58 @@ def _style_scalar_profile_axis(ax: plt.Axes, *, title: str, show_titles: bool) -
 
 
 
+def _add_time_colorbar_inside_axis(
+    ax: plt.Axes,
+    *,
+    cmap: str,
+    time_hours_max: float,
+    label: str = "Time [h]",
+) -> None:
+    time_hours_max = float(time_hours_max) if np.isfinite(time_hours_max) and time_hours_max > 0 else 24.0
+    sm = ScalarMappable(norm=Normalize(vmin=0.0, vmax=time_hours_max), cmap=cmap)
+    sm.set_array([])
+
+    cax = inset_axes(
+        ax,
+        width="4.5%",
+        height="48%",
+        loc="upper right",
+        bbox_to_anchor=(-0.22, 0.0, 1.0, 1.0),
+        bbox_transform=ax.transAxes,
+        borderpad=0.8,
+    )
+    cb = ax.figure.colorbar(sm, cax=cax, orientation="vertical")
+    cb.set_label(label, fontsize=10)
+    cb.ax.tick_params(labelsize=9)
+    cb.set_ticks([0.0, time_hours_max / 2.0, time_hours_max])
+
+
+
+def _resolve_scalar_time_hours_max(
+    dir_data1: dict[str, Any] | None,
+    dir_data2: dict[str, Any] | None,
+    time_step: float | None,
+) -> float:
+    if time_step is None:
+        return 24.0
+
+    max_hours = 0.0
+    for dir_data in (dir_data1, dir_data2):
+        if dir_data is None or "timesteps" not in dir_data:
+            continue
+        timesteps = np.asarray(dir_data["timesteps"], dtype=float)
+        if timesteps.size == 0:
+            continue
+        max_hours = max(max_hours, float(np.nanmax(timesteps) * time_step / 3600.0))
+
+    if not np.isfinite(max_hours) or max_hours <= 0.0:
+        return 24.0
+    if abs(max_hours - 24.0) < 0.25:
+        return 24.0
+    return max_hours
+
+
+
 def _hide_panel(ax: plt.Axes) -> None:
     ax.axis("off")
 
@@ -518,7 +572,7 @@ def create_combined_figure(
     time_step: float | None = None,
     ymax_vmean: float | None = None,
     ymax_veff: float | None = None,
-    figsize: tuple[float, float] = (20, 15),
+    figsize: tuple[float, float] = (20, 10),
     type_labels: list[str] | None = None,
     show_titles: bool = True,
     hspace: float = 0.35,
@@ -530,7 +584,7 @@ def create_combined_figure(
     scalar_ylabel: str | None = None,
 ) -> plt.Figure:
     fig = plt.figure(figsize=figsize)
-    gs = fig.add_gridspec(3, 4)
+    gs = fig.add_gridspec(2, 4)
 
     all_vmean = np.concatenate([
         metrics1["vmean"].to_numpy(dtype=float),
@@ -545,12 +599,17 @@ def create_combined_figure(
     if ymax_veff is None:
         ymax_veff = float(np.nanmax(all_veff[np.isfinite(all_veff)])) * 1.10
 
-    ax_v1 = fig.add_subplot(gs[0, 0])
-    ax_v2 = fig.add_subplot(gs[0, 1])
-    ax_v3 = fig.add_subplot(gs[0, 2])
-    ax_v4 = fig.add_subplot(gs[0, 3])
+    ax_11 = fig.add_subplot(gs[0, 0])
+    ax_21 = fig.add_subplot(gs[1, 0])
+    ax_12 = fig.add_subplot(gs[0, 1])
+    ax_22 = fig.add_subplot(gs[1, 1])
+    ax_13 = fig.add_subplot(gs[0, 2])
+    ax_23 = fig.add_subplot(gs[1, 2])
+    ax_14 = fig.add_subplot(gs[0, 3])
+    ax_24 = fig.add_subplot(gs[1, 3])
+
     _plot_violin_panel(
-        ax_v1,
+        ax_11,
         metrics1,
         "vmean",
         "vmean [µm/s]",
@@ -562,7 +621,7 @@ def create_combined_figure(
         show_title=show_titles,
     )
     _plot_violin_panel(
-        ax_v2,
+        ax_21,
         metrics2,
         "vmean",
         "vmean [µm/s]",
@@ -574,7 +633,7 @@ def create_combined_figure(
         show_title=show_titles,
     )
     _plot_violin_panel(
-        ax_v3,
+        ax_12,
         metrics1,
         "veff",
         "veff [µm/s]",
@@ -586,7 +645,7 @@ def create_combined_figure(
         show_title=show_titles,
     )
     _plot_violin_panel(
-        ax_v4,
+        ax_22,
         metrics2,
         "veff",
         "veff [µm/s]",
@@ -597,23 +656,19 @@ def create_combined_figure(
         xlabel=label2,
         show_title=show_titles,
     )
-    ax_v1.set_ylim(0, ymax_vmean)
-    ax_v2.set_ylim(0, ymax_vmean)
-    ax_v3.set_ylim(0, ymax_veff)
-    ax_v4.set_ylim(0, ymax_veff)
-    _format_large_yaxis(ax_v1)
-    _format_large_yaxis(ax_v2)
-    _format_large_yaxis(ax_v3)
-    _format_large_yaxis(ax_v4)
 
-    ax_dir1 = fig.add_subplot(gs[1, 0])
-    ax_dir2 = fig.add_subplot(gs[1, 1])
-    ax_blank_21 = fig.add_subplot(gs[1, 2])
-    ax_blank_22 = fig.add_subplot(gs[1, 3])
+    ax_11.set_ylim(0, ymax_vmean)
+    ax_21.set_ylim(0, ymax_vmean)
+    ax_12.set_ylim(0, ymax_veff)
+    ax_22.set_ylim(0, ymax_veff)
+    _format_large_yaxis(ax_11)
+    _format_large_yaxis(ax_21)
+    _format_large_yaxis(ax_12)
+    _format_large_yaxis(ax_22)
 
     if dir_data1 is not None:
         _plot_directionality_panel(
-            ax_dir1,
+            ax_13,
             dir_data1,
             label1,
             time_step=time_step,
@@ -621,11 +676,11 @@ def create_combined_figure(
             show_titles=show_titles,
         )
     else:
-        _hide_panel(ax_dir1)
+        _hide_panel(ax_13)
 
     if dir_data2 is not None:
         _plot_directionality_panel(
-            ax_dir2,
+            ax_23,
             dir_data2,
             label2,
             time_step=time_step,
@@ -633,15 +688,7 @@ def create_combined_figure(
             show_titles=show_titles,
         )
     else:
-        _hide_panel(ax_dir2)
-
-    _hide_panel(ax_blank_21)
-    _hide_panel(ax_blank_22)
-
-    ax_scalar1 = fig.add_subplot(gs[2, 0])
-    ax_scalar2 = fig.add_subplot(gs[2, 1])
-    ax_blank_31 = fig.add_subplot(gs[2, 2])
-    ax_blank_32 = fig.add_subplot(gs[2, 3])
+        _hide_panel(ax_23)
 
     can_plot_scalar = (
         scalar_parent1 is not None
@@ -667,17 +714,21 @@ def create_combined_figure(
             alpha=scalar_alpha,
             title1=label1 if show_titles else "",
             title2=label2 if show_titles else "",
-            axes=[ax_scalar1, ax_scalar2],
+            axes=[ax_14, ax_24],
             ylabel=scalar_ylabel,
         )
-        _style_scalar_profile_axis(ax_scalar1, title=label1, show_titles=show_titles)
-        _style_scalar_profile_axis(ax_scalar2, title=label2, show_titles=show_titles)
+        _style_scalar_profile_axis(ax_14, title=label1, show_titles=show_titles)
+        _style_scalar_profile_axis(ax_24, title=label2, show_titles=show_titles)
+        scalar_time_hours_max = _resolve_scalar_time_hours_max(dir_data1, dir_data2, time_step)
+        _add_time_colorbar_inside_axis(
+            ax_24,
+            cmap=scalar_cmap,
+            time_hours_max=scalar_time_hours_max,
+            label="Time [h]",
+        )
     else:
-        _hide_panel(ax_scalar1)
-        _hide_panel(ax_scalar2)
-
-    _hide_panel(ax_blank_31)
-    _hide_panel(ax_blank_32)
+        _hide_panel(ax_14)
+        _hide_panel(ax_24)
 
     _apply_layout(fig, hspace, wspace)
     return fig
@@ -697,7 +748,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target2", default=None, help="Target CSV for condition 2")
     parser.add_argument("--vtk-dir1", default=None, help="Directory with cells_tXXXX.vtk and ecm_data_tXXXX.vtk for condition 1")
     parser.add_argument("--vtk-dir2", default=None, help="Directory with cells_tXXXX.vtk and ecm_data_tXXXX.vtk for condition 2")
-    parser.add_argument("--scalar-name", default=None, help="Scalar name for row 3 diffusion-profile plots")
+    parser.add_argument("--scalar-name", default=None, help="Scalar name for diffusion-profile plots in column 4")
     parser.add_argument("--x1", type=float, default=None, help="First point x for scalar profile extraction")
     parser.add_argument("--y1", type=float, default=None, help="First point y for scalar profile extraction")
     parser.add_argument("--z1", type=float, default=None, help="First point z for scalar profile extraction")
@@ -708,13 +759,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scalar-cmap", default="viridis", help="Colormap for scalar profile evolution")
     parser.add_argument("--scalar-linewidth", type=float, default=1.5, help="Line width for scalar profiles")
     parser.add_argument("--scalar-alpha", type=float, default=0.9, help="Alpha for scalar profiles")
-    parser.add_argument("--scalar-ylabel", default=None, help="Custom y-axis label for scalar profile plots (row 3)")
+    parser.add_argument("--scalar-ylabel", default=None, help="Custom y-axis label for scalar profile plots")
     parser.add_argument("--outdir", default=str(DEFAULT_OUTPUT_DIR), help="Directory for output figure")
     parser.add_argument("--tag", default="comparison", help="Suffix tag for output filename")
     parser.add_argument("--show", action="store_true", help="Display figure interactively")
     parser.add_argument("--ymax-vmean", type=float, default=None, help="Upper y-axis limit for vmean panels")
     parser.add_argument("--ymax-veff", type=float, default=None, help="Upper y-axis limit for veff panels")
-    parser.add_argument("--figsize", type=float, nargs=2, default=[20, 15], metavar=("W", "H"), help="Figure size in inches")
+    parser.add_argument("--figsize", type=float, nargs=2, default=[20, 10], metavar=("W", "H"), help="Figure size in inches")
     parser.add_argument("--dpi", type=int, default=600, help="Resolution for saved figure")
     parser.add_argument(
         "--type-labels",
@@ -812,17 +863,30 @@ def main() -> None:
         scalar_tol=args.scalar_tol,
         scalar_ylabel=args.scalar_ylabel,
     )
+    
+    fig.subplots_adjust(
+        top=0.95,
+        bottom=0.115,
+        left=0.07,
+        right=0.945,
+        hspace=0.35,
+        wspace=0.42,
+    )
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     out_path = outdir / f"migration_diff_profiles_comparison_{args.tag}.png"
     fig.savefig(out_path, dpi=args.dpi)
     print(f"Saved -> {out_path}")
+        
 
     if args.show:
         plt.show()
     else:
         plt.close("all")
+        
+    w, h = fig.get_size_inches()
+    print(f"{w:.2f} x {h:.2f} inches after manual resize")
 
     print("Done.")
 
