@@ -11,6 +11,7 @@ optimizer/optuna_cell_speed_results/*
 optimizer/optuna_cell_speed_control_results/*
 optimizer/optuna_cell_speed_tgfb_results/*
 optimizer/optuna_organoid_results/*
+result_files/*
 *.bak
 *.pvsm
 *.png

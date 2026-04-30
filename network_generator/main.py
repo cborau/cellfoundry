@@ -175,12 +175,12 @@ if __name__ == "__main__":
     LY = 1000
     LZ = 1000
     L_FIBER = 45.0
-    RHO = 0.000001 # number of nodes per unit volume
+    RHO = 0.0001 # number of nodes per unit volume (e.g. high density ~0.0001, medium density ~0.00001, low density ~0.000001) - adjust to get desired network density
 
     # EDGE_LENGTH controls the target segment length when splitting long fibers.
     # Units must match l_fiber and lx/ly/lz.
     EDGE_LENGTH = 45.0
-    file_name = 'network_high_density'
+    file_name = 'network_high_density_dummy'
     file_path = os.path.abspath(file_name + '.pkl')
 
     # ENFORCE_BOUNDS keeps optimization moves inside the initial box.
@@ -210,9 +210,9 @@ if __name__ == "__main__":
     #           local minima, then becomes more selective. More sweeps = more trials.
     # N_optimize: number of outer rounds with progressively smaller stepsizes and
     #            swap fractions (cooling schedule), refining the network.
-    N_ANNEAL = 50
-    N_OPTIMIZE = 50
-    N_BRANCHING_OPTIMIZE = 20
+    N_ANNEAL = 5
+    N_OPTIMIZE = 5
+    N_BRANCHING_OPTIMIZE = 5
 
     if os.path.exists(file_name + '.pkl'):
         print(f'Loading network from {file_path}')

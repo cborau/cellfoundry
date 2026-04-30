@@ -19,3 +19,5 @@ python postprocessing\plot_migration_comparison.py `
     --label1 Basal --label2 TGFβ1 `
     --type-labels shControl shSMAD2 shSMAD3 `
     --figsize 10 7 --dpi 600 --show --no-titles
+
+python postprocessing\plot_migration_comparison.py --pickle1 result_files\homogeneous_diff\output_data_0.pickle --pickle2 result_files\heterogeneous_diff\output_data_0.pickle --vtk-dir1 result_files\homogeneous_diff --vtk-dir2 result_files\heterogeneous_diff --label1 hom --label2 het --type-labels shControl shSMAD2 shSMAD3 --figsize 10 7 --dpi 600 --show --no-titles
