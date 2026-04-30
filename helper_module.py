@@ -1849,7 +1849,8 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
         lumen_coords = list()
         lumen_radius = list()
         lumen_agent = FLAMEGPU.agent("LUMEN")
-        lumen_agent.sortInt("id", pyflamegpu.HostAgentAPI.Asc)
+        if lumen_agent.count() > 0:
+            lumen_agent.sortInt("id", pyflamegpu.HostAgentAPI.Asc)
         for ai in lumen_agent.getPopulationData():
             lumen_ids.append(ai.getVariableInt("id"))
             lumen_coords.append((ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z")))
@@ -3206,6 +3207,23 @@ def recompute_derived_params(ns: dict, pinned: set | None = None) -> None:
         _max_cr = max(cr) if _is_list(cr) else cr
         if "MAX_FOCAD_ARM_LENGTH" not in pinned:
             ns["MAX_FOCAD_ARM_LENGTH"] = 3 * _max_cr
+
+    # --- LUMEN derived ---
+    if "LUMEN_RADIUS" in ns:
+        lr = ns["LUMEN_RADIUS"]
+        if "LUMEN_LUMEN_ADHESION_RANGE" not in pinned:
+            ns["LUMEN_LUMEN_ADHESION_RANGE"] = 1.5 * lr
+        if "MAX_SEARCH_RADIUS_LUMEN_LUMEN_INTERACTION" not in pinned:
+            ns["MAX_SEARCH_RADIUS_LUMEN_LUMEN_INTERACTION"] = 3.0 * lr
+        if "CELL_RADIUS" in ns:
+            _max_cr = max(ns["CELL_RADIUS"]) if _is_list(ns["CELL_RADIUS"]) else ns["CELL_RADIUS"]
+            if "MAX_SEARCH_RADIUS_LUMEN_CELL_INTERACTION" not in pinned:
+                ns["MAX_SEARCH_RADIUS_LUMEN_CELL_INTERACTION"] = 2.0 * (_max_cr + lr)
+    if "CELL_SPEED_REF" in ns:
+        cs = ns["CELL_SPEED_REF"]
+        _max_cs = max(cs) if _is_list(cs) else cs
+        if "LUMEN_LUMEN_CELL_DV_MAX" not in pinned:
+            ns["LUMEN_LUMEN_CELL_DV_MAX"] = 0.5 * _max_cs
 
     # --- Max expected N cells ---
     steps = ns.get("STEPS", 0)
