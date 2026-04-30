@@ -21,7 +21,7 @@ import os
 import pickle
 import matplotlib.pyplot as plt
 import check_hard_coded_values
-from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary, apply_param_overrides, load_param_overrides_from_cli, loadCachedCellInitialization, generateCellInitializationData, recompute_derived_params
+from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, getRadialOrientations, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary, apply_param_overrides, load_param_overrides_from_cli, loadCachedCellInitialization, generateCellInitializationData, recompute_derived_params
 
 # TODO LIST:
 # A- Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
@@ -226,6 +226,7 @@ INCLUDE_CELL_FNODE_REPULSION = False
 N_CELLS = 100
 ORGANOID_ASSAY = False  # If True, cells are initialized in a small cluster in the center of the domain to simulate an organoid. If False, they are initialized randomly in the whole domain.
 ORGANOID_INIT_RADIUS = 20.0  # [um] Radius of the initial cell cluster when ORGANOID_ASSAY is True. Cells are placed randomly within a sphere of this radius centered at the domain origin.
+ORGANOID_ORIENTATION_NOISE = 0.0  # [rad] Std-dev of Gaussian angular noise added to the initial radially-outward cell orientations when ORGANOID_ASSAY is True. 0 = perfectly radial; ~0.3 = ~17 deg RMS jitter; increase towards pi for fully random.
 
 # Per-cell-type mechanical & morphological properties
 # Each is a list of length N_CELL_TYPES.  A scalar is broadcast to all types.
@@ -252,6 +253,21 @@ CELL_FNODE_DV_MAX = [0.5 * s for s in CELL_SPEED_REF]  # [um/s] cap for cell-fno
 print(f'Initial cell speed reference (per type): {CELL_SPEED_REF} um/s')   
 print(f'Initial Brownian motion strength (per type): {BROWNIAN_MOTION_STRENGTH} um/s')
 print(f'Rotational diffusion rate (per type): {ROTATIONAL_DIFFUSION_RATE} rad^2/s')
+
+# LUMEN parameters — only active when INCLUDE_CELLS and ORGANOID_ASSAY are both True.
+INCLUDE_LUMEN = False  # If True, LUMEN agents are present (secreted by cells into the organoid interior).
+LUMEN_RADIUS = 3.0  # [um] Radius of a single LUMEN droplet.
+LUMEN_ETA = 0.15  # [nN·s/um] Overdamped drag coefficient for LUMEN agents.
+LUMEN_K_LUMEN_LUMEN_REPULSION = 4.0  # [nN/um] Stiffness of volume-exclusion repulsion between LUMEN agents.
+LUMEN_K_LUMEN_LUMEN_ADHESION = 0.8  # [nN/um] Cohesive surface-tension adhesion strength between LUMEN agents.
+LUMEN_LUMEN_ADHESION_RANGE = 1.5 * LUMEN_RADIUS  # [um] Thickness of the adhesive shell outside contact distance.
+LUMEN_K_LUMEN_CELL_REPULSION = 3.0  # [nN/um] Stiffness of repulsion between LUMEN and CELL agents.
+LUMEN_LUMEN_CELL_DV_MAX = 0.5 * max(CELL_SPEED_REF)  # [um/s] Velocity cap for LUMEN-CELL interaction contributions.
+MAX_SEARCH_RADIUS_LUMEN_LUMEN_INTERACTION = 3.0 * LUMEN_RADIUS  # [um] Spatial message search radius for LUMEN-LUMEN interactions.
+MAX_SEARCH_RADIUS_LUMEN_CELL_INTERACTION = 2.0 * (max(CELL_RADIUS) + LUMEN_RADIUS)  # [um] Spatial message search radius for LUMEN-CELL interactions.
+LUMEN_SECRETION_RATE = 5e-4  # [1/s] Probability rate of secreting a LUMEN droplet per cell per second.
+LUMEN_SECRETION_COOLDOWN = 100.0  # [s] Refractory time after a CELL secretes a LUMEN droplet before it can secrete another.
+LUMEN_DIFFUSION_COEFF_MULTI = [5.0, 5.0]  # [um^2/s] Diffusion coefficients inside LUMEN voxels (overrides fibre-adjusted D_sp).
 
 # Per-cell-type cell cycle timing
 debug_acc = 1.0 # [s] If > 1.0, accelerates the cell cycle for faster testing (all durations are divided by this value). Set to 1.0 for realistic timing.
@@ -568,6 +584,9 @@ if INCLUDE_DIFFUSION:
 
 if INCLUDE_CELLS:
     _max_cell_radius = max(CELL_RADIUS) if isinstance(CELL_RADIUS, list) else CELL_RADIUS
+    if INCLUDE_LUMEN and not ORGANOID_ASSAY:
+        print('ERROR: INCLUDE_LUMEN requires ORGANOID_ASSAY to be True')
+        critical_error = True
     if INCLUDE_FOCAL_ADHESIONS and not INCLUDE_FIBRE_NETWORK: 
         print('ERROR: focal adhesions cannot be included if there is no fibre network to interact with')
         critical_error = True
@@ -648,6 +667,7 @@ ecm_boundary_concentration_conditions_file = "ecm_boundary_concentration_conditi
 ecm_move_file = "ecm_move.cpp"
 ecm_Csp_update_file = "ecm_Csp_update.cpp"
 ecm_Dsp_update_file = "ecm_Dsp_update.cpp"
+ecm_Dsp_lumen_update_file = "ecm_Dsp_lumen_update.cpp"
 
 """
   CELL
@@ -662,6 +682,8 @@ cell_bucket_location_data_file = "cell_bucket_location_data.cpp"
 cell_focad_update_file = "cell_focad_update.cpp"
 cell_cycle_file = "cell_cycle.cpp"
 cell_maxid_update_file = "cell_MaxID_update.cpp"
+cell_lumen_interaction_file = "cell_lumen_interaction.cpp"
+cell_lumen_secretion_file = "cell_lumen_secretion.cpp"
 
 """
   FOCAD
@@ -672,6 +694,16 @@ focad_anchor_update_file = "focad_anchor_update.cpp"
 focad_post_cycle_update_file = "focad_post_cycle_update.cpp"
 focad_fnode_interaction_file = "focad_fnode_interaction.cpp"
 focad_move_file = "focad_move.cpp"
+
+"""
+  LUMEN
+"""
+lumen_spatial_location_data_file = "lumen_spatial_location_data.cpp"
+lumen_lumen_interaction_file = "lumen_lumen_interaction.cpp"
+lumen_cell_interaction_file = "lumen_cell_interaction.cpp"
+lumen_move_file = "lumen_move.cpp"
+
+
 
 """
   BCORNER  
@@ -757,6 +789,8 @@ env.newMacroPropertyFloat("BOUNDARY_CONC_FIXED_MULTI", N_SPECIES,
                           6)  # a 2D matrix with the 6 boundary conditions (columns) for each species (rows)
 env.newMacroPropertyInt("MACRO_MAX_GLOBAL_CELL_ID", 1)  # shared current max CELL id across all proliferating cells
 env.newMacroPropertyInt("MACRO_MAX_GLOBAL_FNODE_ID", 1)  # shared current max FNODE id across all remodeling cells
+if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+    env.newMacroPropertyInt("MACRO_MAX_GLOBAL_LUMEN_ID", 1)  # shared current max LUMEN id across all secreted lumen droplets
 env.newPropertyUInt("ECM_POPULATION_SIZE", ECM_POPULATION_SIZE)
 
 # Fibre network parameters
@@ -936,6 +970,21 @@ env.newPropertyFloat("EPSILON", EPSILON)
 env.newPropertyUInt("MOVING_BOUNDARIES", MOVING_BOUNDARIES)
 env.newPropertyUInt("ABORT_ON_UNSTABLE_FNODE_MOVE", ABORT_ON_UNSTABLE_FNODE_MOVE)
 
+# LUMEN agent properties (only registered when LUMEN is active)
+if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+    env.newPropertyFloat("LUMEN_RADIUS", LUMEN_RADIUS)
+    env.newPropertyFloat("LUMEN_ETA", LUMEN_ETA)
+    env.newPropertyFloat("LUMEN_K_LUMEN_LUMEN_REPULSION", LUMEN_K_LUMEN_LUMEN_REPULSION)
+    env.newPropertyFloat("LUMEN_K_LUMEN_LUMEN_ADHESION", LUMEN_K_LUMEN_LUMEN_ADHESION)
+    env.newPropertyFloat("LUMEN_LUMEN_ADHESION_RANGE", LUMEN_LUMEN_ADHESION_RANGE)
+    env.newPropertyFloat("LUMEN_K_LUMEN_CELL_REPULSION", LUMEN_K_LUMEN_CELL_REPULSION)
+    env.newPropertyFloat("LUMEN_LUMEN_CELL_DV_MAX", LUMEN_LUMEN_CELL_DV_MAX)
+    env.newPropertyFloat("MAX_SEARCH_RADIUS_LUMEN_LUMEN_INTERACTION", MAX_SEARCH_RADIUS_LUMEN_LUMEN_INTERACTION)
+    env.newPropertyFloat("MAX_SEARCH_RADIUS_LUMEN_CELL_INTERACTION", MAX_SEARCH_RADIUS_LUMEN_CELL_INTERACTION)
+    env.newPropertyFloat("LUMEN_SECRETION_RATE", LUMEN_SECRETION_RATE)
+    env.newPropertyFloat("LUMEN_SECRETION_COOLDOWN", LUMEN_SECRETION_COOLDOWN)
+    env.newPropertyArrayFloat("LUMEN_DIFFUSION_COEFF_MULTI", LUMEN_DIFFUSION_COEFF_MULTI)
+
 # ++==================================================================++
 # ++ Messages                                                          |
 # ++==================================================================++
@@ -1008,6 +1057,19 @@ if INCLUDE_FIBRE_NETWORK:
     FNODE_bucket_location_message_postmove.newVariableFloat("vx")
     FNODE_bucket_location_message_postmove.newVariableFloat("vy")
     FNODE_bucket_location_message_postmove.newVariableFloat("vz")
+
+
+if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+    # LUMEN spatial location message — broadcast radius must cover the larger of lumen-lumen and lumen-cell search radii
+    lumen_spatial_radius = max(MAX_SEARCH_RADIUS_LUMEN_LUMEN_INTERACTION, MAX_SEARCH_RADIUS_LUMEN_CELL_INTERACTION)
+    # Also ensure ECM can find lumen for diffusion override
+    lumen_spatial_radius = max(lumen_spatial_radius, ECM_ECM_EQUILIBRIUM_DISTANCE)
+    LUMEN_spatial_location_message = model.newMessageSpatial3D("lumen_spatial_location_message")
+    LUMEN_spatial_location_message.setRadius(lumen_spatial_radius)
+    LUMEN_spatial_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS)
+    LUMEN_spatial_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS)
+    LUMEN_spatial_location_message.newVariableInt("id")
+    LUMEN_spatial_location_message.newVariableFloat("radius")
 
 
 ECM_grid_location_message = model.newMessageArray3D("ecm_grid_location_message")
@@ -1282,6 +1344,8 @@ ECM_agent.newRTCFunctionFile("ecm_boundary_concentration_conditions", ecm_bounda
 ECM_agent.newRTCFunctionFile("ecm_Csp_update", ecm_Csp_update_file)
 if HETEROGENEOUS_DIFFUSION and INCLUDE_FIBRE_NETWORK:
     ECM_agent.newRTCFunctionFile("ecm_Dsp_update", ecm_Dsp_update_file).setMessageInput("fnode_spatial_location_message")
+if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN and HETEROGENEOUS_DIFFUSION:
+    ECM_agent.newRTCFunctionFile("ecm_Dsp_lumen_update", ecm_Dsp_lumen_update_file).setMessageInput("lumen_spatial_location_message")
 if MOVING_BOUNDARIES:
     ECM_agent.newRTCFunctionFile("ecm_move", ecm_move_file)
 
@@ -1324,6 +1388,10 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableFloat("cf_dvx", 0.0)  # [um/s] velocity contribution from cell_fnode_repulsion
     CELL_agent.newVariableFloat("cf_dvy", 0.0)  
     CELL_agent.newVariableFloat("cf_dvz", 0.0)  
+    CELL_agent.newVariableFloat("cl_dvx", 0.0)  # [um/s] velocity contribution from cell_lumen_interaction
+    CELL_agent.newVariableFloat("cl_dvy", 0.0)  
+    CELL_agent.newVariableFloat("cl_dvz", 0.0)  
+    CELL_agent.newVariableFloat("lumen_secretion_cooldown", 0.0)  # [s] cooldown timer before cell can secrete another lumen droplet
     CELL_agent.newVariableInt("cycle_phase", 1) # [1:G1] [2:S] [3:G2] [4:M]
     CELL_agent.newVariableFloat("clock", 0.0) # internal clock of the cell to switch phases
     CELL_agent.newVariableInt("completed_cycles", 0) # number of completed cell cycles
@@ -1350,6 +1418,10 @@ if INCLUDE_CELLS:
         cfr.setAgentOutput(FNODE_agent)
     CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ecm_grid_location_message")
     CELL_agent.newRTCFunctionFile("cell_move", cell_move_file)
+    if ORGANOID_ASSAY and INCLUDE_LUMEN:
+        CELL_agent.newRTCFunctionFile("cell_lumen_interaction", cell_lumen_interaction_file).setMessageInput("lumen_spatial_location_message")
+        cls_fn = CELL_agent.newRTCFunctionFile("cell_lumen_secretion", cell_lumen_secretion_file)
+        # agent_out for lumen is set after LUMEN_agent is defined (below)
     CELL_agent.newVariableArrayFloat("x_i", N_ANCHOR_POINTS) # focal-adhesion anchor point positions on the cell nucleus surface. Unused if INCLUDE_FOCAL_ADHESIONS is False
     CELL_agent.newVariableArrayFloat("y_i", N_ANCHOR_POINTS) 
     CELL_agent.newVariableArrayFloat("z_i", N_ANCHOR_POINTS)
@@ -1472,10 +1544,33 @@ if INCLUDE_FOCAL_ADHESIONS:
     cell_focad_update_fn.setAgentOutput(FOCAD_agent)
 
 
+"""
+  LUMEN agent
+"""
+if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+    LUMEN_agent = model.newAgent("LUMEN")
+    LUMEN_agent.newVariableInt("id", 0)       # unique LUMEN agent id
+    LUMEN_agent.newVariableFloat("x", 0.0)   # LUMEN position [um]
+    LUMEN_agent.newVariableFloat("y", 0.0)
+    LUMEN_agent.newVariableFloat("z", 0.0)
+    LUMEN_agent.newVariableFloat("vx", 0.0)  # LUMEN velocity [um/s]
+    LUMEN_agent.newVariableFloat("vy", 0.0)
+    LUMEN_agent.newVariableFloat("vz", 0.0)
+    LUMEN_agent.newVariableFloat("radius", LUMEN_RADIUS)  # droplet radius [um]
+    LUMEN_agent.newVariableFloat("ll_dvx", 0.0)  # [um/s] velocity contribution from lumen_lumen_interaction
+    LUMEN_agent.newVariableFloat("ll_dvy", 0.0)
+    LUMEN_agent.newVariableFloat("ll_dvz", 0.0)
+    LUMEN_agent.newVariableFloat("lc_dvx", 0.0)  # [um/s] velocity contribution from lumen_cell_interaction
+    LUMEN_agent.newVariableFloat("lc_dvy", 0.0)
+    LUMEN_agent.newVariableFloat("lc_dvz", 0.0)
 
-"""
-  Population initialisation functions
-"""
+    LUMEN_agent.newRTCFunctionFile("lumen_spatial_location_data", lumen_spatial_location_data_file).setMessageOutput("lumen_spatial_location_message")
+    LUMEN_agent.newRTCFunctionFile("lumen_lumen_interaction", lumen_lumen_interaction_file).setMessageInput("lumen_spatial_location_message")
+    LUMEN_agent.newRTCFunctionFile("lumen_cell_interaction", lumen_cell_interaction_file).setMessageInput("cell_spatial_location_message")
+    LUMEN_agent.newRTCFunctionFile("lumen_move", lumen_move_file)
+
+    # Wire the cell_lumen_secretion output agent now that LUMEN_agent exists
+    cls_fn.setAgentOutput(LUMEN_agent)
 
 # Agent population initialization 
 # ----------------------------------------------------------------------    
@@ -1646,8 +1741,11 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 cell_orientations = np.array([[1.0, 0.0, 0.0]], dtype=float) 
             elif ORGANOID_ASSAY:
                 cell_pos = getRandomCoordsAroundPoint(N_CELLS, 0.0, 0.0, 0.0, ORGANOID_INIT_RADIUS)
-                cell_orientations = getRandomVectors3D(N_CELLS)
+                cell_orientations = getRadialOrientations(
+                    cell_pos, center=(0.0, 0.0, 0.0), noise_sigma=ORGANOID_ORIENTATION_NOISE
+                )
                 print(f"  |-> Organoid assay: cells clustered in sphere of radius {ORGANOID_INIT_RADIUS} um at origin")
+                print(f"  |-> Cell orientations: radially outward (noise_sigma={ORGANOID_ORIENTATION_NOISE:.3f} rad)")
             else:
                 cached_cell_init = loadCachedCellInitialization(N_CELLS, coord_boundary, CELL_INIT_CACHE_DIR, atol=EPSILON)
                 if cached_cell_init is not None:
@@ -1916,6 +2014,10 @@ class initAgentPopulations(pyflamegpu.HostFunction):
 
         FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
         
+        if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+            lumen_id_macro = FLAMEGPU.environment.getMacroPropertyInt("MACRO_MAX_GLOBAL_LUMEN_ID")
+            lumen_id_macro[0] = current_id + count
+        
         
         return
 
@@ -2114,6 +2216,7 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                 "ECM_POPULATION_SIZE": ECM_POPULATION_SIZE,
                 "INCLUDE_FOCAL_ADHESIONS": INCLUDE_FOCAL_ADHESIONS,
                 "INCLUDE_NETWORK_REMODELING": INCLUDE_NETWORK_REMODELING,
+                "INCLUDE_LUMEN": INCLUDE_LUMEN,
                 "pyflamegpu": pyflamegpu,
             },
         )
@@ -2372,6 +2475,8 @@ if INCLUDE_CELLS:
     model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_spatial_location_data")
     if INCLUDE_FOCAL_ADHESIONS:
         model.newLayer("L1_CELL_Locations_2").addAgentFunction("CELL", "cell_bucket_location_data")  # these functions share data of the same agent, so must be in separate layers
+if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+    model.newLayer("L1_LUMEN_Locations").addAgentFunction("LUMEN", "lumen_spatial_location_data")
 if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L1_FNODE_Locations_1").addAgentFunction("FNODE", "fnode_spatial_location_data")
     # These functions share data of the same agent, so must be in separate layers
@@ -2403,6 +2508,8 @@ if INCLUDE_DIFFUSION:
     model.newLayer("L4_ECM_Csp_Update").addAgentFunction("ECM", "ecm_Csp_update")
     if HETEROGENEOUS_DIFFUSION and INCLUDE_FIBRE_NETWORK:
         model.newLayer("L4_ECM_Dsp_Update").addAgentFunction("ECM", "ecm_Dsp_update")
+    if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+        model.newLayer("L4_ECM_Dsp_Lumen_Update").addAgentFunction("ECM", "ecm_Dsp_lumen_update")
     # L5_Diffusion
     model.newLayer("L5_Diffusion").addAgentFunction("ECM", "ecm_ecm_interaction")
     # L6_Diffusion_Boundary (called twice to ensure concentration at boundaries is properly shown visually)
@@ -2424,6 +2531,10 @@ if INCLUDE_CELLS and INCLUDE_CELL_CELL_INTERACTION:
 if INCLUDE_CELLS and INCLUDE_FIBRE_NETWORK and INCLUDE_CELL_FNODE_REPULSION:
     model.newLayer("L7_CELL_FNODE_Repulsion").addAgentFunction("CELL", "cell_fnode_repulsion")
     model.newLayer("L7_FNODE_Cell_Repulsion").addAgentFunction("FNODE", "fnode_cell_repulsion")
+if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+    model.newLayer("L7_LUMEN_LUMEN_Interaction").addAgentFunction("LUMEN", "lumen_lumen_interaction")
+    model.newLayer("L7_LUMEN_CELL_Interaction").addAgentFunction("LUMEN", "lumen_cell_interaction")
+    model.newLayer("L7_CELL_LUMEN_Interaction").addAgentFunction("CELL", "cell_lumen_interaction")
 
 # L8_Agent_Movement
 if INCLUDE_CELLS:
@@ -2432,6 +2543,9 @@ if INCLUDE_CELLS:
         # Re-broadcast CELL bucket after movement so FOCAD anchor update
         # reads post-move anchor positions instead of stale L1 data.
         model.newLayer("L8_CELL_Bucket_Post_Move").addAgentFunction("CELL", "cell_bucket_location_data")
+if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+    model.newLayer("L8_LUMEN_Movement").addAgentFunction("LUMEN", "lumen_move")
+    model.newLayer("L8_CELL_LUMEN_Secretion").addAgentFunction("CELL", "cell_lumen_secretion")
 if INCLUDE_FIBRE_NETWORK:
     model.newLayer("L8_FNODE_Movement").addAgentFunction("FNODE", "fnode_move")
     if INCLUDE_FOCAL_ADHESIONS:

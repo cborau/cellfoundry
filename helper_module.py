@@ -599,6 +599,111 @@ def getRandomCoordsAroundPoint(n, px, py, pz, radius, on_surface=False):
     return central_point + rand_dirs * radii
 
 
+def getRadialOrientations(
+    positions: np.ndarray,
+    center: np.ndarray = None,
+    noise_sigma: float = 0.0,
+    rng: np.random.Generator = None,
+) -> np.ndarray:
+    """
+    Compute unit orientation vectors pointing radially outward from *center*
+    through each agent position.  An optional Gaussian angular perturbation
+    breaks the perfect radial symmetry to produce more natural-looking initial
+    configurations.
+
+    Parameters
+    ----------
+    positions : (N, 3) np.ndarray
+        Agent positions in world coordinates.
+    center : (3,) array-like, optional
+        Reference center from which radial directions are measured.
+        Defaults to the origin [0, 0, 0].
+    noise_sigma : float, optional
+        Standard deviation of the angular perturbation in **radians**.
+        0 → perfectly radial (no noise).
+        ~0.3 → moderate randomisation (~17° RMS deviation).
+        ~1.0 → strongly randomised orientations.
+        Angles are clipped to [-π, π] to avoid excessive rotation.
+    rng : np.random.Generator, optional
+        NumPy random generator for reproducibility.  If *None* a fresh
+        default generator is created internally.
+
+    Returns
+    -------
+    orientations : (N, 3) np.ndarray
+        Unit vectors, one per agent, pointing roughly radially outward.
+    """
+    positions = np.asarray(positions, dtype=np.float64)
+    if positions.ndim == 1:
+        positions = positions[None, :]
+    if positions.ndim != 2 or positions.shape[1] != 3:
+        raise ValueError(f"positions must have shape (N, 3), got {positions.shape}")
+
+    if center is None:
+        center = np.zeros(3, dtype=np.float64)
+    center = np.asarray(center, dtype=np.float64).reshape(3)
+
+    if rng is None:
+        rng = np.random.default_rng()
+
+    N = len(positions)
+    directions = positions - center[None, :]   # (N, 3)  radial vectors
+
+    # Normalize; fall back to a random unit vector for agents at the center
+    norms = np.linalg.norm(directions, axis=1, keepdims=True)  # (N, 1)
+    near_zero = (norms[:, 0] < 1e-10)
+    if near_zero.any():
+        # Replace near-zero rows with random unit vectors
+        rand_dirs = getRandomVectors3D(int(near_zero.sum()))
+        directions[near_zero] = rand_dirs
+        norms[near_zero] = np.linalg.norm(directions[near_zero], axis=1, keepdims=True)
+
+    orientations = directions / norms  # (N, 3) unit vectors
+
+    if noise_sigma > 0.0:
+        # --- Rodrigues rotation by a random angle around a random perpendicular axis ---
+        # 1. Draw rotation angles from a zero-mean Gaussian, clipped to [-pi, pi]
+        angles = rng.normal(0.0, float(noise_sigma), size=N)
+        angles = np.clip(angles, -np.pi, np.pi)
+
+        # 2. Build a random perpendicular axis for each orientation vector
+        #    Use a random vector and project out the radial component.
+        rand_vecs = rng.standard_normal((N, 3))
+        # Subtract the component parallel to orientations
+        dot = np.einsum("ij,ij->i", rand_vecs, orientations)  # (N,)
+        perp = rand_vecs - dot[:, None] * orientations          # (N, 3)
+        perp_norms = np.linalg.norm(perp, axis=1, keepdims=True)
+
+        # Handle degenerate case (rand_vec accidentally parallel to orientation)
+        degenerate = (perp_norms[:, 0] < 1e-10)
+        if degenerate.any():
+            # Swap the first and second components to guarantee non-parallel
+            fallback = np.zeros_like(orientations[degenerate])
+            fallback[:, 0] = -orientations[degenerate, 1]
+            fallback[:, 1] =  orientations[degenerate, 0]
+            fallback[:, 2] = 0.0
+            fallback_norms = np.linalg.norm(fallback, axis=1, keepdims=True)
+            fallback_norms = np.maximum(fallback_norms, 1e-10)
+            perp[degenerate] = fallback / fallback_norms
+            perp_norms[degenerate] = 1.0
+
+        axes = perp / perp_norms  # (N, 3)  unit rotation axes ⊥ to orientations
+
+        # 3. Rodrigues' rotation formula (k·v == 0 here so last term vanishes)
+        #    v_rot = v * cos(θ) + (k × v) * sin(θ)
+        cos_a = np.cos(angles)[:, None]  # (N, 1)
+        sin_a = np.sin(angles)[:, None]  # (N, 1)
+        cross = np.cross(axes, orientations)  # (N, 3)
+        orientations = orientations * cos_a + cross * sin_a
+
+        # Re-normalise to absorb any floating-point drift
+        final_norms = np.linalg.norm(orientations, axis=1, keepdims=True)
+        final_norms = np.maximum(final_norms, 1e-12)
+        orientations = orientations / final_norms
+
+    return orientations.astype(float)  # float64, matching pyflamegpu setVariableFloat expectations
+
+
 def compute_u_ref_from_anchor_pos(anchor_pos: np.ndarray,
                                  cell_center: np.ndarray,
                                  eps: float = 1e-12) -> np.ndarray:
@@ -731,6 +836,12 @@ def build_save_data_context(ecm_agents_per_dir, include_fibre_network, n_nodes):
         "ASCII",
         "DATASET UNSTRUCTURED_GRID",
     ]
+    context["lumendata"] = [
+        "# vtk DataFile Version 3.0",
+        "Lumen agents",
+        "ASCII",
+        "DATASET UNSTRUCTURED_GRID",
+    ]
 
     return context
 
@@ -748,6 +859,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
     ecm_population_size = config["ECM_POPULATION_SIZE"]
     include_focal_adhesions = config["INCLUDE_FOCAL_ADHESIONS"]
     include_network_remodeling = config["INCLUDE_NETWORK_REMODELING"]
+    include_lumen = config["INCLUDE_LUMEN"]
     pyflamegpu = config["pyflamegpu"]
 
     stepCounter = FLAMEGPU.getStepCounter() + 1
@@ -1731,6 +1843,37 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
                     file.write("{:.6e} {:.6e} {:.6e}\n".format(M[0, 0], M[0, 1], M[0, 2]))
                     file.write("{:.6e} {:.6e} {:.6e}\n".format(M[1, 0], M[1, 1], M[1, 2]))
                     file.write("{:.6e} {:.6e} {:.6e}\n".format(M[2, 0], M[2, 1], M[2, 2]))
+
+    if include_lumen:
+        lumen_ids = list()
+        lumen_coords = list()
+        lumen_radius = list()
+        lumen_agent = FLAMEGPU.agent("LUMEN")
+        lumen_agent.sortInt("id", pyflamegpu.HostAgentAPI.Asc)
+        for ai in lumen_agent.getPopulationData():
+            lumen_ids.append(ai.getVariableInt("id"))
+            lumen_coords.append((ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z")))
+            lumen_radius.append(ai.getVariableFloat("radius"))
+
+        num_lumen = len(lumen_ids)
+        file_name = 'lumen_data_t{:04d}.vtk'.format(stepCounter)
+        file_path = res_path / file_name
+        with open(str(file_path), 'w') as file:
+            for line in save_context["lumendata"]:
+                file.write(line + '\n')
+            file.write("POINTS {} float \n".format(num_lumen))
+            for c in lumen_coords:
+                file.write("{:.6f} {:.6f} {:.6f} \n".format(c[0], c[1], c[2]))
+            if num_lumen > 0:
+                file.write("POINT_DATA {} \n".format(num_lumen))
+                file.write("SCALARS id int 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in lumen_ids:
+                    file.write("{} \n".format(v))
+                file.write("SCALARS radius float 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for v in lumen_radius:
+                    file.write("{:.4f} \n".format(v))
 
     file_name = 'ecm_data_t{:04d}.vtk'.format(stepCounter)
     file_path = res_path / file_name
