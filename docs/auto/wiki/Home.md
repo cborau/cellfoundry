@@ -1,4 +1,4 @@
-# CellFoundry Wiki
+# Cellfoundry Wiki
 
 This wiki content is generated from source code and project metadata.
 

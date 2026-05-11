@@ -1,16 +1,16 @@
-# What is Cellfoundry
-
 <p align="center">
-  <img src="https://raw.githubusercontent.com/cborau/cellfoundry/master/assets/logo_cellfoundry.png" alt="CellFoundry logo" width="360">
+  <img src="https://raw.githubusercontent.com/cborau/cellfoundry/master/assets/logo_cellfoundry.png" alt="Cellfoundry logo" width="360">
 </p>
 
 ## Overview
 
-CellFoundry is a multi-physics, agent-based simulation framework for studying the cellular microenvironment. It combines interacting cells, extracellular matrix, fibre networks, diffusing chemical species, mechanical coupling, and more, in a single GPU-accelerated model.
+Cellfoundry is a multi-physics, agent-based simulation framework for studying the cellular microenvironment. It combines interacting cells, extracellular matrix, fibre networks, diffusing chemical species, mechanical coupling, and more, in a single GPU-accelerated model.
 
 The framework is designed for in vitro and organoid-scale studies where transport, mechanics, and microstructure jointly affect cell behaviour. Its modular structure also makes it suitable for parameter sweeps, digital twin prototyping, and mechanobiology hypothesis testing.
 
-Model structure and initialization are contained in a single Python file (model.py), while agent interaction implementation is separated into single C++ files. Agent functions are fully customizable and can be used to simulate a wide range of biological processes## Core Model Components
+Model structure and initialization are contained in a single Python file (model.py), while agent interaction implementation is separated into single C++ files. Agent functions are fully customizable and can be used to simulate a wide range of biological processes.
+
+## Core Model Components
 
 - **Cells (CELL)**: migration, metabolism, stress updates, and interactions with ECM and adhesions.
 - **Extracellular matrix (ECM)**: concentration fields, diffusion, and voxel-level mechanics.
@@ -20,7 +20,7 @@ Model structure and initialization are contained in a single Python file (model.
 
 ## Outputs and Analysis
 
-CellFoundry produces a range of output data that can be analyzed to extract biological insights:
+Cellfoundry produces a range of output data that can be analyzed to extract biological insights:
 
 - **VTK files**: 3D visualization of cell and ECM states over time.
 - **Pickle snapshots**: Complete model state at specified intervals for detailed analysis.
@@ -28,7 +28,7 @@ CellFoundry produces a range of output data that can be analyzed to extract biol
 
 ## Built on FLAME GPU 2
 
-CellFoundry is implemented on top of FLAME GPU 2, which provides high-performance GPU execution for agent-based models.
+Cellfoundry is implemented on top of FLAME GPU 2, which provides high-performance GPU execution for agent-based models.
 
 - FLAME GPU 2 repository: <https://github.com/FLAMEGPU/FLAMEGPU2>
 - FLAME GPU 2 documentation: <https://docs.flamegpu.com/>
@@ -37,9 +37,31 @@ CellFoundry is implemented on top of FLAME GPU 2, which provides high-performanc
 ## Typical Workflow
 
 1. Configure model parameters in `model.py` (or through the Model Editor UI).
-2. Run simulation to produce VTK outputs and optional pickle snapshots.
-3. Analyze dynamics using scripts in `postprocessing/`.
-4. Use the generated function reference to inspect model behavior and implementation details.
+2. Optionally, create a `.json` file to override specific parameters at runtime:
+```json
+{
+  "STEPS": 2400,
+  "TIME_STEP": 180,
+  "SAVE_EVERY_N_STEPS": 12,
+  "INCLUDE_CELLS": true,
+  "INCLUDE_CELL_CELL_INTERACTION": true,
+  "INCLUDE_CELL_CYCLE": true,
+  "ORGANOID_ASSAY": true,
+  "ORGANOID_INIT_RADIUS": 20.0,
+  "CELL_RADIUS": [10.0, 10.0, 10.0],
+  "SAVE_DATA_TO_FILE": true,
+  "SAVE_PICKLE": true,
+  "N_CELLS": 10,
+  "CELL_SPEED_REF": 0.005,
+  "ROTATIONAL_DIFFUSION_RATE": 0.0005,
+  "DIVISION_RATE_MULTIPLIER": [1.0, 1.5, 2.0],
+  "CELL_CELL_ADHESION_K": 9.8,
+  "CELL_CELL_REPULSION_K": 60.7
+}
+```
+3. Run simulation to produce VTK outputs and optional pickle snapshots.
+4. Analyze dynamics using scripts in `postprocessing/`.
+5. Use the generated function reference to inspect model behavior and implementation details.
 
 ## Supplementary Videos
 
