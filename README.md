@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="assets/logo_cellfoundry.png" alt="CellFoundry logo" width="320">
+  <img src="assets/logo_cellfoundry.png" alt="Cellfoundry logo" width="320">
 </p>
 
-# CellFoundry
+# Cellfoundry
 
-**CellFoundry** is a multi-physics, agent-based simulation framework built on FLAMEGPU2 for studying the cellular microenvironment.
+**Cellfoundry** is a multi-physics, agent-based simulation framework built on FLAMEGPU2 for studying the cellular microenvironment.
 
-The framework integrates interacting cells, extracellular matrix (ECM), fibre networks, diffusing chemical species, and mechanical interactions within a unified, GPU-accelerated model. CellFoundry is designed for in vitro and organoid-scale studies, enabling systematic investigation of how biochemical transport, mechanics, and microstructural organisation jointly regulate cell behaviour.
+The framework integrates interacting cells, extracellular matrix (ECM), fibre networks, diffusing chemical species, and mechanical interactions within a unified, GPU-accelerated model. Cellfoundry is designed for in vitro and organoid-scale studies, enabling systematic investigation of how biochemical transport, mechanics, and microstructural organisation jointly regulate cell behaviour.
 
-CellFoundry is modular, extensible, and suitable for large-scale parameter studies, digital twin development, and mechanobiology-driven hypothesis testing.
+Cellfoundry is modular, extensible, and suitable for large-scale parameter studies, digital twin development, and mechanobiology-driven hypothesis testing.
 
 <p align="center">
   <img src="assets/SuppVideo2_Migration_Focad.gif" alt="Cell migration showcase">
@@ -22,7 +22,7 @@ CellFoundry is modular, extensible, and suitable for large-scale parameter studi
   whose colour reflect their local elastic energy. This video highlights the dynamic interplay between cellular motility and matrix mechanics in a complex microenvironment.</em>
 </p>
 
-This is a work in active development with new features added progressively. Check branches for newest (experimental) features. For detailed documentation, visit the [CellFoundry Wiki](https://github.com/cborau/cellfoundry/wiki) and the appendix files of [this paper](https://www.biorxiv.org/content/10.64898/2026.04.22.720218v1).
+This is a work in active development with new features added progressively. Check branches for newest (experimental) features. For detailed documentation, visit the [Cellfoundry Wiki](https://github.com/cborau/cellfoundry/wiki) and the appendix files of [this paper](https://www.biorxiv.org/content/10.64898/2026.04.22.720218v1).
 
 # Citation
 
