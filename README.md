@@ -10,7 +10,36 @@ The framework integrates interacting cells, extracellular matrix (ECM), fibre ne
 
 CellFoundry is modular, extensible, and suitable for large-scale parameter studies, digital twin development, and mechanobiology-driven hypothesis testing.
 
-This is a work in active development with new features added progressively. Check branches for newest (experimental) features.
+<p align="center">
+  <img src="assets/SuppVideo2_Migration_Focad.gif" alt="Cell migration showcase">
+</p>
+<p align="center">
+  <em>Showcase of 100 cells migrating through the extracellular matrix,
+  illustrating how adhesion formation, force transmission, and detachment contribute to the resulting trajectories and long-range force transmission.
+  CELL agents are represented as semi-transparent spheres, including nuclei (coloured by deformation) and nuclei anchor points (white).
+  FOCAD agents are shown as straight rods coloured by adhesion state (green means attached).
+  The surrounding matrix is visualised through the positions of FNODE agents (small light blue spheres on the right panel), joined by lines (fibres)
+  whose colour reflect their local elastic energy. This video highlights the dynamic interplay between cellular motility and matrix mechanics in a complex microenvironment.</em>
+</p>
+
+This is a work in active development with new features added progressively. Check branches for newest (experimental) features. For detailed documentation, visit the [CellFoundry Wiki](https://github.com/cborau/cellfoundry/wiki) and the appendix files of [this paper](https://www.biorxiv.org/content/10.64898/2026.04.22.720218v1).
+
+# Citation
+
+If you use this framework in your research, please cite the following paper:
+
+```bibtex
+@article{Borau2026.04.22.720218,
+  author    = {Borau, C. and Chisholm, R. and Richmond, P.},
+  title     = {Cellfoundry: a GPU-accelerated, multi-physics ABM framework for cellular microenvironment and organoid-scale studies},
+  journal   = {bioRxiv},
+  year      = {2026},
+  doi       = {10.64898/2026.04.22.720218},
+  publisher = {Cold Spring Harbor Laboratory},
+  URL       = {https://www.biorxiv.org/content/early/2026/04/25/2026.04.22.720218},
+  eprint    = {https://www.biorxiv.org/content/early/2026/04/25/2026.04.22.720218.full.pdf},
+}
+```
 
 # Quick Installation Guide (Windows, CUDA 12.4, Python 3.10)
 

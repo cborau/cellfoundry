@@ -192,9 +192,10 @@ def render_wiki_home() -> str:
         "# CellFoundry Wiki\n\n"
         "This wiki content is generated from source code and project metadata.\n\n"
         "## Pages\n\n"
-        "- [What is CellFoundry](What-is-CellFoundry)\n"
+        "- [What is Cellfoundry](What-is-Cellfoundry)\n"
         "- [C++ Function Reference](Function-Reference)\n"
         "- [Model Editor](Model-Editor)\n"
+        "- [Model Configurator](Model-Configurator)\n"
         "- [Post Processing](Post-Processing)\n"
         "- [Tutorial: Benchmarking Performance](Tutorial-Benchmarking-Performance)\n"
         "- [Tutorial: Parameter Optimization](Tutorial-Parameter-Optimization)\n"
@@ -215,8 +216,12 @@ def github_raw_url(github_repo: str, github_ref: str, repo_path: str) -> str:
 
 def render_what_is_cellfoundry(github_repo: str, github_ref: str) -> str:
     logo_url = github_raw_url(github_repo, github_ref, "assets/logo_cellfoundry.png")
+    supp3_url = github_raw_url(github_repo, github_ref, "assets/SuppVideo3_Metabolism.gif")
+    supp4_url = github_raw_url(github_repo, github_ref, "assets/SuppVideo4_Matrix_Degradation.gif")
+    supp5_url = github_raw_url(github_repo, github_ref, "assets/SuppVideo5_Matrix_Reinforcement.gif")
+    supp6_url = github_raw_url(github_repo, github_ref, "assets/SuppVideo6_Organoid_Growth.gif")
     return (
-        "# What is CellFoundry\n\n"
+        "# What is Cellfoundry\n\n"
         "<p align=\"center\">\n"
         f"  <img src=\"{logo_url}\" alt=\"CellFoundry logo\" width=\"360\">\n"
         "</p>\n\n"
@@ -250,7 +255,16 @@ def render_what_is_cellfoundry(github_repo: str, github_ref: str) -> str:
         "1. Configure model parameters in `model.py` (or through the Model Editor UI).\n"
         "2. Run simulation to produce VTK outputs and optional pickle snapshots.\n"
         "3. Analyze dynamics using scripts in `postprocessing/`.\n"
-        "4. Use the generated function reference to inspect model behavior and implementation details.\n"
+        "4. Use the generated function reference to inspect model behavior and implementation details.\n\n"
+        "## Supplementary Videos\n\n"
+        f"![Metabolism showcase]({supp3_url})\n\n"
+        "*This video illustrates the integration of chemical and mechanical interactions in the model, where cell motility and matrix remodelling are influenced by local biochemical cues, while cells also actively modify their microenvironment through secretion and consumption of diffusible factors. In this example, 100 cells are shown. The cells consume species 0 (e.g. nutrients present in the environment) and release species 1, generating heterogeneous concentration patterns in the surrounding domain. The blobs are coloured and scaled according to the local concentration values of species 1*\n\n"
+        f"![Matrix degradation]({supp4_url})\n\n"
+        "*Matrix degradation by a migrating cell. Surrounding fibre nodes (FNODEs) within the interaction range are represented as blobs whose size and colour reflect their local degradation state. As degradation progresses and reaches a value of 1, the corresponding FNODE is removed from the simulation, thereby modelling local matrix breakdown, relaxing mechanical constraints and enabling cell invasion through the matrix*\n\n"
+        f"![Matrix reinforcement]({supp5_url})\n\n"
+        "*Matrix reinforcement driven by a migrating cell. Surrounding fibre nodes (FNODEs) within the interaction range are shown as blobs whose size and colour indicate the local reinforcement level. Reinforcement promotes the generation of new FNODEs and connected fibres, enabling progressive matrix deposition and remodelling around the cell. This can lead to local stiffening and densification of the matrix, which in turn can influence cell motility, force transmission and diffusion of species.*\n\n"
+        f"![Organoid growth]({supp6_url})\n\n"
+        "*Organoid growth driven by the proliferation of three cell types that progressively assemble into a compact three-dimensional structure. Cells are coloured by cell type in the left panel and by cell-cycle phase in the right panel, highlighting both the emerging tissue composition and the heterogeneous proliferative dynamics during organoid formation.*\n"
     )
 
 
@@ -281,21 +295,62 @@ def render_model_editor_page(github_repo: str, github_ref: str) -> str:
     )
 
 
+def render_model_configurator_page(github_repo: str, github_ref: str) -> str:
+    ui_gif_url = github_raw_url(github_repo, github_ref, "assets/SuppVideo1_UI_Configurator.gif")
+    return (
+        "# FLAME GPU 2 Visual Configurator\n\n"
+        "A desktop tool for assembling FLAME GPU 2 model configurations to minimize hand-editing. "
+        "Define agents, globals, layers, logging, and visualization settings through a Qt UI and export ready-to-edit Python and C++ files.\n\n"
+        "Repository: <https://github.com/cborau/flamegpu2_uiconfig>\n\n"
+        f"![UI Configurator]({ui_gif_url})\n\n"
+        "## Features\n\n"
+        "- **Agent authoring** \u2013 create agent templates with variables, functions, logging modes, and colour assignments.\n"
+        "- **Global parameters** \u2013 manage scalar and macro globals with type selection and persistence.\n"
+        "- **Layer sequencing** \u2013 build execution layers, add functions, and preview ordering.\n"
+        "- **Interactive canvas** \u2013 visual wiring of message connections between agent functions.\n"
+        "- **Visualization presets** \u2013 configure domain options, per-agent geometry/colour, and interpolation ranges.\n"
+        "- **Export pipeline** \u2013 generate Python starter code aligned with FLAME GPU 2 template placeholders.\n"
+    )
+
+
 def render_post_processing_page(github_repo: str, github_ref: str) -> str:
-    focad_report = github_blob_url(github_repo, github_ref, "postprocessing/focad_report.py")
+    report_focad = github_blob_url(github_repo, github_ref, "postprocessing/report_focad.py")
     compare_linc = github_blob_url(github_repo, github_ref, "postprocessing/compare_linc_runs.py")
     plot_boundary = github_blob_url(github_repo, github_ref, "postprocessing/plot_boundary_results.py")
     plot_diffusion = github_blob_url(github_repo, github_ref, "postprocessing/plot_diffusion_results.py")
+    plot_migration = github_blob_url(github_repo, github_ref, "postprocessing/plot_migration_results.py")
+    plot_migration_comp = github_blob_url(github_repo, github_ref, "postprocessing/plot_migration_comparison.py")
+    plot_migration_diff = github_blob_url(github_repo, github_ref, "postprocessing/plot_migration_diff_profiles_comparison.py")
+    plot_organoid = github_blob_url(github_repo, github_ref, "postprocessing/plot_organoid_metrics.py")
+    report_cell_pop = github_blob_url(github_repo, github_ref, "postprocessing/report_cell_population.py")
+    report_matrix = github_blob_url(github_repo, github_ref, "postprocessing/report_matrix_remodeling.py")
     return (
         "# Post Processing\n\n"
         "The `postprocessing/` folder contains analysis and plotting utilities for simulation outputs in "
         "`result_files/` (CSV, pickle, and VTK-derived signals).\n\n"
         "## Main Scripts\n\n"
-        f"- [`focad_report.py`]({focad_report})\n"
-        "  - Loads simulation pickle data and exports focal adhesion metrics/polarity time series to CSV.\n"
+        f"- [`report_focad.py`]({report_focad})\n"
+        "  - Loads simulation pickle or VTK data and exports focal adhesion metrics/polarity time series to CSV.\n"
         "  - Builds summary tables (including last-20% statistics) and generates diagnostic plots.\n"
+        f"- [`report_cell_population.py`]({report_cell_pop})\n"
+        "  - Tracks per-step cell counts (total, alive/dead, proliferation proxy, death by cause) from pickle or VTK outputs.\n"
+        "  - Generates population time-series plots and CSV reports.\n"
+        f"- [`report_matrix_remodeling.py`]({report_matrix})\n"
+        "  - Tracks FNODE count, degradation, reinforcement, net remodeling, and elastic energy per step.\n"
+        "  - Produces time-series plots and CSV reports from pickle or VTK outputs.\n"
         f"- [`compare_linc_runs.py`]({compare_linc})\n"
         "  - Compares tagged LINC OFF/ON CSV outputs and produces comparison tables and figures.\n"
+        f"- [`plot_migration_results.py`]({plot_migration})\n"
+        "  - Plots CELL migration metrics (speed, trajectories) from pickle files.\n"
+        "  - Supports optional target CSV for reference comparison lines.\n"
+        f"- [`plot_migration_comparison.py`]({plot_migration_comp})\n"
+        "  - Compares migration results across one or two conditions via violin plots and 3D trajectory plots.\n"
+        "  - Computes and plots directionality ratio curves per cell type.\n"
+        f"- [`plot_migration_diff_profiles_comparison.py`]({plot_migration_diff})\n"
+        "  - Produces a fixed 2\u00d74 figure comparing migration metrics, directionality, and diffusion-profile evolution for two conditions.\n"
+        f"- [`plot_organoid_metrics.py`]({plot_organoid})\n"
+        "  - Plots organoid growth metrics over time (radius of gyration, sphericity, span, cell count per type).\n"
+        "  - Supports single or dual-condition comparison.\n"
         f"- [`plot_boundary_results.py`]({plot_boundary})\n"
         "  - Loads boundary-related outputs from pickle and produces force/position/shear visualizations.\n"
         f"- [`plot_diffusion_results.py`]({plot_diffusion})\n"
@@ -306,9 +361,11 @@ def render_post_processing_page(github_repo: str, github_ref: str) -> str:
         "- PNG figures for trends, diagnostics, and side-by-side run comparisons.\n\n"
         "## Recommended Usage\n\n"
         "1. Run simulation and generate outputs in `result_files/`.\n"
-        "2. Use `focad_report.py` for baseline reports.\n"
-        "3. Use `compare_linc_runs.py` for condition-to-condition analysis.\n"
-        "4. Use boundary/diffusion plotting scripts for targeted diagnostics.\n"
+        "2. Use `report_focad.py` for baseline focal adhesion reports.\n"
+        "3. Use `report_cell_population.py` and `report_matrix_remodeling.py` for population and matrix diagnostics.\n"
+        "4. Use migration plotting scripts for speed and trajectory analysis.\n"
+        "5. Use `compare_linc_runs.py` for condition-to-condition analysis.\n"
+        "6. Use boundary/diffusion plotting scripts for targeted diagnostics.\n"
     )
 
 
@@ -348,12 +405,14 @@ def main() -> int:
     wiki_home_md = render_wiki_home()
     wiki_what_md = render_what_is_cellfoundry(github_repo, args.github_ref)
     wiki_editor_md = render_model_editor_page(github_repo, args.github_ref)
+    wiki_configurator_md = render_model_configurator_page(github_repo, args.github_ref)
     wiki_post_md = render_post_processing_page(github_repo, args.github_ref)
 
     out_wiki_ref = ROOT / "docs" / "auto" / "wiki" / "Function-Reference.md"
     out_wiki_home = ROOT / "docs" / "auto" / "wiki" / "Home.md"
-    out_wiki_what = ROOT / "docs" / "auto" / "wiki" / "What-is-CellFoundry.md"
+    out_wiki_what = ROOT / "docs" / "auto" / "wiki" / "What-is-Cellfoundry.md"
     out_wiki_editor = ROOT / "docs" / "auto" / "wiki" / "Model-Editor.md"
+    out_wiki_configurator = ROOT / "docs" / "auto" / "wiki" / "Model-Configurator.md"
     out_wiki_post = ROOT / "docs" / "auto" / "wiki" / "Post-Processing.md"
 
     outputs: Dict[pathlib.Path, str] = {
@@ -361,6 +420,7 @@ def main() -> int:
         out_wiki_home: wiki_home_md,
         out_wiki_what: wiki_what_md,
         out_wiki_editor: wiki_editor_md,
+        out_wiki_configurator: wiki_configurator_md,
         out_wiki_post: wiki_post_md,
     }
 

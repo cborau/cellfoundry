@@ -236,13 +236,56 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 - 🔸 **Purpose:** Reads all focal adhesion (FOCAD) messages in a bucket keyed by this cell id.
 - - -
 
+## 📄 cell_lumen_interaction.cpp
+
+### 🔹 [cl_normalize3](https://github.com/cborau/cellfoundry/blob/master/cell_lumen_interaction.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_lumen_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_lumen_interaction.cpp)
+
+- 🔸 **Purpose:** Normalize a 3D vector in-place; if near-zero, sets a default unit vector.
+- - -
+
+### 🔹 [cell_lumen_interaction](https://github.com/cborau/cellfoundry/blob/master/cell_lumen_interaction.cpp)
+**Type:** `agent`  
+**Source:** [Open cell_lumen_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_lumen_interaction.cpp)
+
+- 🔸 **Purpose:** Compute CELL-LUMEN repulsion (Newton's 3rd law pair of lumen_cell_interaction). When a LUMEN droplet overlaps with a cell, the cell is pushed away from the lumen (simulating hydrostatic pressure from the lumen cavity pushing the surrounding cells outward).
+- ⬇️ **Inputs:**
+  - lumen_spatial_location_message (spatial neighbors)
+  - Environment parameters: LUMEN_K_LUMEN_CELL_REPULSION, CELL_D_DUMPING,
+- ⬆️ **Outputs:**
+  - Per-CELL interaction velocity contribution (cl_dv*) [um/s]
+- - -
+
+## 📄 cell_lumen_secretion.cpp
+
+### 🔹 [cls_normalize3](https://github.com/cborau/cellfoundry/blob/master/cell_lumen_secretion.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_lumen_secretion.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_lumen_secretion.cpp)
+
+- 🔸 **Purpose:** Normalize a 3D vector in-place; if near-zero, sets a default unit vector.
+- - -
+
+### 🔹 [cell_lumen_secretion](https://github.com/cborau/cellfoundry/blob/master/cell_lumen_secretion.cpp)
+**Type:** `agent`  
+**Source:** [Open cell_lumen_secretion.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_lumen_secretion.cpp)
+
+- 🔸 **Purpose:** Each CELL agent stochastically secretes a LUMEN droplet in the direction opposite to its orientation vector (apical side = anti-orientation). The new LUMEN droplet is placed at one contact distance (cell_radius + LUMEN_RADIUS) behind the cell. A per-cell cooldown timer prevents continuous secretion.
+- ⬇️ **Inputs:**
+  - CELL variables: x, y, z, orx, ory, orz, radius, lumen_secretion_cooldown, dead
+  - Environment: TIME_STEP, LUMEN_RADIUS, LUMEN_SECRETION_RATE,
+  - MACRO_MAX_GLOBAL_LUMEN_ID for unique id assignment
+- ⬆️ **Outputs:**
+  - New LUMEN agent (if secretion fires), updated lumen_secretion_cooldown
+- - -
+
 ## 📄 cell_move.cpp
 
 ### 🔹 [cell_move](https://github.com/cborau/cellfoundry/blob/master/cell_move.cpp)
 **Type:** `agent`  
 **Source:** [Open cell_move.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_move.cpp)
 
-- 🔸 **Purpose:** Update CELL velocity/orientation-driven migration by combining Brownian, chemotactic, and durotactic components, then advance position.
+- 🔸 **Purpose:** Update CELL velocity/orientation-driven migration by combining Brownian, chemotactic, chemokinetic and durotactic components, then advance position.
 - ⬇️ **Inputs:**
   - CELL kinematic state, stress/strain eigensystem, chemotaxis sensitivities
   - Environment controls for chemotaxis/durotaxis and timestep
@@ -279,6 +322,27 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 - 📝 **Notes:**
   - This is the synchronization bridge from macro-level concentration updates
   - back into per-agent concentration variables.
+- - -
+
+## 📄 ecm_Dsp_lumen_update.cpp
+
+### 🔹 [vec3Length_dsp_lumen](https://github.com/cborau/cellfoundry/blob/master/ecm_Dsp_lumen_update.cpp)
+**Type:** `helper`  
+**Source:** [Open ecm_Dsp_lumen_update.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_Dsp_lumen_update.cpp)
+
+- 🔸 **Purpose:** vec3Length_dsp_lumen (local helper, avoids name collision)
+- - -
+
+### 🔹 [ecm_Dsp_lumen_update](https://github.com/cborau/cellfoundry/blob/master/ecm_Dsp_lumen_update.cpp)
+**Type:** `agent`  
+**Source:** [Open ecm_Dsp_lumen_update.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_Dsp_lumen_update.cpp)
+
+- 🔸 **Purpose:** Override the D_sp diffusion coefficient of ECM voxels that contain at least one LUMEN agent. LUMEN represents a liquid void with free diffusion, so if any LUMEN droplet is found within the voxel's equilibrium distance, D_sp is overwritten with LUMEN_DIFFUSION_COEFF_MULTI (the lumen-specific diffusion coefficient) for all species. This runs after ecm_Dsp_update (the fibre-crowding reduction step), replacing its value where lumen is present. Only called when INCLUDE_LUMEN is True.
+- ⬇️ **Inputs:**
+  - lumen_spatial_location_message (broadcast radius >= ECM_ECM_EQUILIBRIUM_DISTANCE)
+  - Environment: ECM_ECM_EQUILIBRIUM_DISTANCE, LUMEN_DIFFUSION_COEFF_MULTI
+- ⬆️ **Outputs:**
+  - Updated D_sp array per ECM agent (overwritten to lumen value when lumen present)
 - - -
 
 ## 📄 ecm_Dsp_update.cpp
@@ -333,7 +397,7 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 **Type:** `agent`  
 **Source:** [Open ecm_Dsp_update.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_Dsp_update.cpp)
 
-- 🔸 **Purpose:** Compute local FNODE crowding around each ECM voxel and downscale diffusion coefficients to represent heterogeneous transport in dense regions.
+- 🔸 **Purpose:** Compute local FNODE crowding around each ECM voxel and downscale diffusion coefficients to represent heterogeneous transport in dense regions. Only called if HETEROGENEOUS_DIFFUSION is true in the model config.
 - ⬇️ **Inputs:**
   - Spatial FNODE messages around each ECM position
   - Environment controls: equilibrium distance, average voxel density
@@ -507,6 +571,18 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - Connectivity arrays: linked_nodes, equilibrium_distance
 - ⬆️ **Outputs:**
   - MessageBucket record for direct id-based neighbor access
+- - -
+
+## 📄 fnode_bucket_location_data_postmove.cpp
+
+### 🔹 [fnode_bucket_location_data_postmove](https://github.com/cborau/cellfoundry/blob/master/fnode_bucket_location_data_postmove.cpp)
+**Type:** `agent`  
+**Source:** [Open fnode_bucket_location_data_postmove.cpp](https://github.com/cborau/cellfoundry/blob/master/fnode_bucket_location_data_postmove.cpp)
+
+- 🔸 **Purpose:** Broadcast FNODE post-move positions into a dedicated bucket message list. This runs after fnode_move in L8 so that focad_move can read the current-step FNODE position instead of the stale L1 pre-move data.
+- 📝 **Notes:**
+  - This is a lightweight version of fnode_bucket_location_data that only
+  - carries the variables needed by focad_move (position and velocity).
 - - -
 
 ## 📄 fnode_cell_repulsion.cpp
@@ -736,4 +812,73 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - This file is a template/reference module and is intended for copy-paste use
   - inside runtime-compiled FLAMEGPU agent function files.
   - vec3CrossProd: compute cross product (x1,y1,z1) x (x2,y2,z2).
+- - -
+
+## 📄 lumen_cell_interaction.cpp
+
+### 🔹 [lc_normalize3](https://github.com/cborau/cellfoundry/blob/master/lumen_cell_interaction.cpp)
+**Type:** `helper`  
+**Source:** [Open lumen_cell_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/lumen_cell_interaction.cpp)
+
+- 🔸 **Purpose:** Normalize a 3D vector in-place; if near-zero, sets a default unit vector.
+- - -
+
+### 🔹 [lumen_cell_interaction](https://github.com/cborau/cellfoundry/blob/master/lumen_cell_interaction.cpp)
+**Type:** `agent`  
+**Source:** [Open lumen_cell_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/lumen_cell_interaction.cpp)
+
+- 🔸 **Purpose:** Compute LUMEN-CELL repulsion (hydrostatic pressure effect). When a LUMEN droplet overlaps with a cell, it is pushed away. This is the LUMEN-side reaction; the corresponding CELL-side reaction is handled in cell_lumen_interaction.cpp.
+- ⬇️ **Inputs:**
+  - cell_spatial_location_message (spatial neighbors)
+  - Environment parameters: LUMEN_K_LUMEN_CELL_REPULSION, LUMEN_ETA,
+- ⬆️ **Outputs:**
+  - Per-LUMEN interaction velocity contribution (lc_dv*) [um/s]
+- - -
+
+## 📄 lumen_lumen_interaction.cpp
+
+### 🔹 [ll_normalize3](https://github.com/cborau/cellfoundry/blob/master/lumen_lumen_interaction.cpp)
+**Type:** `helper`  
+**Source:** [Open lumen_lumen_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/lumen_lumen_interaction.cpp)
+
+- 🔸 **Purpose:** Normalize a 3D vector in-place; if near-zero, sets a default unit vector.
+- - -
+
+### 🔹 [lumen_lumen_interaction](https://github.com/cborau/cellfoundry/blob/master/lumen_lumen_interaction.cpp)
+**Type:** `agent`  
+**Source:** [Open lumen_lumen_interaction.cpp](https://github.com/cborau/cellfoundry/blob/master/lumen_lumen_interaction.cpp)
+
+- 🔸 **Purpose:** Compute short-range LUMEN-LUMEN mechanics: volume exclusion repulsion at contact and a cohesive adhesion shell beyond contact (surface-tension analogue). This keeps LUMEN droplets together as a coherent liquid mass while preventing overlap.
+- ⬇️ **Inputs:**
+  - lumen_spatial_location_message (spatial neighbors)
+  - Environment parameters: LUMEN_K_LUMEN_LUMEN_REPULSION, LUMEN_K_LUMEN_LUMEN_ADHESION,
+- ⬆️ **Outputs:**
+  - Per-LUMEN interaction velocity contribution (ll_dv*) [um/s]
+- - -
+
+## 📄 lumen_move.cpp
+
+### 🔹 [lumen_move](https://github.com/cborau/cellfoundry/blob/master/lumen_move.cpp)
+**Type:** `agent`  
+**Source:** [Open lumen_move.cpp](https://github.com/cborau/cellfoundry/blob/master/lumen_move.cpp)
+
+- 🔸 **Purpose:** Advance LUMEN agent position using overdamped dynamics. Combines all interaction velocity contributions (LUMEN-LUMEN and LUMEN-CELL) and integrates position with a forward-Euler step. Resets per-step velocity accumulators to zero after applying them.
+- ⬇️ **Inputs:**
+  - LUMEN kinematic state, ll_dv*, lc_dv* contributions
+  - Environment: TIME_STEP, domain boundary coordinates
+- ⬆️ **Outputs:**
+  - Updated LUMEN position, velocity; reset interaction velocity accumulators
+- - -
+
+## 📄 lumen_spatial_location_data.cpp
+
+### 🔹 [lumen_spatial_location_data](https://github.com/cborau/cellfoundry/blob/master/lumen_spatial_location_data.cpp)
+**Type:** `agent`  
+**Source:** [Open lumen_spatial_location_data.cpp](https://github.com/cborau/cellfoundry/blob/master/lumen_spatial_location_data.cpp)
+
+- 🔸 **Purpose:** Broadcast LUMEN agent position and radius over a spatial message list so that other agents (LUMEN, CELL, ECM) can query nearby LUMEN droplets.
+- ⬇️ **Inputs:**
+  - LUMEN variables: id, x, y, z, radius
+- ⬆️ **Outputs:**
+  - MessageSpatial3D record for nearby agent queries
 - - -

@@ -1,4 +1,4 @@
-# What is CellFoundry
+# What is Cellfoundry
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/cborau/cellfoundry/master/assets/logo_cellfoundry.png" alt="CellFoundry logo" width="360">
@@ -40,3 +40,21 @@ CellFoundry is implemented on top of FLAME GPU 2, which provides high-performanc
 2. Run simulation to produce VTK outputs and optional pickle snapshots.
 3. Analyze dynamics using scripts in `postprocessing/`.
 4. Use the generated function reference to inspect model behavior and implementation details.
+
+## Supplementary Videos
+
+![Metabolism showcase](https://raw.githubusercontent.com/cborau/cellfoundry/master/assets/SuppVideo3_Metabolism.gif)
+
+*This video illustrates the integration of chemical and mechanical interactions in the model, where cell motility and matrix remodelling are influenced by local biochemical cues, while cells also actively modify their microenvironment through secretion and consumption of diffusible factors. In this example, 100 cells are shown. The cells consume species 0 (e.g. nutrients present in the environment) and release species 1, generating heterogeneous concentration patterns in the surrounding domain. The blobs are coloured and scaled according to the local concentration values of species 1*
+
+![Matrix degradation](https://raw.githubusercontent.com/cborau/cellfoundry/master/assets/SuppVideo4_Matrix_Degradation.gif)
+
+*Matrix degradation by a migrating cell. Surrounding fibre nodes (FNODEs) within the interaction range are represented as blobs whose size and colour reflect their local degradation state. As degradation progresses and reaches a value of 1, the corresponding FNODE is removed from the simulation, thereby modelling local matrix breakdown, relaxing mechanical constraints and enabling cell invasion through the matrix*
+
+![Matrix reinforcement](https://raw.githubusercontent.com/cborau/cellfoundry/master/assets/SuppVideo5_Matrix_Reinforcement.gif)
+
+*Matrix reinforcement driven by a migrating cell. Surrounding fibre nodes (FNODEs) within the interaction range are shown as blobs whose size and colour indicate the local reinforcement level. Reinforcement promotes the generation of new FNODEs and connected fibres, enabling progressive matrix deposition and remodelling around the cell. This can lead to local stiffening and densification of the matrix, which in turn can influence cell motility, force transmission and diffusion of species.*
+
+![Organoid growth](https://raw.githubusercontent.com/cborau/cellfoundry/master/assets/SuppVideo6_Organoid_Growth.gif)
+
+*Organoid growth driven by the proliferation of three cell types that progressively assemble into a compact three-dimensional structure. Cells are coloured by cell type in the left panel and by cell-cycle phase in the right panel, highlighting both the emerging tissue composition and the heterogeneous proliferative dynamics during organoid formation.*
