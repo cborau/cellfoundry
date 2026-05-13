@@ -87,17 +87,21 @@ def load_fibre_network(
             network_parameters = data.get('network_parameters')
         if network_parameters:
             # print('Loaded network parameters:')
-            # for key, value in network_parameters.items():
-            #     print(f'  {key}: {value}')
+            for key, value in network_parameters.items():
+                print(f'  {key}: {value}')
 
             domain_lx = abs(boundary_coords[1] - boundary_coords[0])
             domain_ly = abs(boundary_coords[3] - boundary_coords[2])
             domain_lz = abs(boundary_coords[5] - boundary_coords[4])
+            
+            #print(f'Computed domain size from boundary coords: LX={domain_lx}, LY={domain_ly}, LZ={domain_lz}')
 
             expected_lx = network_parameters.get('LX')
             expected_ly = network_parameters.get('LY')
             expected_lz = network_parameters.get('LZ')
             expected_edge_length = network_parameters.get('EDGE_LENGTH')
+            
+            #print(f'Expected network parameters for compatibility checks: LX={expected_lx}, LY={expected_ly}, LZ={expected_lz}, EDGE_LENGTH={expected_edge_length}')
             n_fiber = network_parameters.get('N_FIBER')
 
             if expected_lx is not None and not math.isclose(domain_lx, expected_lx, rel_tol=0.0, abs_tol=epsilon):
