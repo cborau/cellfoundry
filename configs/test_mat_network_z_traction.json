@@ -1,0 +1,56 @@
+{
+  "_comment": "TEST: Fibre mechanics only — Z-axis compression using converted FIRE .mat network.",
+  "_note": "No cells, no diffusion, no focal adhesions. +Z and -Z boundaries move inward at equal rates. Set BOUNDARY_COORDS to match network_parameters [LX/2, LY/2, LZ/2] printed by load_network_from_mat.py.",
+
+  "___ SIMULATION ___": "-------------------------------------------------------",
+  "STEPS": 10000,
+  "TIME_STEP": 0.1,
+  "SAVE_EVERY_N_STEPS": 200,
+  "VISUALISATION": false,
+  "SHOW_PLOTS": false,
+  "SAVE_DATA_TO_FILE": true,
+  "SAVE_PICKLE": true,
+  "DEBUG_PRINTING": false,
+
+  "___ DOMAIN ___": "-----------------------------------------------------------",
+  "_BOUNDARY_COORDS_note": "Set these to +/- half of LX, LY, LZ printed by load_network_from_mat.py. Format: [+X, -X, +Y, -Y, +Z, -Z]",
+  "BOUNDARY_COORDS": [30.7411675, -30.7411675, 30.7411675, -30.7411675, 49.94875, -49.94875],
+
+  "_BOUNDARY_DISP_RATES_note": "Z-compression: +Z face moves inward (-), -Z face moves inward (+). Order: [+X,-X,+Y,-Y,+Z,-Z]",
+  "BOUNDARY_DISP_RATES": [0.0, 0.0, 0.0, 0.0, 0.025, 0.0],
+  "BOUNDARY_DISP_RATES_PARALLEL": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+  "CLAMP_AGENT_TOUCHING_BOUNDARY": [1, 1, 1, 1, 1, 1],
+  "ALLOW_AGENT_SLIDING": [1, 1, 1, 1, 0, 0],
+  "ALLOW_BOUNDARY_ELASTIC_MOVEMENT": [0, 0, 0, 0, 0, 0],
+
+  "___ FEATURE FLAGS ___": "----------------------------------------------------",
+  "INCLUDE_CELLS": false,
+  "INCLUDE_CELL_CELL_INTERACTION": false,
+  "INCLUDE_CELL_CYCLE": false,
+  "INCLUDE_CELL_FNODE_REPULSION": false,
+  "INCLUDE_FOCAL_ADHESIONS": false,
+  "INCLUDE_LINC_COUPLING": false,
+
+  "INCLUDE_FIBRE_NETWORK": true,
+  "NETWORK_FILE": "converted_network.pkl",
+  "ALLOW_IRREGULAR_NETWORK": true,
+  "INCLUDE_NETWORK_REMODELING": false,
+
+  "INCLUDE_DIFFUSION": false,
+  "INCLUDE_CHEMOTAXIS": false,
+  "INCLUDE_CHEMOKINESIS": false,
+  "INCLUDE_DUROTAXIS": false,
+
+  "___ FIBRE NETWORK MECHANICS ___": "------------------------------------------",
+  "FIBRE_SEGMENT_K_ELAST": 0.08,
+  "FIBRE_SEGMENT_D_DUMPING": 0.01,
+  "FIBRE_NODE_REPULSION_K": 0.016,
+  "BUCKLING_COEFF_D0": 0.15,
+  "STRAIN_STIFFENING_COEFF_DS": 0.85,
+  "CRITICAL_STRAIN": 0.25,
+  "MAX_STRAIN_K_FACTOR": 12.0,
+
+  "FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE": 1.0,
+  "MAX_SEARCH_RADIUS_FNODES": 0.5
+
+}
