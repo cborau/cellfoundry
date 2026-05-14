@@ -269,6 +269,14 @@ LUMEN_SECRETION_RATE = 5e-4  # [1/s] Probability rate of secreting a LUMEN dropl
 LUMEN_SECRETION_COOLDOWN = 100.0  # [s] Refractory time after a CELL secretes a LUMEN droplet before it can secrete another.
 LUMEN_DIFFUSION_COEFF_MULTI = [5.0, 5.0]  # [um^2/s] Diffusion coefficients inside LUMEN voxels (overrides fibre-adjusted D_sp).
 
+# +====================================================================+
+# | VASCULARIZATION PARAMETERS                                         |
+# +====================================================================+
+INCLUDE_VASCULARIZATION = False  # If True, VASC agents representing a vascular network are included.
+VASC_NETWORK_FILE = 'vascular_network.pickle'  # Path (relative to CURR_PATH) to the vascular network pickle file.
+INIT_VASCULARIZATION_CONCENTRATION_VALS = [2.5, 2.5]  # Initial concentration of each species in VASC agents.
+MAX_VASC_CHILDREN = 2  # Maximum number of children per VASC node (fixed array size).
+
 # Per-cell-type cell cycle timing
 debug_acc = 1.0 # [s] If > 1.0, accelerates the cell cycle for faster testing (all durations are divided by this value). Set to 1.0 for realistic timing.
 _g1 = 10.0 * 3600 / debug_acc
@@ -546,6 +554,26 @@ else:
     INITIAL_NETWORK_CONNECTIVITY = None
     AVG_NETWORK_VOXEL_DENSITY = None
 
+if INCLUDE_VASCULARIZATION:
+    _vasc_network_path = CURR_PATH / VASC_NETWORK_FILE
+    with open(str(_vasc_network_path), 'rb') as _vf:
+        _vasc_network = pickle.load(_vf)
+    VASC_NODES = _vasc_network['nodes']
+    N_VASC_NODES = len(VASC_NODES)
+    print(f'Loaded vascular network: {N_VASC_NODES} nodes from {_vasc_network_path}')
+    # Compute the global ID base for VASC agents (they come after ECM agents in ID space)
+    _vasc_id_base = 8  # boundary corners 1-8
+    if INCLUDE_FIBRE_NETWORK and N_NODES is not None:
+        _vasc_id_base += N_NODES
+    if INCLUDE_CELLS:
+        _vasc_id_base += N_CELLS
+        if INCLUDE_FOCAL_ADHESIONS:
+            _vasc_id_base += N_CELLS * INIT_N_FOCAD_PER_CELL
+    _vasc_id_base += ECM_POPULATION_SIZE
+else:
+    VASC_NODES = None
+    N_VASC_NODES = 0
+
 UNSTABLE_DIFFUSION = False
 # Check diffusion parameters
 if INCLUDE_DIFFUSION:
@@ -702,6 +730,16 @@ lumen_spatial_location_data_file = "lumen_spatial_location_data.cpp"
 lumen_lumen_interaction_file = "lumen_lumen_interaction.cpp"
 lumen_cell_interaction_file = "lumen_cell_interaction.cpp"
 lumen_move_file = "lumen_move.cpp"
+
+"""
+  VASC
+"""
+vasc_bucket_location_data_file = "vasc_bucket_location_data.cpp"
+vasc_spatial_location_data_file = "vasc_spatial_location_data.cpp"
+vasc_Csp_update_file = "vasc_Csp_update.cpp"
+ecm_vasc_Csp_update_file = "ecm_vasc_Csp_update.cpp"
+vascularization_move_file = "vascularization_move.cpp"
+vasc_ecm_cell_spawn_file = "vasc_ecm_cell_spawn.cpp"
 
 
 
@@ -985,6 +1023,15 @@ if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
     env.newPropertyFloat("LUMEN_SECRETION_COOLDOWN", LUMEN_SECRETION_COOLDOWN)
     env.newPropertyArrayFloat("LUMEN_DIFFUSION_COEFF_MULTI", LUMEN_DIFFUSION_COEFF_MULTI)
 
+# VASC agent properties
+if INCLUDE_VASCULARIZATION:
+    env.newPropertyUInt("INCLUDE_VASCULARIZATION", 1)
+    env.newPropertyFloat("MAX_SEARCH_RADIUS_VASCULARIZATION", MAX_SEARCH_RADIUS_VASCULARIZATION)
+    env.newPropertyArrayFloat("INIT_VASCULARIZATION_CONCENTRATION_VALS", INIT_VASCULARIZATION_CONCENTRATION_VALS)
+    env.newPropertyUInt("N_VASC_NODES", N_VASC_NODES)
+else:
+    env.newPropertyUInt("INCLUDE_VASCULARIZATION", 0)
+
 # ++==================================================================++
 # ++ Messages                                                          |
 # ++==================================================================++
@@ -1209,6 +1256,31 @@ if INCLUDE_CELLS:
         FOCAD_spatial_location_message.newVariableInt("fnode_id")
         FOCAD_spatial_location_message.newVariableInt("attached")
         FOCAD_spatial_location_message.newVariableUInt8("active")
+
+if INCLUDE_VASCULARIZATION:
+    VASC_bucket_location_message = model.newMessageBucket("vasc_bucket_location_message")
+    # Compute bucket ID bounds: VASC agents occupy the ID range immediately after ECM agents
+    VASC_BUCKET_MIN = _vasc_id_base + 1
+    VASC_BUCKET_MAX = _vasc_id_base + N_VASC_NODES + 1
+    if VASC_BUCKET_MAX <= VASC_BUCKET_MIN:  # guard against empty range (0 VASC nodes)
+        VASC_BUCKET_MAX = VASC_BUCKET_MIN + 1
+    VASC_bucket_location_message.setBounds(VASC_BUCKET_MIN, VASC_BUCKET_MAX)
+    VASC_bucket_location_message.newVariableInt("id")
+    VASC_bucket_location_message.newVariableFloat("x")
+    VASC_bucket_location_message.newVariableFloat("y")
+    VASC_bucket_location_message.newVariableFloat("z")
+    VASC_bucket_location_message.newVariableInt("parent_id")
+    VASC_bucket_location_message.newVariableArrayFloat("children_ids", MAX_VASC_CHILDREN)
+    VASC_bucket_location_message.newVariableArrayFloat("C_sp", N_SPECIES)
+    VASC_bucket_location_message.newVariableInt("dead")
+
+    VASC_spatial_location_message = model.newMessageSpatial3D("vasc_spatial_location_message")
+    VASC_spatial_location_message.setRadius(MAX_SEARCH_RADIUS_VASCULARIZATION)
+    VASC_spatial_location_message.setMin(MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS, MIN_EXPECTED_BOUNDARY_POS)
+    VASC_spatial_location_message.setMax(MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS, MAX_EXPECTED_BOUNDARY_POS)
+    VASC_spatial_location_message.newVariableInt("id")
+    VASC_spatial_location_message.newVariableInt("dead")
+    VASC_spatial_location_message.newVariableArrayFloat("C_sp", N_SPECIES)
 
 # ++==================================================================++
 # ++ Agents                                                            |
@@ -1572,6 +1644,36 @@ if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
     # Wire the cell_lumen_secretion output agent now that LUMEN_agent exists
     cls_fn.setAgentOutput(LUMEN_agent)
 
+"""
+  VASC agent
+"""
+if INCLUDE_VASCULARIZATION:
+    VASC_agent = model.newAgent("VASC")
+    VASC_agent.newVariableInt("id")                               # unique VASC node id
+    VASC_agent.newVariableFloat("x", 0.0)                        # VASC position [um]
+    VASC_agent.newVariableFloat("y", 0.0)
+    VASC_agent.newVariableFloat("z", 0.0)
+    VASC_agent.newVariableFloat("vx", 0.0)                       # VASC velocity [um/s] (used only when MOVING_BOUNDARIES)
+    VASC_agent.newVariableFloat("vy", 0.0)
+    VASC_agent.newVariableFloat("vz", 0.0)
+    VASC_agent.newVariableInt("parent_id", -1)                   # global id of the parent VASC node (-1 = source/root)
+    VASC_agent.newVariableArrayFloat("children_ids", MAX_VASC_CHILDREN)  # global ids of children (-1 = empty slot)
+    VASC_agent.newVariableArrayFloat("C_sp", N_SPECIES)          # per-species concentration
+    VASC_agent.newVariableInt("dead", 0)                         # 0 = alive, 1 = dead
+
+    VASC_agent.newRTCFunctionFile("vasc_bucket_location_data", vasc_bucket_location_data_file).setMessageOutput("vasc_bucket_location_message")
+    VASC_agent.newRTCFunctionFile("vasc_Csp_update", vasc_Csp_update_file).setMessageInput("vasc_bucket_location_message")
+    VASC_agent.newRTCFunctionFile("vasc_spatial_location_data", vasc_spatial_location_data_file).setMessageOutput("vasc_spatial_location_message")
+    if MOVING_BOUNDARIES:
+        VASC_agent.newRTCFunctionFile("vascularization_move", vascularization_move_file).setMessageInput("ecm_grid_location_message")
+    if INCLUDE_CELLS:
+        vasc_ecm_cell_spawn_fn = VASC_agent.newRTCFunctionFile("vasc_ecm_cell_spawn", vasc_ecm_cell_spawn_file)
+        vasc_ecm_cell_spawn_fn.setAgentOutput(CELL_agent)
+        vasc_ecm_cell_spawn_fn.setAllowAgentDeath(False)
+
+    # Add the ECM→VASC concentration update to the ECM agent
+    ECM_agent.newRTCFunctionFile("ecm_vasc_Csp_update", ecm_vasc_Csp_update_file).setMessageInput("vasc_spatial_location_message")
+
 # Agent population initialization 
 # ----------------------------------------------------------------------    
 # IMPORTANT NOTE: agents must be initialized in the following order to make sure that their ids are consistent with the assumptions made in the RTC functions and bucket message bounds and the vtk files writing:
@@ -1589,6 +1691,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
         global INCLUDE_DIFFUSION, N_SPECIES, DIFFUSION_COEFF_MULTI
         global INIT_ECM_CONCENTRATION_VALS, INIT_ECM_SAT_CONCENTRATION_VALS
         global INCLUDE_FIBRE_NETWORK, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, MAX_CONNECTIVITY
+        global INCLUDE_VASCULARIZATION, VASC_NODES, N_VASC_NODES, INIT_VASCULARIZATION_CONCENTRATION_VALS, MAX_VASC_CHILDREN
         # BOUNDARY CORNERS
         current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
         coord_boundary = FLAMEGPU.environment.getPropertyArrayFloat("COORDS_BOUNDARIES")
@@ -2014,9 +2117,41 @@ class initAgentPopulations(pyflamegpu.HostFunction):
 
         FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
         
+        if INCLUDE_VASCULARIZATION:
+            current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
+            current_id += 1
+            print(f"--- Initializing VASC ({N_VASC_NODES})")
+            print("  |-> current_id:", current_id)
+            _init_conc = list(INIT_VASCULARIZATION_CONCENTRATION_VALS)
+            count = -1
+            for vn in VASC_NODES:
+                count += 1
+                instance = FLAMEGPU.agent("VASC").newAgent()
+                instance.setVariableInt("id", current_id + count)
+                instance.setVariableFloat("x", float(vn["x"]))
+                instance.setVariableFloat("y", float(vn["y"]))
+                instance.setVariableFloat("z", float(vn["z"]))
+                instance.setVariableFloat("vx", 0.0)
+                instance.setVariableFloat("vy", 0.0)
+                instance.setVariableFloat("vz", 0.0)
+                # Offset parent_id from local 0-indexed to global ID space
+                _parent_id_local = vn["parent_id"]
+                _parent_id_global = (current_id + _parent_id_local) if _parent_id_local >= 0 else -1
+                instance.setVariableInt("parent_id", _parent_id_global)
+                # Offset children_ids and pad to MAX_VASC_CHILDREN
+                _children_raw = list(vn.get("children_ids", []))[:MAX_VASC_CHILDREN]
+                _children_global = [float(current_id + c) if c >= 0 else -1.0 for c in _children_raw]
+                while len(_children_global) < MAX_VASC_CHILDREN:
+                    _children_global.append(-1.0)
+                instance.setVariableArrayFloat("children_ids", _children_global)
+                instance.setVariableArrayFloat("C_sp", _init_conc)
+                instance.setVariableInt("dead", 0)
+            FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
+
         if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
             lumen_id_macro = FLAMEGPU.environment.getMacroPropertyInt("MACRO_MAX_GLOBAL_LUMEN_ID")
-            lumen_id_macro[0] = current_id + count
+            # Lumen IDs must start after the last used ID (which may include VASC if active)
+            lumen_id_macro[0] = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
         
         
         return
@@ -2200,6 +2335,7 @@ class SaveDataToFile(pyflamegpu.HostFunction):
         global RES_PATH
         global INCLUDE_FIBRE_NETWORK, HETEROGENEOUS_DIFFUSION, INITIAL_NETWORK_CONNECTIVITY, N_NODES, INCLUDE_CELLS, ECM_POPULATION_SIZE
         global INCLUDE_FOCAL_ADHESIONS
+        global INCLUDE_VASCULARIZATION, N_VASC_NODES
         save_data_to_file_step(
             FLAMEGPU=FLAMEGPU,
             save_context=self.save_context,
@@ -2217,6 +2353,8 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                 "INCLUDE_FOCAL_ADHESIONS": INCLUDE_FOCAL_ADHESIONS,
                 "INCLUDE_NETWORK_REMODELING": INCLUDE_NETWORK_REMODELING,
                 "INCLUDE_LUMEN": INCLUDE_LUMEN,
+                "INCLUDE_VASCULARIZATION": INCLUDE_VASCULARIZATION,
+                "N_VASC_NODES": N_VASC_NODES,
                 "pyflamegpu": pyflamegpu,
             },
         )
@@ -2467,6 +2605,16 @@ if INCLUDE_FOCAL_ADHESIONS:
   Control flow
 """
 
+# L0: VASC concentration update — runs BEFORE L1 so the ECM grid message
+# (broadcast in L1) already reflects the VASC-imposed concentration floor.
+if INCLUDE_VASCULARIZATION:
+    model.newLayer("L0_VASC_Bucket_Locations").addAgentFunction("VASC", "vasc_bucket_location_data")
+    model.newLayer("L0_VASC_Csp_Update").addAgentFunction("VASC", "vasc_Csp_update")
+    model.newLayer("L0_VASC_Spatial_Locations").addAgentFunction("VASC", "vasc_spatial_location_data")
+    model.newLayer("L0_ECM_VASC_Csp_Update").addAgentFunction("ECM", "ecm_vasc_Csp_update")
+    if INCLUDE_CELLS:
+        model.newLayer("L0_VASC_Cell_Spawn").addAgentFunction("VASC", "vasc_ecm_cell_spawn")
+
 # L1: Agent_Locations
 model.newLayer("L1_Agent_Locations").addAgentFunction("BCORNER", "bcorner_output_location_data")
 if INCLUDE_DIFFUSION:
@@ -2560,6 +2708,8 @@ if INCLUDE_FIBRE_NETWORK:
 if MOVING_BOUNDARIES:
     model.newLayer("L8_BCORNER_Movement").addAgentFunction("BCORNER", "bcorner_move")
     model.newLayer("L8_ECM_Movement").addAgentFunction("ECM", "ecm_move")
+    if INCLUDE_VASCULARIZATION:
+        model.newLayer("L8_VASC_Movement").addAgentFunction("VASC", "vascularization_move")
     
 # ++==================================================================++
 # ++ Logging                                                           |

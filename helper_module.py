@@ -864,6 +864,8 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
     include_focal_adhesions = config["INCLUDE_FOCAL_ADHESIONS"]
     include_network_remodeling = config["INCLUDE_NETWORK_REMODELING"]
     include_lumen = config["INCLUDE_LUMEN"]
+    include_vascularization = config.get("INCLUDE_VASCULARIZATION", False)
+    n_vasc_nodes = config.get("N_VASC_NODES", 0)
     pyflamegpu = config["pyflamegpu"]
 
     stepCounter = FLAMEGPU.getStepCounter() + 1
@@ -1879,6 +1881,69 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
                 file.write("LOOKUP_TABLE default\n")
                 for v in lumen_radius:
                     file.write("{:.4f} \n".format(v))
+
+    if include_vascularization:
+        vasc_ids = []
+        vasc_coords = []
+        vasc_C_sp_list = []
+        vasc_dead = []
+        vasc_parent_ids = []
+        vasc_children_ids = []
+        vasc_agent = FLAMEGPU.agent("VASC")
+        if vasc_agent.count() > 0:
+            vasc_agent.sortInt("id", pyflamegpu.HostAgentAPI.Asc)
+        for ai in vasc_agent.getPopulationData():
+            vasc_ids.append(ai.getVariableInt("id"))
+            vasc_coords.append((ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z")))
+            vasc_C_sp_list.append(ai.getVariableArrayFloat("C_sp"))
+            vasc_dead.append(ai.getVariableInt("dead"))
+            vasc_parent_ids.append(ai.getVariableInt("parent_id"))
+            vasc_children_ids.append(ai.getVariableArrayFloat("children_ids"))
+
+        num_vasc = len(vasc_ids)
+        file_name = 'vasc_data_t{:04d}.vtk'.format(stepCounter)
+        file_path = res_path / file_name
+
+        # Build edges: parent → child (using parent_id field, offset-matched to sorted ids)
+        id_to_idx = {vid: i for i, vid in enumerate(vasc_ids)}
+        edges = []
+        for i, vid in enumerate(vasc_ids):
+            pid = vasc_parent_ids[i]
+            if pid >= 0 and pid in id_to_idx:
+                edges.append((id_to_idx[pid], i))
+        num_edges = len(edges)
+
+        with open(str(file_path), 'w') as file:
+            for line in save_context["vascularizationdata"]:
+                file.write(line + '\n')
+            file.write("POINTS {} float\n".format(num_vasc))
+            for c in vasc_coords:
+                file.write("{:.6f} {:.6f} {:.6f}\n".format(c[0], c[1], c[2]))
+            if num_vasc > 0:
+                if num_edges > 0:
+                    file.write("CELLS {} {}\n".format(num_edges, num_edges * 3))
+                    for (p, c) in edges:
+                        file.write("2 {} {}\n".format(p, c))
+                    file.write("CELL_TYPES {}\n".format(num_edges))
+                    for _ in range(num_edges):
+                        file.write("3\n")  # VTK_LINE
+                else:
+                    file.write("CELLS 0 0\n")
+                    file.write("CELL_TYPES 0\n")
+                file.write("POINT_DATA {}\n".format(num_vasc))
+                file.write("SCALARS id int 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for vid in vasc_ids:
+                    file.write("{}\n".format(vid))
+                file.write("SCALARS dead int 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                for d in vasc_dead:
+                    file.write("{}\n".format(d))
+                for s in range(n_species):
+                    file.write("SCALARS concentration_species_{} float 1\n".format(s))
+                    file.write("LOOKUP_TABLE default\n")
+                    for c_sp in vasc_C_sp_list:
+                        file.write("{:.6f}\n".format(c_sp[s]))
 
     file_name = 'ecm_data_t{:04d}.vtk'.format(stepCounter)
     file_path = res_path / file_name
