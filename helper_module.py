@@ -3403,3 +3403,263 @@ def load_param_overrides_from_cli(argv=None):
         with open(overrides_path, "r") as f:
             overrides = json.load(f)
     return overrides, result_dir
+
+
+import numpy as np
+
+
+def smoothstep(edge0, edge1, x):
+    """
+    Smooth transition from 0 to 1 between edge0 and edge1.
+    """
+    t = (x - edge0) / (edge1 - edge0)
+    t = np.clip(t, 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def create_u_shaped_scalar_profile(
+    ecm_agents_per_dir,
+    coords_boundaries,
+    loaded_face="y_neg",
+    u_axes=("x",),
+    max_scalar=1.0,
+    side_surface_fraction=0.5,
+    center_reach=0.70,
+    side_reach=0.25,
+    lateral_power=1.3,
+    decay_length=0.60,
+    decay_power=1.0,
+    front_smoothing=0.08,
+    dtype=np.float32,
+):
+    """
+    Create a flattened scalar profile over a regular ECM grid.
+
+    The returned array uses the same linear indexing as:
+
+        grid_lin_id = i * Ny * Nz + j * Nz + k
+
+    where:
+        i corresponds to x index
+        j corresponds to y index
+        k corresponds to z index
+
+    Parameters
+    ----------
+    ecm_agents_per_dir : tuple/list of int
+        Number of ECM grid points in each direction:
+
+            (Nx, Ny, Nz)
+
+    coords_boundaries : tuple/list of float
+        Domain boundaries in the same order used in the FLAMEGPU environment:
+
+            (X_POS, X_NEG, Y_POS, Y_NEG, Z_POS, Z_NEG)
+
+        The current implementation only needs these to preserve the same convention
+        as the C++ code. The profile itself is generated in normalized coordinates.
+
+    loaded_face : str
+        Face where the scalar is applied.
+
+        Options:
+            "x_neg", "x_pos",
+            "y_neg", "y_pos",
+            "z_neg", "z_pos"
+
+        Example:
+            "y_neg" means the scalar is applied at Y_NEG and decays toward Y_POS.
+
+    u_axes : tuple of str
+        Lateral axes that define the upside-down U shape.
+
+        Examples:
+            ("x",) gives a 2D U profile in the x-depth plane, repeated along z.
+            ("x", "z") gives a 3D dome-like profile, strongest at the face centre.
+
+    max_scalar : float
+        Maximum scalar value, reached at the centre of the loaded face.
+
+    side_surface_fraction : float
+        Scalar at the lateral sides of the loaded face, relative to max_scalar.
+
+        For example, 0.5 gives a loaded-face profile similar to:
+
+            0.5 0.8 1.0 0.8 0.5
+
+    center_reach : float
+        Normalized penetration distance at the centre of the loaded face.
+
+        This controls how far the pressure profile extends into the cube at the
+        centre of the loaded face. It is normalized between 0 and 1, where:
+
+            0.0 = exactly at the loaded face
+            1.0 = the opposite face of the cube
+
+        For example, if loaded_face="y_neg", then depth is measured from Y_NEG
+        toward Y_POS. In that case:
+
+            center_reach = 0.70
+
+        means that, at the centre of the loaded face, the pressure profile is
+        allowed to extend up to approximately 70% of the domain depth before being
+        smoothly cut off.
+
+    side_reach : float
+        Normalized penetration distance at the sides of the loaded face.
+
+        This controls how far the pressure profile extends into the cube near the
+        lateral sides of the loaded face. It is also normalized between 0 and 1:
+
+            0.0 = exactly at the loaded face
+            1.0 = the opposite face of the cube
+
+        For an upside-down U-shaped pressure profile, side_reach should be smaller
+        than center_reach. This makes pressure penetrate deeper at the centre than
+        at the sides.
+
+        Example:
+
+            center_reach = 0.70
+            side_reach   = 0.25
+
+        If the cube depth along the loading direction is 1000 microns, this means:
+
+            centre of the loaded face: pressure can reach about 700 microns
+            sides of the loaded face:  pressure can reach about 250 microns
+
+        This produces a profile where the centre column remains nonzero deeper into
+        the cube, while the side columns decay and disappear sooner.
+
+    lateral_power : float
+        Controls the lateral shape of the U.
+
+        Larger values make the central high-scalar region wider.
+        Smaller values make it sharper.
+
+    decay_length : float
+        Controls how fast the scalar decays away from the loaded face.
+
+        Smaller values produce faster decay.
+        Larger values produce slower decay.
+
+    decay_power : float
+        Exponent applied to the decay term.
+
+        1.0 gives exponential-like decay.
+        2.0 gives a sharper Gaussian-like decay.
+
+    front_smoothing : float
+        Width of the smooth cutoff near the penetration front, in normalized units.
+
+        Set to 0.0 for a hard cutoff.
+
+    dtype : numpy dtype
+        Output array dtype. Usually np.float32 for FLAMEGPU buffers.
+
+    Returns
+    -------
+    scalar_flat : np.ndarray
+        Flattened scalar array with length Nx * Ny * Nz.
+
+        Compatible with:
+
+            grid_lin_id = i * Ny * Nz + j * Nz + k
+    """
+
+    Nx, Ny, Nz = map(int, ecm_agents_per_dir)
+    X_POS, X_NEG, Y_POS, Y_NEG, Z_POS, Z_NEG = map(float, coords_boundaries)
+
+    if Nx <= 0 or Ny <= 0 or Nz <= 0:
+        raise ValueError("All grid dimensions must be positive.")
+
+    if not (0.0 <= side_surface_fraction <= 1.0):
+        raise ValueError("side_surface_fraction must be between 0 and 1.")
+
+    if not (0.0 <= center_reach <= 1.0):
+        raise ValueError("center_reach must be between 0 and 1.")
+
+    if not (0.0 <= side_reach <= 1.0):
+        raise ValueError("side_reach must be between 0 and 1.")
+
+    if decay_length <= 0.0:
+        raise ValueError("decay_length must be > 0.")
+
+    if decay_power <= 0.0:
+        raise ValueError("decay_power must be > 0.")
+
+    valid_faces = {"x_neg", "x_pos", "y_neg", "y_pos", "z_neg", "z_pos"}
+    if loaded_face not in valid_faces:
+        raise ValueError(f"loaded_face must be one of {sorted(valid_faces)}.")
+
+    valid_axes = {"x", "y", "z"}
+    u_axes = tuple(u_axes)
+    if not u_axes:
+        raise ValueError("u_axes must contain at least one axis.")
+
+    if any(axis not in valid_axes for axis in u_axes):
+        raise ValueError("u_axes can only contain 'x', 'y', and/or 'z'.")
+
+    normal_axis = loaded_face[0]
+    if normal_axis in u_axes:
+        raise ValueError("u_axes should not include the normal axis of loaded_face.")
+
+    # Normalized grid coordinates.
+    # Shape is (Nx, Ny, Nz), matching linear index:
+    # idx = i * Ny * Nz + j * Nz + k
+    x = np.linspace(0.0, 1.0, Nx, dtype=np.float64)[:, None, None]
+    y = np.linspace(0.0, 1.0, Ny, dtype=np.float64)[None, :, None]
+    z = np.linspace(0.0, 1.0, Nz, dtype=np.float64)[None, None, :]
+
+    coords = {
+        "x": x,
+        "y": y,
+        "z": z,
+    }
+
+    # Normalized depth from the loaded face.
+    # depth = 0 at loaded face
+    # depth = 1 at opposite face
+    if loaded_face.endswith("_neg"):
+        depth = coords[normal_axis]
+    else:
+        depth = 1.0 - coords[normal_axis]
+
+    # Lateral profile:
+    #   1 at centre
+    #   0 at selected lateral sides
+    #
+    # For one axis, this produces the side-view U shape.
+    # For two axes, this produces a 3D centre-focused profile.
+    lateral_core = 1.0
+    for axis in u_axes:
+        centred_distance = np.abs(2.0 * coords[axis] - 1.0)
+        axis_core = 1.0 - centred_distance ** lateral_power
+        lateral_core = lateral_core * axis_core
+
+    lateral_core = np.clip(lateral_core, 0.0, 1.0)
+
+    # Scalar on the loaded face.
+    # At the centre: max_scalar
+    # At the lateral sides: side_surface_fraction * max_scalar
+    surface_profile = side_surface_fraction + (1.0 - side_surface_fraction) * lateral_core
+
+    # Local penetration reach.
+    # At the centre: center_reach
+    # At the sides: side_reach
+    local_reach = side_reach + (center_reach - side_reach) * lateral_core
+
+    # Decay away from loaded face.
+    decay = np.exp(-((depth / decay_length) ** decay_power))
+
+    scalar = max_scalar * surface_profile * decay
+
+    # Apply cutoff at the local penetration front.
+    if front_smoothing > 0.0:
+        cutoff_start = np.maximum(local_reach - front_smoothing, 0.0)
+        cutoff = 1.0 - smoothstep(cutoff_start, local_reach, depth)
+        scalar *= cutoff
+    else:
+        scalar = np.where(depth <= local_reach, scalar, 0.0)
+
+    return scalar.astype(dtype).ravel(order="C")
