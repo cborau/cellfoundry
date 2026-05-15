@@ -864,8 +864,8 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
     include_focal_adhesions = config["INCLUDE_FOCAL_ADHESIONS"]
     include_network_remodeling = config["INCLUDE_NETWORK_REMODELING"]
     include_lumen = config["INCLUDE_LUMEN"]
-    include_vascularization = config.get("INCLUDE_VASCULARIZATION", False)
-    n_vasc_nodes = config.get("N_VASC_NODES", 0)
+    include_vascularization = config["INCLUDE_VASCULARIZATION"]
+    n_vasc_nodes = config["N_VASC_NODES"]
     pyflamegpu = config["pyflamegpu"]
 
     stepCounter = FLAMEGPU.getStepCounter() + 1
@@ -1897,8 +1897,8 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             vasc_coords.append((ai.getVariableFloat("x"), ai.getVariableFloat("y"), ai.getVariableFloat("z")))
             vasc_C_sp_list.append(ai.getVariableArrayFloat("C_sp"))
             vasc_dead.append(ai.getVariableInt("dead"))
-            vasc_parent_ids.append(ai.getVariableInt("parent_id"))
-            vasc_children_ids.append(ai.getVariableArrayFloat("children_ids"))
+            vasc_parent_ids.append(ai.getVariableArrayInt("parent_ids"))
+            vasc_children_ids.append(ai.getVariableArrayInt("children_ids"))
 
         num_vasc = len(vasc_ids)
         file_name = 'vasc_data_t{:04d}.vtk'.format(stepCounter)
@@ -1908,9 +1908,9 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
         id_to_idx = {vid: i for i, vid in enumerate(vasc_ids)}
         edges = []
         for i, vid in enumerate(vasc_ids):
-            pid = vasc_parent_ids[i]
-            if pid >= 0 and pid in id_to_idx:
-                edges.append((id_to_idx[pid], i))
+            for pid in vasc_parent_ids[i]:
+                if pid >= 0 and pid in id_to_idx:
+                    edges.append((id_to_idx[pid], i))
         num_edges = len(edges)
 
         with open(str(file_path), 'w') as file:

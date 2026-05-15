@@ -43,6 +43,7 @@ class ReferenceValues:
     n_cell_types: int
     max_connectivity: int
     n_anchor_points: int
+    max_vasc_connectivity: int
     boundary_coords: List[Number]
     ecm_agents_per_dir: List[int]
     ecm_population_size: int
@@ -150,6 +151,7 @@ def load_reference_values(model_path: str) -> ReferenceValues:
     N_CELL_TYPES = need_int("N_CELL_TYPES")
     MAX_CONNECTIVITY = need_int("MAX_CONNECTIVITY")
     N_ANCHOR_POINTS = need_int("N_ANCHOR_POINTS")
+    MAX_VASC_CONNECTIVITY = need_int("MAX_VASC_CONNECTIVITY")
     BOUNDARY_COORDS = need_boundary()
 
     diff_x = abs(BOUNDARY_COORDS[0] - BOUNDARY_COORDS[1])
@@ -192,6 +194,7 @@ def load_reference_values(model_path: str) -> ReferenceValues:
         n_cell_types=N_CELL_TYPES,
         max_connectivity=MAX_CONNECTIVITY,
         n_anchor_points=N_ANCHOR_POINTS,
+        max_vasc_connectivity=MAX_VASC_CONNECTIVITY,
         boundary_coords=BOUNDARY_COORDS,
         ecm_agents_per_dir=ECM_AGENTS_PER_DIR,
         ecm_population_size=ECM_POPULATION_SIZE,
@@ -382,6 +385,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"N_CELL_TYPES = {ref.n_cell_types}")
     print(f"MAX_CONNECTIVITY = {ref.max_connectivity}")
     print(f"N_ANCHOR_POINTS = {ref.n_anchor_points}")
+    print(f"MAX_VASC_CONNECTIVITY = {ref.max_vasc_connectivity}")
     print(f"ECM_AGENTS_PER_DIR = {ref.ecm_agents_per_dir}")
     print(f"ECM_POPULATION_SIZE = {ref.ecm_population_size}")
     print("")
@@ -396,6 +400,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "ECM_POPULATION_SIZE": ref.ecm_population_size,
         "MAX_CONNECTIVITY": ref.max_connectivity,
         "N_ANCHOR_POINTS": ref.n_anchor_points,
+        "MAX_VASC_CONNECTIVITY": ref.max_vasc_connectivity,
     }
 
     # Exclude:

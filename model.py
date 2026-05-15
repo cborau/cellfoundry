@@ -275,7 +275,8 @@ LUMEN_DIFFUSION_COEFF_MULTI = [5.0, 5.0]  # [um^2/s] Diffusion coefficients insi
 INCLUDE_VASCULARIZATION = False  # If True, VASC agents representing a vascular network are included.
 VASC_NETWORK_FILE = 'vascular_network.pickle'  # Path (relative to CURR_PATH) to the vascular network pickle file.
 INIT_VASCULARIZATION_CONCENTRATION_VALS = [2.5, 2.5]  # Initial concentration of each species in VASC agents.
-MAX_VASC_CHILDREN = 2  # Maximum number of children per VASC node (fixed array size).
+MAX_VASC_CONNECTIVITY = 2  # Maximum number of parents or children per VASC node (fixed array size). Defined during vascular network generation (tools/generate_vascular_network.py).
+INCLUDE_VASCULAR_CELL_RECRUITMENT = False  # If True, cells can be recruited from the vascular network into the simulation based on proximity and chemical cues.
 
 # Per-cell-type cell cycle timing
 debug_acc = 1.0 # [s] If > 1.0, accelerates the cell cycle for faster testing (all durations are divided by this value). Set to 1.0 for realistic timing.
@@ -738,7 +739,7 @@ vasc_bucket_location_data_file = "vasc_bucket_location_data.cpp"
 vasc_spatial_location_data_file = "vasc_spatial_location_data.cpp"
 vasc_Csp_update_file = "vasc_Csp_update.cpp"
 ecm_vasc_Csp_update_file = "ecm_vasc_Csp_update.cpp"
-vascularization_move_file = "vascularization_move.cpp"
+vasc_move_file = "vasc_move.cpp"
 vasc_ecm_cell_spawn_file = "vasc_ecm_cell_spawn.cpp"
 
 
@@ -1269,8 +1270,8 @@ if INCLUDE_VASCULARIZATION:
     VASC_bucket_location_message.newVariableFloat("x")
     VASC_bucket_location_message.newVariableFloat("y")
     VASC_bucket_location_message.newVariableFloat("z")
-    VASC_bucket_location_message.newVariableInt("parent_id")
-    VASC_bucket_location_message.newVariableArrayFloat("children_ids", MAX_VASC_CHILDREN)
+    VASC_bucket_location_message.newVariableArrayInt("parent_ids", MAX_VASC_CONNECTIVITY)
+    VASC_bucket_location_message.newVariableArrayInt("children_ids", MAX_VASC_CONNECTIVITY)
     VASC_bucket_location_message.newVariableArrayFloat("C_sp", N_SPECIES)
     VASC_bucket_location_message.newVariableInt("dead")
 
@@ -1656,8 +1657,8 @@ if INCLUDE_VASCULARIZATION:
     VASC_agent.newVariableFloat("vx", 0.0)                       # VASC velocity [um/s] (used only when MOVING_BOUNDARIES)
     VASC_agent.newVariableFloat("vy", 0.0)
     VASC_agent.newVariableFloat("vz", 0.0)
-    VASC_agent.newVariableInt("parent_id", -1)                   # global id of the parent VASC node (-1 = source/root)
-    VASC_agent.newVariableArrayFloat("children_ids", MAX_VASC_CHILDREN)  # global ids of children (-1 = empty slot)
+    VASC_agent.newVariableArrayInt("parent_ids", MAX_VASC_CONNECTIVITY)  # global ids of parents (-1 = empty slot; source nodes have all entries == -1)
+    VASC_agent.newVariableArrayInt("children_ids", MAX_VASC_CONNECTIVITY)  # global ids of children (-1 = empty slot)
     VASC_agent.newVariableArrayFloat("C_sp", N_SPECIES)          # per-species concentration
     VASC_agent.newVariableInt("dead", 0)                         # 0 = alive, 1 = dead
 
@@ -1665,8 +1666,8 @@ if INCLUDE_VASCULARIZATION:
     VASC_agent.newRTCFunctionFile("vasc_Csp_update", vasc_Csp_update_file).setMessageInput("vasc_bucket_location_message")
     VASC_agent.newRTCFunctionFile("vasc_spatial_location_data", vasc_spatial_location_data_file).setMessageOutput("vasc_spatial_location_message")
     if MOVING_BOUNDARIES:
-        VASC_agent.newRTCFunctionFile("vascularization_move", vascularization_move_file).setMessageInput("ecm_grid_location_message")
-    if INCLUDE_CELLS:
+        VASC_agent.newRTCFunctionFile("vasc_move", vasc_move_file).setMessageInput("ecm_grid_location_message")
+    if INCLUDE_CELLS and INCLUDE_VASCULAR_CELL_RECRUITMENT:
         vasc_ecm_cell_spawn_fn = VASC_agent.newRTCFunctionFile("vasc_ecm_cell_spawn", vasc_ecm_cell_spawn_file)
         vasc_ecm_cell_spawn_fn.setAgentOutput(CELL_agent)
         vasc_ecm_cell_spawn_fn.setAllowAgentDeath(False)
@@ -1691,7 +1692,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
         global INCLUDE_DIFFUSION, N_SPECIES, DIFFUSION_COEFF_MULTI
         global INIT_ECM_CONCENTRATION_VALS, INIT_ECM_SAT_CONCENTRATION_VALS
         global INCLUDE_FIBRE_NETWORK, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE, MAX_CONNECTIVITY
-        global INCLUDE_VASCULARIZATION, VASC_NODES, N_VASC_NODES, INIT_VASCULARIZATION_CONCENTRATION_VALS, MAX_VASC_CHILDREN
+        global INCLUDE_VASCULARIZATION, VASC_NODES, N_VASC_NODES, INIT_VASCULARIZATION_CONCENTRATION_VALS, MAX_VASC_CONNECTIVITY
         # BOUNDARY CORNERS
         current_id = FLAMEGPU.environment.getPropertyUInt("CURRENT_ID")
         coord_boundary = FLAMEGPU.environment.getPropertyArrayFloat("COORDS_BOUNDARIES")
@@ -2134,16 +2135,18 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableFloat("vx", 0.0)
                 instance.setVariableFloat("vy", 0.0)
                 instance.setVariableFloat("vz", 0.0)
-                # Offset parent_id from local 0-indexed to global ID space
-                _parent_id_local = vn["parent_id"]
-                _parent_id_global = (current_id + _parent_id_local) if _parent_id_local >= 0 else -1
-                instance.setVariableInt("parent_id", _parent_id_global)
-                # Offset children_ids and pad to MAX_VASC_CHILDREN
-                _children_raw = list(vn.get("children_ids", []))[:MAX_VASC_CHILDREN]
-                _children_global = [float(current_id + c) if c >= 0 else -1.0 for c in _children_raw]
-                while len(_children_global) < MAX_VASC_CHILDREN:
-                    _children_global.append(-1.0)
-                instance.setVariableArrayFloat("children_ids", _children_global)
+                # Offset parent_ids from local 0-indexed to global ID space and pad to MAX_VASC_CONNECTIVITY
+                _parent_ids_local = list(vn["parent_ids"])
+                _parent_ids_global = [(current_id + p) if p >= 0 else p for p in _parent_ids_local]
+                while len(_parent_ids_global) < MAX_VASC_CONNECTIVITY:
+                    _parent_ids_global.append(-1)
+                instance.setVariableArrayInt("parent_ids", _parent_ids_global[:MAX_VASC_CONNECTIVITY])
+                # Offset children_ids and pad to MAX_VASC_CONNECTIVITY
+                _children_raw = list(vn.get("children_ids", []))[:MAX_VASC_CONNECTIVITY]
+                _children_global = [(current_id + c) if c >= 0 else -1 for c in _children_raw]
+                while len(_children_global) < MAX_VASC_CONNECTIVITY:
+                    _children_global.append(-1)
+                instance.setVariableArrayInt("children_ids", _children_global)
                 instance.setVariableArrayFloat("C_sp", _init_conc)
                 instance.setVariableInt("dead", 0)
             FLAMEGPU.environment.setPropertyUInt("CURRENT_ID", current_id + count)
@@ -2612,7 +2615,7 @@ if INCLUDE_VASCULARIZATION:
     model.newLayer("L0_VASC_Csp_Update").addAgentFunction("VASC", "vasc_Csp_update")
     model.newLayer("L0_VASC_Spatial_Locations").addAgentFunction("VASC", "vasc_spatial_location_data")
     model.newLayer("L0_ECM_VASC_Csp_Update").addAgentFunction("ECM", "ecm_vasc_Csp_update")
-    if INCLUDE_CELLS:
+    if INCLUDE_CELLS and INCLUDE_VASCULAR_CELL_RECRUITMENT:
         model.newLayer("L0_VASC_Cell_Spawn").addAgentFunction("VASC", "vasc_ecm_cell_spawn")
 
 # L1: Agent_Locations
@@ -2709,7 +2712,7 @@ if MOVING_BOUNDARIES:
     model.newLayer("L8_BCORNER_Movement").addAgentFunction("BCORNER", "bcorner_move")
     model.newLayer("L8_ECM_Movement").addAgentFunction("ECM", "ecm_move")
     if INCLUDE_VASCULARIZATION:
-        model.newLayer("L8_VASC_Movement").addAgentFunction("VASC", "vascularization_move")
+        model.newLayer("L8_VASC_Movement").addAgentFunction("VASC", "vasc_move")
     
 # ++==================================================================++
 # ++ Logging                                                           |

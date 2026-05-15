@@ -26,8 +26,6 @@
  * Notes:
  *   - FLAMEGPU2 permits at most one agent_out output per function execution.
  *     Use early-exit after the first successful spawn to guarantee this.
- *   - The function reads C_SP_MACRO from the previous step's L0_ECM_VASC_Csp_Update
- *     values, so concentration is at most one step stale — acceptable for spawning.
  *   - All TODO markers must be replaced with real rules before production use.
  *   - To add more cell types, duplicate the corresponding TODO block and adjust
  *     the condition and cell_type value.

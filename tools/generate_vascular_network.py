@@ -114,17 +114,19 @@ class VesselNode:
     """
     Vascular point-agent node.
 
-    parent_id is the growth parent used to create this node. It is -1 for seed
-    nodes placed on nucleation faces. children_ids stores outgoing adjacency.
-    For anastomosis connections, children_ids can include an already existing
-    node whose parent_id remains unchanged.
+    parent_ids is a list of parent node ids. Seed nodes placed on nucleation
+    faces have parent_ids = [-2] (-2 is the source/boundary sentinel, distinct
+    from -1 which means empty slot). Growth nodes start with parent_ids =
+    [growth_parent_id]. When an anastomosis connection is formed, the
+    anastomosis parent id is appended, giving the child node multiple parents.
+    children_ids stores outgoing adjacency.
     """
 
     id: int
     x: float
     y: float
     z: float
-    parent_id: int
+    parent_ids: List[int] = field(default_factory=lambda: [-2])
     children_ids: List[int] = field(default_factory=list)
     tree_id: int = -1
     is_boundary: bool = False
@@ -316,7 +318,7 @@ def add_node(
             x=float(position[0]),
             y=float(position[1]),
             z=float(position[2]),
-            parent_id=int(parent_id),
+            parent_ids=[-2 if parent_id < 0 else int(parent_id)],  # -2 = source sentinel; >=0 = growth parent
             tree_id=int(tree_id),
             is_boundary=bool(is_boundary),
             boundary_face=int(boundary_face),
@@ -342,8 +344,12 @@ def add_edge(
 
     # Growth edges already add the new node to children_ids in add_node().
     # Anastomosis edges link to an existing node and must add adjacency here.
-    if edge_type == "anastomosis" and child_id not in nodes[parent_id].children_ids:
-        nodes[parent_id].children_ids.append(child_id)
+    if edge_type == "anastomosis":
+        if child_id not in nodes[parent_id].children_ids:
+            nodes[parent_id].children_ids.append(child_id)
+        # Register the anastomosis parent in the child's parent list
+        if parent_id not in nodes[child_id].parent_ids:
+            nodes[child_id].parent_ids.append(parent_id)
 
     edges.append(VesselEdge(parent_id=parent_id, child_id=child_id, length=length, edge_type=edge_type))
     return length
@@ -657,7 +663,7 @@ def network_to_arrays(network: Dict[str, object]) -> Dict[str, np.ndarray]:
     edges = network["edges"]
 
     positions = np.array([[n["x"], n["y"], n["z"]] for n in nodes], dtype=float)
-    parent_ids = np.array([n["parent_id"] for n in nodes], dtype=np.int64)
+    parent_ids = np.array([list(n["parent_ids"]) for n in nodes], dtype=object)
     tree_ids = np.array([n["tree_id"] for n in nodes], dtype=np.int64)
     is_boundary = np.array([n["is_boundary"] for n in nodes], dtype=bool)
     boundary_faces = np.array([n["boundary_face"] for n in nodes], dtype=np.int64)

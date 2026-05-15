@@ -1,11 +1,9 @@
 /**
- * vascularization_move
+ * vasc_move
  *
  * Purpose:
  *   Advect each alive VASC node with the local ECM grid velocity so the
  *   vascular network deforms coherently when the simulation boundaries move.
- *   The nearest ECM grid point is found from the current VASC position using
- *   the same rounding formula as cell_ecm_interaction_metabolism.cpp.
  *
  * Inputs:
  *   - Agent variables: dead, x, y, z
@@ -18,13 +16,8 @@
  *
  * Notes:
  *   Only registered in the model when MOVING_BOUNDARIES is True.
- *   Dead nodes are skipped and left at their last position.
  */
-FLAMEGPU_AGENT_FUNCTION(vascularization_move, flamegpu::MessageArray3D, flamegpu::MessageNone) {
-    // Dead VASC nodes do not move
-    if (FLAMEGPU->getVariable<int>("dead") == 1) {
-        return flamegpu::ALIVE;
-    }
+FLAMEGPU_AGENT_FUNCTION(vasc_move, flamegpu::MessageArray3D, flamegpu::MessageNone) {
 
     float agent_x = FLAMEGPU->getVariable<float>("x");
     float agent_y = FLAMEGPU->getVariable<float>("y");
