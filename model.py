@@ -217,7 +217,7 @@ HETEROGENEOUS_DIFFUSION = True  # if True, diffusion coefficient is multiplied b
 # --------------------------------------------------------------------------
 N_CELL_TYPES = 3
 
-INCLUDE_CELLS = True
+INCLUDE_CELLS = False
 INCLUDE_CELL_CELL_INTERACTION = True # If True, cells interact with each other through short-range repulsion and adhesion forces. 
 INCLUDE_CELL_CYCLE = True # If True, cells go through a simplified cell cycle with G1, S, G2 and M phases, which can affect their behavior. Also includes birth/death dynamics (WARNING: USER-DEFINED in cell_cycle.cpp).
 DEAD_CELLS_DISAPPEAR = False  # If True, dead CELL agents are removed; if False, they remain inert with dead=1.
@@ -562,6 +562,14 @@ if INCLUDE_VASCULARIZATION:
     VASC_NODES = _vasc_network['nodes']
     N_VASC_NODES = len(VASC_NODES)
     print(f'Loaded vascular network: {N_VASC_NODES} nodes from {_vasc_network_path}')
+    # --- DEBUG: spatial coverage sanity check ---
+    if VASC_NODES and DEBUG_PRINTING:
+        _vxs = [n['x'] for n in VASC_NODES]
+        _vys = [n['y'] for n in VASC_NODES]
+        _vzs = [n['z'] for n in VASC_NODES]
+        print(f'[DEBUG VASC] bounding box: x=[{min(_vxs):.2f}, {max(_vxs):.2f}]  '
+              f'y=[{min(_vys):.2f}, {max(_vys):.2f}]  '
+              f'z=[{min(_vzs):.2f}, {max(_vzs):.2f}]')
     # Compute the global ID base for VASC agents (they come after ECM agents in ID space)
     _vasc_id_base = 8  # boundary corners 1-8
     if INCLUDE_FIBRE_NETWORK and N_NODES is not None:

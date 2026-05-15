@@ -833,7 +833,7 @@ def main() -> None:
         args = argparse.Namespace(
             bounds=[50, -50, 50, -50, 50, -50],
             diameter=1.0,
-            density=0.004,
+            density=0.002,
             resolution=4.0,
             branching_probability=0.08,
             nucleation_faces=[1, 1, 1, 1, 1, 1],

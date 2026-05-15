@@ -38,13 +38,28 @@ FLAMEGPU_AGENT_FUNCTION(ecm_vasc_Csp_update, flamegpu::MessageSpatial3D, flamegp
         C_sp[i] = FLAMEGPU->getVariable<float, N_SPECIES>("C_sp", i);
     }
 
-    // Accumulate the per-species maximum concentration over all alive nearby VASC nodes
+    // Accumulate the per-species maximum concentration over alive VASC nodes within range.
+    // NOTE: MessageSpatial3D's message_in(x,y,z) returns all messages in the 3x3x3 bin
+    // neighbourhood (bin size = radius), which can include nodes up to ~3x the configured
+    // radius away. An explicit distance check is therefore required.
+    const float MAX_R = FLAMEGPU->environment.getProperty<float>("MAX_SEARCH_RADIUS_VASCULARIZATION");
+    const float MAX_R2 = MAX_R * MAX_R;
     int found_alive = 0;
     float max_vasc_C_sp[N_SPECIES] = {};
+    // DEBUG tracking
+    int   n_vasc_in_radius  = 0;          // alive VASC nodes within MAX_R
+    float min_dist2_found   = 1e30f;      // nearest alive VASC node (squared distance)
 
     for (const auto& msg : FLAMEGPU->message_in(agent_x, agent_y, agent_z)) {
+        const float dx   = agent_x - msg.getVariable<float>("x");
+        const float dy   = agent_y - msg.getVariable<float>("y");
+        const float dz   = agent_z - msg.getVariable<float>("z");
+        const float dist2 = dx * dx + dy * dy + dz * dz;
+        if (dist2 > MAX_R2) { continue; }
         if (msg.getVariable<int>("dead") == 0) {
             found_alive = 1;
+            n_vasc_in_radius++;
+            if (dist2 < min_dist2_found) { min_dist2_found = dist2; }
             for (int i = 0; i < N_SPECIES; i++) {
                 float c = msg.getVariable<float, N_SPECIES>("C_sp", i);
                 if (c > max_vasc_C_sp[i]) {
@@ -53,6 +68,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_vasc_Csp_update, flamegpu::MessageSpatial3D, flamegp
             }
         }
     }
+
 
     if (found_alive) {
         for (int i = 0; i < N_SPECIES; i++) {

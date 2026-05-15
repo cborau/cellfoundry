@@ -1,0 +1,51 @@
+{
+  "_comment": "Vascularization + diffusion showcase. No cells, no focal adhesions, no fibre network.",
+  "_usage": "python model.py --overrides configs/showcase_vascularization.json",
+
+  "___ SIMULATION ___": "-------------------------------------------------------",
+  "STEPS": 20,
+  "TIME_STEP": 1.0,
+  "SAVE_EVERY_N_STEPS": 1,
+  "VISUALISATION": false,
+  "SHOW_PLOTS": false,
+  "SAVE_DATA_TO_FILE": true,
+  "SAVE_PICKLE": true,
+  "DEBUG_PRINTING": false,
+  "BOUNDARY_COORDS": [50.0, -50.0, 50.0, -50.0, 50.0, -50.0],
+
+
+
+  "___ FEATURE FLAGS ___": "----------------------------------------------------",
+  "INCLUDE_VASCULARIZATION": true,
+  "INCLUDE_DIFFUSION": true,
+  "HETEROGENEOUS_DIFFUSION": false,
+  "INCLUDE_CELLS": false,
+  "INCLUDE_CELL_CYCLE": false,
+  "INCLUDE_CELL_CELL_INTERACTION": false,
+  "INCLUDE_CELL_FNODE_REPULSION": false,
+  "INCLUDE_FIBRE_NETWORK": false,
+  "INCLUDE_FOCAL_ADHESIONS": false,
+  "INCLUDE_NETWORK_REMODELING": false,
+  "INCLUDE_CHEMOTAXIS": false,
+  "INCLUDE_CHEMOKINESIS": false,
+  "INCLUDE_LUMEN": false,
+  "ORGANOID_ASSAY": false,
+
+  "___ VASCULARIZATION ___": "---------------------------------------------------",
+  "VASC_NETWORK_FILE": "vascular_network.pickle",
+  "MAX_VASC_CONNECTIVITY": 2,
+  "INIT_VASCULARIZATION_CONCENTRATION_VALS": [2.5, 20.0],
+
+  "___ DIFFUSION ___": "---------------------------------------------------------",
+  "N_SPECIES": 2,
+  "DIFFUSION_COEFF_MULTI": [1.5, 1.5],
+  "BOUNDARY_CONC_INIT_MULTI": [
+    [-1.0, -1.0, -1.0, -1.0, -1.0, -1.0],
+    [-1.0, -1.0, -1.0, -1.0, -1.0, -1.0]
+  ],
+  "BOUNDARY_CONC_FIXED_MULTI": [
+    [-1.0, -1.0, -1.0, -1.0, -1.0, -1.0],
+    [-1.0, -1.0, -1.0, -1.0, -1.0, -1.0]
+  ],
+  "INIT_ECM_CONCENTRATION_VALS": [0.0, 0.0]
+}

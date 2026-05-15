@@ -2333,6 +2333,8 @@ class ModelParameterConfig:
         max_expected_boundary_pos: float = None,
         # Vascularization
         include_vascularization: bool = None,
+        vasc_network_file: str = None,
+        max_vasc_connectivity: int = None,
         init_vascularization_concentration_vals: list = None,
         # Organoid assay
         organoid_assay: bool = None,
@@ -2535,6 +2537,8 @@ class ModelParameterConfig:
         self.MIN_EXPECTED_BOUNDARY_POS = min_expected_boundary_pos
         self.MAX_EXPECTED_BOUNDARY_POS = max_expected_boundary_pos
         self.INCLUDE_VASCULARIZATION = include_vascularization
+        self.VASC_NETWORK_FILE = vasc_network_file
+        self.MAX_VASC_CONNECTIVITY = max_vasc_connectivity
         self.INIT_VASCULARIZATION_CONCENTRATION_VALS = init_vascularization_concentration_vals
         self.ORGANOID_ASSAY = organoid_assay
         self.ORGANOID_INIT_RADIUS = organoid_init_radius
@@ -3089,6 +3093,8 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         min_expected_boundary_pos=ns.get("MIN_EXPECTED_BOUNDARY_POS"),
         max_expected_boundary_pos=ns.get("MAX_EXPECTED_BOUNDARY_POS"),
         include_vascularization=ns.get("INCLUDE_VASCULARIZATION"),
+        vasc_network_file=ns.get("VASC_NETWORK_FILE"),
+        max_vasc_connectivity=ns.get("MAX_VASC_CONNECTIVITY"),
         init_vascularization_concentration_vals=ns.get("INIT_VASCULARIZATION_CONCENTRATION_VALS"),
         organoid_assay=ns.get("ORGANOID_ASSAY"),
         organoid_init_radius=ns.get("ORGANOID_INIT_RADIUS"),
@@ -3103,12 +3109,11 @@ def recompute_derived_params(ns: dict, pinned: set | None = None) -> None:
     """Re-compute derived parameters from base values after applying overrides.
 
     Call this after injecting parameter overrides into the model namespace so
-    that values which depend on other parameters are kept consistent.  Only
-    the *simple* algebraic relations are handled here; domain-level
-    re-gridding (ECM_AGENTS_PER_DIR, ECM_POPULATION_SIZE, etc.) is
-    intentionally left out because changing the grid seed (N) or
-    BOUNDARY_COORDS has far-reaching consequences that should be set
-    explicitly.
+    that values which depend on other parameters are kept consistent.
+    Handles domain-geometry quantities (L0_x/y/z, ECM_ECM_EQUILIBRIUM_DISTANCE,
+    MAX_SEARCH_RADIUS_VASCULARIZATION, …) as well as cell / fibre / lumen
+    derived values.  ECM_AGENTS_PER_DIR and ECM_POPULATION_SIZE are intentionally
+    left unchanged because they are baked into hard-coded C++ constants.
 
     Handles both scalar and list (per-cell-type) parameters transparently.
 
@@ -3144,6 +3149,27 @@ def recompute_derived_params(ns: dict, pinned: set | None = None) -> None:
             return [fn(a, bi) for bi in b]
         else:
             return fn(a, b)
+
+    # --- Domain geometry (BOUNDARY_COORDS -> L0, ECM spacing, search radii) ---
+    # ECM_AGENTS_PER_DIR and ECM_POPULATION_SIZE are intentionally NOT recomputed
+    # here because they are baked into hard-coded C++ constants.
+    if "BOUNDARY_COORDS" in ns and "ECM_AGENTS_PER_DIR" in ns:
+        bc = ns["BOUNDARY_COORDS"]
+        epa = ns["ECM_AGENTS_PER_DIR"]
+        l0x = abs(bc[0] - bc[1])
+        l0y = abs(bc[2] - bc[3])
+        l0z = abs(bc[4] - bc[5])
+        ns["L0_x"] = l0x
+        ns["L0_y"] = l0y
+        ns["L0_z"] = l0z
+        ns["ECM_VOXEL_VOLUME"] = (l0x / (epa[0] - 1)) * (l0y / (epa[1] - 1)) * (l0z / (epa[2] - 1))
+        if "ECM_ECM_EQUILIBRIUM_DISTANCE" not in pinned:
+            ns["ECM_ECM_EQUILIBRIUM_DISTANCE"] = l0x / (epa[0] - 1)
+        _ecm_eq = ns["ECM_ECM_EQUILIBRIUM_DISTANCE"]
+        if "MAX_SEARCH_RADIUS_VASCULARIZATION" not in pinned:
+            ns["MAX_SEARCH_RADIUS_VASCULARIZATION"] = _ecm_eq
+        if "MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION" not in pinned:
+            ns["MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION"] = _ecm_eq
 
     # --- Boundary stiffness / damping arrays ---
     if "RELATIVE_BOUNDARY_STIFFNESS" in ns and "BOUNDARY_STIFFNESS_VALUE" in ns:
