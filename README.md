@@ -47,6 +47,9 @@ Official references:
 - FLAME GPU documentation: https://docs.flamegpu.com/
 - Installation guide: https://docs.flamegpu.com/guide/index.html
 - Official wheelhouse (latest releases): https://whl.flamegpu.com/
+- Cellfoundry-specific wheels*: https://m2be.unizar.es/people/cborau/cellfoundry_wheels/  
+
+**These wheels include specific features, such as atomic operations on macro variables, that are not yet included in the official FLAMEGPU release. Since some customizable agent functions rely on these operations, the code in this repository may not run correctly with the official FLAMEGPU release and can throw runtime or compilation errors.*
 
 If you encounter issues, always refer to the official FLAME GPU installation guide.
 
@@ -115,26 +118,55 @@ python -m pip install -r requirements.txt
 
 ## 4. Install FLAME GPU Wheels (CUDA 12.4)
 
-FLAME GPU wheels are hosted at: https://whl.flamegpu.com/
-Pick the one corresponding to your operating system and CUDA version.
+FLAMEGPU official wheels are hosted at: https://whl.flamegpu.com/. However, as stated above, this repository currently requires some Cellfoundry-specific features not yet available in the official release. In the meantime, until those features are incorporated, the required wheels can be downloaded from: https://m2be.unizar.es/people/cborau/cellfoundry_wheels/
 
-Two variants are available:
-- **ON** → Visualization enabled (useful for quick debugging and model inspection)
-- **OFF** → Visualization disabled (lighter)
+Pick the wheel corresponding to your operating system, Python version, CUDA version, and visualization preference.
 
-**Visualization ON (recommended for development)**
+Two variants may be available:
+
+- **Visualization ON**: visualization enabled, useful for quick debugging and model inspection
+- **Visualization OFF**: visualization disabled, lighter
+
+## Option A: Cellfoundry-specific wheels, recommended
+
+Download the appropriate wheel, for example, for Windows, Python 3.10, CUDA 12.4, and visualization enabled, download:
+```text
+wheel-windows-12.4.0-3.10-ON-Release-windows-2022.zip
+```
+which includes:
+```text
+pyflamegpu-2.0.0rc5+cuda124.vis-cp310-cp310-win_amd64.whl
+```
+
+Then install it from the folder where the file was downloaded:
+
+```powershell
+python -m pip install .\pyflamegpu-2.0.0rc5+cuda124.vis-cp310-cp310-win_amd64.whl
+```
+
+If reinstalling:
+
+```powershell
+python -m pip install --force-reinstall --no-cache-dir .\pyflamegpu-2.0.0rc5+cuda124.vis-cp310-cp310-win_amd64.whl
+```
+
+## Option B: Official FLAME GPU wheels
+
+These wheels can be used for standard FLAMEGPU installations. However, running Cellfoundry with the official wheels may fail if the code path uses features that are currently only available in the Cellfoundry-specific wheels.
+
+### Visualization ON
 
 ```powershell
 python -m pip install --extra-index-url https://whl.flamegpu.com/whl/cuda124-vis/ pyflamegpu
 ```
 
-**Visualization OFF**
+### Visualization OFF
 
 ```powershell
 python -m pip install --extra-index-url https://whl.flamegpu.com/whl/cuda124/ pyflamegpu
 ```
 
-**If reinstalling:**
+If reinstalling:
 
 ```powershell
 python -m pip install --force-reinstall --no-cache-dir --extra-index-url https://whl.flamegpu.com/whl/cuda124-vis/ pyflamegpu
