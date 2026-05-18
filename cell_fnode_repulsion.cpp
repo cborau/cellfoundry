@@ -32,6 +32,12 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_repulsion, flamegpu::MessageSpatial3D, flameg
     FLAMEGPU->setVariable<float>("cf_dvx", 0.0f);
     FLAMEGPU->setVariable<float>("cf_dvy", 0.0f);
     FLAMEGPU->setVariable<float>("cf_dvz", 0.0f);
+    FLAMEGPU->setVariable<float>("cf_S_xx", 0.0f);
+    FLAMEGPU->setVariable<float>("cf_S_yy", 0.0f);
+    FLAMEGPU->setVariable<float>("cf_S_zz", 0.0f);
+    FLAMEGPU->setVariable<float>("cf_S_xy", 0.0f);
+    FLAMEGPU->setVariable<float>("cf_S_xz", 0.0f);
+    FLAMEGPU->setVariable<float>("cf_S_yz", 0.0f);
     return flamegpu::ALIVE;
   }
 
@@ -39,6 +45,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_repulsion, flamegpu::MessageSpatial3D, flameg
   const float agent_y = FLAMEGPU->getVariable<float>("y");
   const float agent_z = FLAMEGPU->getVariable<float>("z");
   const float agent_radius = FLAMEGPU->getVariable<float>("radius");
+  const float agent_nucleus_radius = FLAMEGPU->getVariable<float>("nucleus_radius");
   const int agent_cell_type = FLAMEGPU->getVariable<int>("cell_type");
 
   const uint8_t N_CELL_TYPES = 3; // WARNING: must match main python model N_CELL_TYPES
@@ -52,6 +59,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_repulsion, flamegpu::MessageSpatial3D, flameg
   float fx_sum = 0.0f;
   float fy_sum = 0.0f;
   float fz_sum = 0.0f;
+  float cf_S_xx = 0.0f, cf_S_yy = 0.0f, cf_S_zz = 0.0f;
+  float cf_S_xy = 0.0f, cf_S_xz = 0.0f, cf_S_yz = 0.0f;
 
   for (const auto &message : FLAMEGPU->message_in(agent_x, agent_y, agent_z)) {
     const float mx = message.getVariable<float>("x");
@@ -86,6 +95,13 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_repulsion, flamegpu::MessageSpatial3D, flameg
     fx_sum += f_pair * nx;
     fy_sum += f_pair * ny;
     fz_sum += f_pair * nz;
+    const float cf_s_coeff = -agent_nucleus_radius * f_pair;
+    cf_S_xx += cf_s_coeff * nx * nx;
+    cf_S_yy += cf_s_coeff * ny * ny;
+    cf_S_zz += cf_s_coeff * nz * nz;
+    cf_S_xy += cf_s_coeff * nx * ny;
+    cf_S_xz += cf_s_coeff * nx * nz;
+    cf_S_yz += cf_s_coeff * ny * nz;
   }
 
   const float inv_drag = (CELL_D_DUMPING > 1e-12f) ? (1.0f / CELL_D_DUMPING) : 0.0f;
@@ -108,5 +124,11 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_repulsion, flamegpu::MessageSpatial3D, flameg
   FLAMEGPU->setVariable<float>("cf_dvx", dvx);
   FLAMEGPU->setVariable<float>("cf_dvy", dvy);
   FLAMEGPU->setVariable<float>("cf_dvz", dvz);
+  FLAMEGPU->setVariable<float>("cf_S_xx", cf_S_xx);
+  FLAMEGPU->setVariable<float>("cf_S_yy", cf_S_yy);
+  FLAMEGPU->setVariable<float>("cf_S_zz", cf_S_zz);
+  FLAMEGPU->setVariable<float>("cf_S_xy", cf_S_xy);
+  FLAMEGPU->setVariable<float>("cf_S_xz", cf_S_xz);
+  FLAMEGPU->setVariable<float>("cf_S_yz", cf_S_yz);
   return flamegpu::ALIVE;
 }

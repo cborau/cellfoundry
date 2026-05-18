@@ -3425,7 +3425,11 @@ def load_param_overrides_from_cli(argv=None):
     result_dir = _get_flag("--result-dir")
 
     overrides = {}
-    if overrides_path and os.path.isfile(overrides_path):
+    if overrides_path:
+        if not os.path.isfile(overrides_path):
+            raise FileNotFoundError(
+                f"[ERROR] --overrides path does not exist or is not a file: {overrides_path!r}"
+            )
         with open(overrides_path, "r") as f:
             overrides = json.load(f)
     return overrides, result_dir

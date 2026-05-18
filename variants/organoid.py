@@ -131,8 +131,8 @@ def configure_globals(g: dict) -> None:
     cell_cycle.cpp are registered in configure_layers() below.
     """
     # Example (not needed unless VARIANT_SUPPRESS_LAYERS is active):
-    # g["ORGANOID_CONTACT_INHIBIT_SIGMA"] = 1.5  # [kPa]
-    # g["ORGANOID_CONTACT_INHIBIT_FACTOR"] = 3.0
+    g["ORGANOID_CONTACT_INHIBIT_SIGMA"] = 1.5  # [kPa]
+    g["ORGANOID_CONTACT_INHIBIT_FACTOR"] = 3.0
     pass
 
 

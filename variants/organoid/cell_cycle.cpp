@@ -204,6 +204,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
   // fixed CYCLE_PHASE_*_START environment constants.
   // Falls back to normal advancement when INCLUDE_FOCAL_ADHESIONS = False
   // (sig_eig_1 stays 0, condition never fires).
+  printf("[ORGANOID VARIANT] DEBUG: agent_id=%d, cell_type=%d, sig_eig_1=%.2f\n", id, agent_cell_type, agent_sig_l1);
   float clock_dt = TIME_STEP;
   if (agent_cell_type == 1
       && agent_clock >= CYCLE_PHASE_G1_START
@@ -376,7 +377,29 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
       FLAMEGPU->agent_out.setVariable<float>("cf_dvx", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("cf_dvy", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("cf_dvz", 0.0f);
-      FLAMEGPU->agent_out.setVariable<float>("clock", 0.0 + FLAMEGPU->random.uniform<float>(0.0, 0.1) * CYCLE_PHASE_G1_DURATION);
+      FLAMEGPU->agent_out.setVariable<float>("cc_S_xx", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cc_S_yy", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cc_S_zz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cc_S_xy", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cc_S_xz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cc_S_yz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cf_S_xx", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cf_S_yy", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cf_S_zz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cf_S_xy", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cf_S_xz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cf_S_yz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cl_S_xx", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cl_S_yy", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cl_S_zz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cl_S_xy", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cl_S_xz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cl_S_yz", 0.0f);      FLAMEGPU->agent_out.setVariable<float>("focad_S_xx", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("focad_S_yy", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("focad_S_zz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("focad_S_xy", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("focad_S_xz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("focad_S_yz", 0.0f);      FLAMEGPU->agent_out.setVariable<float>("clock", 0.0 + FLAMEGPU->random.uniform<float>(0.0, 0.1) * CYCLE_PHASE_G1_DURATION);
       FLAMEGPU->agent_out.setVariable<int>("cycle_phase", 1);
       // [ORGANOID PATCH B] ─────────────────────────────────────────────────
       // Asymmetric division: apical progenitors (type 0) produce luminal (type 1)

@@ -756,6 +756,7 @@ cell_fnode_repulsion_file = "cell_fnode_repulsion.cpp"
 cell_fnode_remodel_file = "cell_fnode_remodel.cpp"
 cell_bucket_location_data_file = "cell_bucket_location_data.cpp"
 cell_focad_update_file = "cell_focad_update.cpp"
+cell_stress_state_update_file = "cell_stress_state_update.cpp"
 cell_cycle_file = "cell_cycle.cpp"
 cell_maxid_update_file = "cell_MaxID_update.cpp"
 cell_lumen_interaction_file = "cell_lumen_interaction.cpp"
@@ -1525,6 +1526,31 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableFloat("cl_dvx", 0.0)  # [um/s] velocity contribution from cell_lumen_interaction
     CELL_agent.newVariableFloat("cl_dvy", 0.0)  
     CELL_agent.newVariableFloat("cl_dvz", 0.0)  
+    # Contact-derived stresslet accumulators [nN·um] — summed each step by interaction functions
+    CELL_agent.newVariableFloat("cc_S_xx", 0.0)  # cell-cell stresslet components
+    CELL_agent.newVariableFloat("cc_S_yy", 0.0)
+    CELL_agent.newVariableFloat("cc_S_zz", 0.0)
+    CELL_agent.newVariableFloat("cc_S_xy", 0.0)
+    CELL_agent.newVariableFloat("cc_S_xz", 0.0)
+    CELL_agent.newVariableFloat("cc_S_yz", 0.0)
+    CELL_agent.newVariableFloat("cf_S_xx", 0.0)  # cell-fnode stresslet components
+    CELL_agent.newVariableFloat("cf_S_yy", 0.0)
+    CELL_agent.newVariableFloat("cf_S_zz", 0.0)
+    CELL_agent.newVariableFloat("cf_S_xy", 0.0)
+    CELL_agent.newVariableFloat("cf_S_xz", 0.0)
+    CELL_agent.newVariableFloat("cf_S_yz", 0.0)
+    CELL_agent.newVariableFloat("cl_S_xx", 0.0)  # cell-lumen stresslet components
+    CELL_agent.newVariableFloat("cl_S_yy", 0.0)
+    CELL_agent.newVariableFloat("cl_S_zz", 0.0)
+    CELL_agent.newVariableFloat("cl_S_xy", 0.0)
+    CELL_agent.newVariableFloat("cl_S_xz", 0.0)
+    CELL_agent.newVariableFloat("cl_S_yz", 0.0)
+    CELL_agent.newVariableFloat("focad_S_xx", 0.0)  # focal-adhesion stresslet components
+    CELL_agent.newVariableFloat("focad_S_yy", 0.0)
+    CELL_agent.newVariableFloat("focad_S_zz", 0.0)
+    CELL_agent.newVariableFloat("focad_S_xy", 0.0)
+    CELL_agent.newVariableFloat("focad_S_xz", 0.0)
+    CELL_agent.newVariableFloat("focad_S_yz", 0.0)
     CELL_agent.newVariableFloat("lumen_secretion_cooldown", 0.0)  # [s] cooldown timer before cell can secrete another lumen droplet
     CELL_agent.newVariableInt("cycle_phase", 1) # [1:G1] [2:S] [3:G2] [4:M]
     CELL_agent.newVariableFloat("clock", 0.0) # internal clock of the cell to switch phases
@@ -1602,6 +1628,7 @@ if INCLUDE_CELLS:
         CELL_agent.newRTCFunctionFile("cell_bucket_location_data", cell_bucket_location_data_file).setMessageOutput("cell_bucket_location_message")
         cell_focad_update_fn = CELL_agent.newRTCFunctionFile("cell_focad_update", cell_focad_update_file)
         cell_focad_update_fn.setMessageInput("focad_bucket_location_message")
+    CELL_agent.newRTCFunctionFile("cell_stress_state_update", cell_stress_state_update_file)
     if INCLUDE_CELL_CYCLE:
         CELL_agent.newRTCFunctionFile("cell_MaxID_update", cell_maxid_update_file)
         ccf = CELL_agent.newRTCFunctionFile("cell_cycle", cell_cycle_file)
@@ -2747,6 +2774,9 @@ if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
     model.newLayer("L7_LUMEN_LUMEN_Interaction").addAgentFunction("LUMEN", "lumen_lumen_interaction")
     model.newLayer("L7_LUMEN_CELL_Interaction").addAgentFunction("LUMEN", "lumen_cell_interaction")
     model.newLayer("L7_CELL_LUMEN_Interaction").addAgentFunction("CELL", "cell_lumen_interaction")
+# Unified nucleus stress finalization 
+if INCLUDE_CELLS:
+    model.newLayer("L7_CELL_Stress_State_Update").addAgentFunction("CELL", "cell_stress_state_update")
 
 # L8_Agent_Movement
 if INCLUDE_CELLS:
