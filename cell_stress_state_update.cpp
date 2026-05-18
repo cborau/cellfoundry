@@ -421,30 +421,39 @@ FLAMEGPU_AGENT_FUNCTION(cell_stress_state_update, flamegpu::MessageNone, flamegp
 
   // -------------------------
   // Orientation alignment toward max principal direction
+  //
+  // Guard: skip when the stress/strain tensor is near-isotropic.
+  // For symmetric packing (hydrostatic compression), all eigenvalues are
+  // nearly equal and the Jacobi solver returns the identity columns as
+  // eigenvectors (v1 = (1,0,0)), which would introduce a spurious x-bias.
+  // Only apply alignment when the normalized anisotropy exceeds 5 %.
   // -------------------------
   if (INCLUDE_ORIENTATION_ALIGN) {
-    float target_x = sig_v1x;
-    float target_y = sig_v1y;
-    float target_z = sig_v1z;
-    if (ORIENTATION_ALIGN_USE_STRESS == 0) {
-      target_x = eps_v1x;
-      target_y = eps_v1y;
-      target_z = eps_v1z;
-    }
+    const float l1_a  = ORIENTATION_ALIGN_USE_STRESS ? sig_l1 : eps_l1;
+    const float l3_a  = ORIENTATION_ALIGN_USE_STRESS ? sig_l3 : eps_l3;
+    const float l2_a  = ORIENTATION_ALIGN_USE_STRESS ? sig_l2 : eps_l2;
+    const float mag_a = fabsf(l1_a) + fabsf(l2_a) + fabsf(l3_a);
+    const float aniso = (mag_a > 1e-12f) ? (l1_a - l3_a) / mag_a : 0.0f;
 
-    // Avoid sign flips: choose target with positive dot to current orientation
-    const float dot = agent_orx*target_x + agent_ory*target_y + agent_orz*target_z;
-    if (dot < 0.0f) {
-      target_x = -target_x;
-      target_y = -target_y;
-      target_z = -target_z;
-    }
+    if (aniso > 0.05f) { // minimum anisotropy threshold to avoid alignment to noise
+      float target_x = ORIENTATION_ALIGN_USE_STRESS ? sig_v1x : eps_v1x;
+      float target_y = ORIENTATION_ALIGN_USE_STRESS ? sig_v1y : eps_v1y;
+      float target_z = ORIENTATION_ALIGN_USE_STRESS ? sig_v1z : eps_v1z;
 
-    const float a = ccs_clampf(ORIENTATION_ALIGN_RATE * TIME_STEP, 0.0f, 1.0f);
-    agent_orx = (1.0f - a) * agent_orx + a * target_x;
-    agent_ory = (1.0f - a) * agent_ory + a * target_y;
-    agent_orz = (1.0f - a) * agent_orz + a * target_z;
-    ccs_normalize3(agent_orx, agent_ory, agent_orz);
+      // Avoid sign flips: choose target with positive dot to current orientation
+      const float dot = agent_orx*target_x + agent_ory*target_y + agent_orz*target_z;
+      if (dot < 0.0f) {
+        target_x = -target_x;
+        target_y = -target_y;
+        target_z = -target_z;
+      }
+
+      const float a = ccs_clampf(ORIENTATION_ALIGN_RATE * TIME_STEP, 0.0f, 1.0f);
+      agent_orx = (1.0f - a) * agent_orx + a * target_x;
+      agent_ory = (1.0f - a) * agent_ory + a * target_y;
+      agent_orz = (1.0f - a) * agent_orz + a * target_z;
+      ccs_normalize3(agent_orx, agent_ory, agent_orz);
+    }
   }
   FLAMEGPU->setVariable<float>("orx", agent_orx);
   FLAMEGPU->setVariable<float>("ory", agent_ory);
