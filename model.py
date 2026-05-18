@@ -443,10 +443,49 @@ DUROTAXIS_BLEND_BETA = [0.5, 0.5, 0.5]   # 0: traction only, 1: principal direct
 DUROTAXIS_USE_STRESS = True   # True: use stress eigenpair, False: use strain eigenpair
 
 
+# +===================================================================+
+# | VARIANT MODULE LOADING                                             |
+# +====================================================================+
+# Load a named variant from the variants/ folder via --variant <name>.
+# e.g.  python model.py --variant organoid
+#
+# Priority order (highest wins):
+#   1. --overrides <json>   (CLI / optimizer)
+#   2. variant.PARAMS        (variant module)
+#   3. model.py defaults
+#
+# Variant FILES and the configure_layers / configure_globals hooks are
+# applied later in this file at the appropriate execution points.
+_ACTIVE_VARIANT = None
+_VARIANT_NAME = None
+for _vi, _varg in enumerate(_ORIGINAL_ARGV):
+    if _varg == "--variant" and _vi + 1 < len(_ORIGINAL_ARGV):
+        _VARIANT_NAME = _ORIGINAL_ARGV[_vi + 1]
+        break
+if _VARIANT_NAME:
+    import importlib.util as _iutil
+    _variant_path = CURR_PATH / "variants" / f"{_VARIANT_NAME}.py"
+    if not _variant_path.exists():
+        _available = [p.stem for p in (CURR_PATH / "variants").glob("*.py") if p.stem != "__init__"]
+        raise FileNotFoundError(
+            f"Variant '{_VARIANT_NAME}' not found: expected {_variant_path}\n"
+            f"Available variants: {_available}"
+        )
+    _vspec = _iutil.spec_from_file_location(f"variants.{_VARIANT_NAME}", str(_variant_path))
+    _ACTIVE_VARIANT = _iutil.module_from_spec(_vspec)
+    _vspec.loader.exec_module(_ACTIVE_VARIANT)
+    _variant_params = getattr(_ACTIVE_VARIANT, "PARAMS", {})
+    if _variant_params:
+        print(f"[VARIANT] Applying {len(_variant_params)} parameter(s) from variant '{_VARIANT_NAME}'")
+        apply_param_overrides(globals(), _variant_params)
+    print(f"[VARIANT] Loaded variant '{_VARIANT_NAME}' from {_variant_path}")
+
+
 # +====================================================================+
 # | PARAMETER OVERRIDES (for optimization / batch runs)                |
 # +====================================================================+
 # Load overrides from --overrides <file.json> CLI argument (if any).
+# JSON overrides are applied AFTER variant PARAMS so they always win.
 # e.g. python model.py --overrides ./optimizer/optuna_results/best_params.json
 # This must run AFTER all defaults above so that derived values can be
 # recomputed from the (possibly overridden) base parameters.
@@ -773,6 +812,20 @@ fnode_move_file = "fnode_move.cpp"
 fnode_bucket_location_data_postmove_file = "fnode_bucket_location_data_postmove.cpp"
 fnode_focad_interaction_file = "fnode_focad_interaction.cpp"
 fnode_cell_repulsion_file = "fnode_cell_repulsion.cpp"
+
+# Apply variant FILES overrides — redirects *_file variables to variant-
+# specific .cpp paths.  Paths are relative to the project root (CURR_PATH).
+if _ACTIVE_VARIANT is not None:
+    for _vfkey, _vfpath in getattr(_ACTIVE_VARIANT, "FILES", {}).items():
+        if _vfkey in globals():
+            print(f"[VARIANT] Redirecting {_vfkey} -> {_vfpath}")
+            globals()[_vfkey] = _vfpath
+        else:
+            print(f"[VARIANT] WARNING: FILES key '{_vfkey}' not found in model.py globals, ignoring")
+    # configure_globals hook: may inject new global flags before model build.
+    if hasattr(_ACTIVE_VARIANT, "configure_globals"):
+        print(f"[VARIANT] Calling configure_globals for variant '{_VARIANT_NAME}'")
+        _ACTIVE_VARIANT.configure_globals(globals())
 
 
 model = pyflamegpu.ModelDescription("cellfoundry")
@@ -2721,7 +2774,14 @@ if MOVING_BOUNDARIES:
     model.newLayer("L8_ECM_Movement").addAgentFunction("ECM", "ecm_move")
     if INCLUDE_VASCULARIZATION:
         model.newLayer("L8_VASC_Movement").addAgentFunction("VASC", "vasc_move")
-    
+
+# Variant layer injection point — called after ALL default layers.
+# Variants use configure_layers() to append new layers at the end of the
+# default layer stack.
+if _ACTIVE_VARIANT is not None and hasattr(_ACTIVE_VARIANT, "configure_layers"):
+    print(f"[VARIANT] Calling configure_layers for variant '{_VARIANT_NAME}'")
+    _ACTIVE_VARIANT.configure_layers(model, globals())
+
 # ++==================================================================++
 # ++ Logging                                                           |
 # ++==================================================================++

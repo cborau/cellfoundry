@@ -1,0 +1,470 @@
+/**
+ * variants/organoid/cell_cycle.cpp
+ * =================================
+ * Organoid-variant override of the default cell_cycle.cpp.
+ *
+ * Differences from the base model
+ * --------------------------------
+ * PATCH A — CONTACT-INHIBITED G1 (cell_type == 1, luminal cells):
+ *   When a luminal cell is under compressive stress exceeding
+ *   ORGANOID_CONTACT_INHIBIT_SIGMA [kPa], the cell-cycle clock is advanced
+ *   at a reduced rate during G1, effectively extending the G1 duration by
+ *   ORGANOID_CONTACT_INHIBIT_FACTOR.  Search for "PATCH A" to find the
+ *   modified line.
+ *   NOTE: requires INCLUDE_FOCAL_ADHESIONS = True so that sig_eig_1 is
+ *   updated by cell_focad_update.cpp.  When INCLUDE_FOCAL_ADHESIONS = False,
+ *   sig_eig_1 stays 0 and this patch has no effect.
+ *
+ * PATCH B — ASYMMETRIC DIVISION (cell_type == 0, apical progenitors):
+ *   When an apical cell divides, the daughter is assigned cell_type 1
+ *   (luminal) instead of inheriting the parent type.  This models the
+ *   progenitor → luminal fate transition observed in organoid expansion.
+ *   Search for "PATCH B" to find the modified line.
+ *
+ * Variant environment properties (registered by configure_layers in
+ * variants/organoid.py)
+ * --------------------------------------------------------------------------
+ *   ORGANOID_CONTACT_INHIBIT_SIGMA  float   [nN/um^2 = kPa]  default 1.5
+ *   ORGANOID_CONTACT_INHIBIT_FACTOR float   [-]               default 3.0
+ */
+
+// ---------------------------------------------------------------------------
+// Shared device utilities (identical to base cell_cycle.cpp)
+// ---------------------------------------------------------------------------
+FLAMEGPU_DEVICE_FUNCTION void vec3Div(float &x, float &y, float &z, const float divisor) {
+  x /= divisor;
+  y /= divisor;
+  z /= divisor;
+}
+
+FLAMEGPU_DEVICE_FUNCTION float vec3Length(const float x, const float y, const float z) {
+  return sqrtf(x * x + y * y + z * z);
+}
+
+// ---------------------------------------------------------------------------
+// Main agent function
+// ---------------------------------------------------------------------------
+FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone) {
+  int id = FLAMEGPU->getVariable<int>("id");
+  auto MACRO_MAX_GLOBAL_CELL_ID = FLAMEGPU->environment.getMacroProperty<int, 1>("MACRO_MAX_GLOBAL_CELL_ID");
+  const uint32_t DEAD_CELLS_DISAPPEAR = FLAMEGPU->environment.getProperty<uint32_t>("DEAD_CELLS_DISAPPEAR");
+  int agent_cell_type = FLAMEGPU->getVariable<int>("cell_type");
+  int agent_max_global_cell_id = FLAMEGPU->getVariable<int>("max_global_cell_id");
+  const int agent_marked_for_removal = FLAMEGPU->getVariable<int>("marked_for_removal");
+  if (agent_marked_for_removal == 1 && DEAD_CELLS_DISAPPEAR != 0) {
+    return flamegpu::DEAD;
+  }
+  const int agent_dead = FLAMEGPU->getVariable<int>("dead");
+  if (agent_dead == 1) {
+    return flamegpu::ALIVE;
+  }
+  FLAMEGPU->setVariable<int>("just_divided", 0);
+  FLAMEGPU->setVariable<int>("daughter_id", -1);
+
+  float agent_x = FLAMEGPU->getVariable<float>("x");
+  float agent_y = FLAMEGPU->getVariable<float>("y");
+  float agent_z = FLAMEGPU->getVariable<float>("z");
+  float agent_vx = FLAMEGPU->getVariable<float>("vx");
+  float agent_vy = FLAMEGPU->getVariable<float>("vy");
+  float agent_vz = FLAMEGPU->getVariable<float>("vz");
+  float agent_orx = FLAMEGPU->getVariable<float>("orx");
+  float agent_ory = FLAMEGPU->getVariable<float>("ory");
+  float agent_orz = FLAMEGPU->getVariable<float>("orz");
+  float agent_alignment = FLAMEGPU->getVariable<float>("alignment");
+  float agent_k_elast = FLAMEGPU->getVariable<float>("k_elast");
+  float agent_d_dumping = FLAMEGPU->getVariable<float>("d_dumping");
+  float agent_speed_ref = FLAMEGPU->getVariable<float>("speed_ref");
+  float agent_radius = FLAMEGPU->getVariable<float>("radius");
+  float agent_nucleus_radius = FLAMEGPU->getVariable<float>("nucleus_radius");
+  float agent_focad_birth_cooldown = FLAMEGPU->getVariable<float>("focad_birth_cooldown");
+  float agent_damage = FLAMEGPU->getVariable<float>("damage");
+  float agent_sig_l1 = FLAMEGPU->getVariable<float>("sig_eig_1");
+  int agent_completed_cycles = FLAMEGPU->getVariable<int>("completed_cycles");
+
+  const uint8_t N_SPECIES = 2;
+  const uint8_t N_ANCHOR_POINTS = 50;
+
+  float agent_k_consumption[N_SPECIES] = {};
+  float agent_k_production[N_SPECIES] = {};
+  float agent_k_reaction[N_SPECIES] = {};
+  float agent_C_sp[N_SPECIES] = {};
+  float agent_M_sp[N_SPECIES] = {};
+  for (int i = 0; i < N_SPECIES; i++) {
+    agent_k_consumption[i] = FLAMEGPU->getVariable<float, N_SPECIES>("k_consumption", i);
+    agent_k_production[i] = FLAMEGPU->getVariable<float, N_SPECIES>("k_production", i);
+    agent_k_reaction[i] = FLAMEGPU->getVariable<float, N_SPECIES>("k_reaction", i);
+    agent_C_sp[i] = FLAMEGPU->getVariable<float, N_SPECIES>("C_sp", i);
+    agent_M_sp[i] = FLAMEGPU->getVariable<float, N_SPECIES>("M_sp", i);
+  }
+
+  float agent_x_i[N_ANCHOR_POINTS] = {};
+  float agent_y_i[N_ANCHOR_POINTS] = {};
+  float agent_z_i[N_ANCHOR_POINTS] = {};
+  float agent_u_ref_x_i[N_ANCHOR_POINTS] = {};
+  float agent_u_ref_y_i[N_ANCHOR_POINTS] = {};
+  float agent_u_ref_z_i[N_ANCHOR_POINTS] = {};
+  for (int i = 0; i < N_ANCHOR_POINTS; i++) {
+    agent_x_i[i] = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("x_i", i);
+    agent_y_i[i] = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("y_i", i);
+    agent_z_i[i] = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("z_i", i);
+    agent_u_ref_x_i[i] = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("u_ref_x_i", i);
+    agent_u_ref_y_i[i] = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("u_ref_y_i", i);
+    agent_u_ref_z_i[i] = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("u_ref_z_i", i);
+  }
+
+  const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
+
+  const uint8_t N_CELL_TYPES = 3;
+  const float CELL_RADIUS = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_RADIUS", agent_cell_type);
+  const float CELL_NUCLEUS_RADIUS = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_NUCLEUS_RADIUS", agent_cell_type);
+  const float CELL_CYCLE_DURATION = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_CYCLE_DURATION", agent_cell_type);
+  const float CYCLE_PHASE_G1_START = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CYCLE_PHASE_G1_START", agent_cell_type);
+  const float CYCLE_PHASE_S_START = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CYCLE_PHASE_S_START", agent_cell_type);
+  const float CYCLE_PHASE_G2_START = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CYCLE_PHASE_G2_START", agent_cell_type);
+  const float CYCLE_PHASE_M_START = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CYCLE_PHASE_M_START", agent_cell_type);
+  const float CYCLE_PHASE_G1_DURATION = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CYCLE_PHASE_G1_DURATION", agent_cell_type);
+  const float CYCLE_PHASE_M_DURATION = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CYCLE_PHASE_M_DURATION", agent_cell_type);
+  const float hypoxia_threshold = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_HYPOXIA_THRESHOLD", agent_cell_type);
+  const float nutrient_threshold = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_NUTRIENT_THRESHOLD", agent_cell_type);
+  const float stress_threshold = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_STRESS_THRESHOLD", agent_cell_type);
+  const float hypoxia_damage_rate = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_HYPOXIA_DAMAGE_RATE", agent_cell_type);
+  const float nutrient_damage_rate = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_NUTRIENT_DAMAGE_RATE", agent_cell_type);
+  const float stress_damage_rate = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_STRESS_DAMAGE_RATE", agent_cell_type);
+  const float basal_damage_repair_rate = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_BASAL_DAMAGE_REPAIR_RATE", agent_cell_type);
+  const float acute_hypoxia_threshold = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_ACUTE_HYPOXIA_THRESHOLD", agent_cell_type);
+  const float acute_nutrient_threshold = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_ACUTE_NUTRIENT_THRESHOLD", agent_cell_type);
+  const float acute_stress_threshold = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_ACUTE_STRESS_THRESHOLD", agent_cell_type);
+
+  const uint32_t oxygen_idx = FLAMEGPU->environment.getProperty<uint32_t>("OXYGEN_SPECIES_INDEX");
+  const uint32_t nutrient_idx = FLAMEGPU->environment.getProperty<uint32_t>("NUTRIENT_SPECIES_INDEX");
+  const float oxygen_proxy = agent_C_sp[oxygen_idx];
+  const float nutrient_proxy = agent_C_sp[nutrient_idx];
+  const float tensile_stress_proxy = fmaxf(0.0f, agent_sig_l1);
+
+  const float division_rate_multiplier = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("DIVISION_RATE_MULTIPLIER", agent_cell_type);
+  const float damage_accumulation_multiplier = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("DAMAGE_ACCUMULATION_MULTIPLIER", agent_cell_type);
+  const float damage_repair_multiplier = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("DAMAGE_REPAIR_MULTIPLIER", agent_cell_type);
+  const float damage_death_threshold = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("DAMAGE_DEATH_THRESHOLD", agent_cell_type);
+
+  // [ORGANOID ENV] Contact-inhibition parameters for PATCH A
+  const float organoid_inhibit_sigma  = FLAMEGPU->environment.getProperty<float>("ORGANOID_CONTACT_INHIBIT_SIGMA");
+  const float organoid_inhibit_factor = FLAMEGPU->environment.getProperty<float>("ORGANOID_CONTACT_INHIBIT_FACTOR");
+
+  if (oxygen_proxy < hypoxia_threshold) {
+    const float severity = (hypoxia_threshold - oxygen_proxy) / fmaxf(1e-6f, hypoxia_threshold);
+    agent_damage += TIME_STEP * damage_accumulation_multiplier * hypoxia_damage_rate * severity;
+  }
+  if (nutrient_proxy < nutrient_threshold) {
+    const float severity = (nutrient_threshold - nutrient_proxy) / fmaxf(1e-6f, nutrient_threshold);
+    agent_damage += TIME_STEP * damage_accumulation_multiplier * nutrient_damage_rate * severity;
+  }
+  if (tensile_stress_proxy > stress_threshold) {
+    const float severity = (tensile_stress_proxy - stress_threshold) / fmaxf(1e-6f, stress_threshold);
+    agent_damage += TIME_STEP * damage_accumulation_multiplier * stress_damage_rate * severity;
+  }
+
+  agent_damage -= TIME_STEP * damage_repair_multiplier * basal_damage_repair_rate;
+  agent_damage = fminf(1.0f, fmaxf(0.0f, agent_damage));
+  FLAMEGPU->setVariable<float>("damage", agent_damage);
+  int death_cause = -1;
+  if (oxygen_proxy < acute_hypoxia_threshold) {
+    death_cause = 0;
+  } else if (nutrient_proxy < acute_nutrient_threshold) {
+    death_cause = 1;
+  } else if (tensile_stress_proxy > acute_stress_threshold) {
+    death_cause = 2;
+  } else if (agent_damage >= damage_death_threshold) {
+    death_cause = 3;
+  }
+
+  if (death_cause >= 0) {
+    FLAMEGPU->setVariable<int>("dead", 1);
+    FLAMEGPU->setVariable<int>("dead_by", death_cause);
+    FLAMEGPU->setVariable<int>("just_divided", 0);
+    FLAMEGPU->setVariable<int>("daughter_id", -1);
+    FLAMEGPU->setVariable<float>("vx", 0.0f);
+    FLAMEGPU->setVariable<float>("vy", 0.0f);
+    FLAMEGPU->setVariable<float>("vz", 0.0f);
+    if (DEAD_CELLS_DISAPPEAR != 0) {
+      FLAMEGPU->setVariable<int>("marked_for_removal", 1);
+      return flamegpu::ALIVE;
+    }
+    FLAMEGPU->setVariable<int>("marked_for_removal", 0);
+    return flamegpu::ALIVE;
+  }
+  FLAMEGPU->setVariable<int>("marked_for_removal", 0);
+
+  float agent_clock = FLAMEGPU->getVariable<float>("clock");
+
+  // [ORGANOID PATCH A] ─────────────────────────────────────────────────────
+  // Slow the G1 clock for luminal cells (type 1) under compressive stress.
+  // sig_eig_1 is the largest principal stress; negative means compression.
+  // When -sig_eig_1 > threshold, advance the clock at 1/inhibit_factor speed,
+  // effectively multiplying the apparent G1 duration without changing the
+  // fixed CYCLE_PHASE_*_START environment constants.
+  // Falls back to normal advancement when INCLUDE_FOCAL_ADHESIONS = False
+  // (sig_eig_1 stays 0, condition never fires).
+  float clock_dt = TIME_STEP;
+  if (agent_cell_type == 1
+      && agent_clock >= CYCLE_PHASE_G1_START
+      && agent_clock < CYCLE_PHASE_S_START
+      && (-agent_sig_l1 > organoid_inhibit_sigma)) {
+    clock_dt = TIME_STEP / organoid_inhibit_factor;
+  }
+  agent_clock += clock_dt;
+  // ────────────────────────────────────────────────────────────────────────
+
+  FLAMEGPU->setVariable<float>("clock", agent_clock);
+
+  if ((agent_clock >= CYCLE_PHASE_G1_START) && (agent_clock < CYCLE_PHASE_S_START)) {
+    FLAMEGPU->setVariable<int>("cycle_phase", 1);
+  }
+  if ((agent_clock >= CYCLE_PHASE_S_START) && (agent_clock < CYCLE_PHASE_G2_START)) {
+    FLAMEGPU->setVariable<int>("cycle_phase", 2);
+  }
+  if ((agent_clock >= CYCLE_PHASE_G2_START) && (agent_clock < CYCLE_PHASE_M_START)) {
+    FLAMEGPU->setVariable<int>("cycle_phase", 3);
+  }
+  if (agent_clock >= CYCLE_PHASE_M_START) {
+    float time_in_phase = agent_clock - CYCLE_PHASE_M_START;
+    float phase_n_steps = CYCLE_PHASE_M_DURATION / TIME_STEP;
+    float p_step = 1 / phase_n_steps;
+    float current_phase_step = time_in_phase / TIME_STEP;
+    float p_division = p_step / ((phase_n_steps - current_phase_step + 1) / phase_n_steps);
+    p_division *= division_rate_multiplier;
+    p_division = fminf(1.0f, fmaxf(0.0f, p_division));
+    float p = FLAMEGPU->random.uniform<float>(0.0, 1.0);
+    FLAMEGPU->setVariable<int>("cycle_phase", 4);
+    if (agent_clock > CELL_CYCLE_DURATION) {
+      agent_clock -= CELL_CYCLE_DURATION;
+      FLAMEGPU->setVariable<float>("clock", agent_clock);
+    }
+    if (p < p_division) {
+      const float old_agent_x = agent_x;
+      const float old_agent_y = agent_y;
+      const float old_agent_z = agent_z;
+      const float parent_new_x = old_agent_x + (agent_orx * CELL_RADIUS / 2);
+      const float parent_new_y = old_agent_y + (agent_ory * CELL_RADIUS / 2);
+      const float parent_new_z = old_agent_z + (agent_orz * CELL_RADIUS / 2);
+      const float daughter_x = old_agent_x - (agent_orx * CELL_RADIUS / 2);
+      const float daughter_y = old_agent_y - (agent_ory * CELL_RADIUS / 2);
+      const float daughter_z = old_agent_z - (agent_orz * CELL_RADIUS / 2);
+
+      FLAMEGPU->setVariable<float>("x", parent_new_x);
+      FLAMEGPU->setVariable<float>("y", parent_new_y);
+      FLAMEGPU->setVariable<float>("z", parent_new_z);
+      FLAMEGPU->setVariable<float>("vx", 0.0f);
+      FLAMEGPU->setVariable<float>("vy", 0.0f);
+      FLAMEGPU->setVariable<float>("vz", 0.0f);
+      FLAMEGPU->setVariable<float>("trajectory_length", 0.0f);
+      FLAMEGPU->setVariable<float>("trajectory_time", 0.0f);
+      FLAMEGPU->setVariable<float>("birth_x", parent_new_x);
+      FLAMEGPU->setVariable<float>("birth_y", parent_new_y);
+      FLAMEGPU->setVariable<float>("birth_z", parent_new_z);
+      FLAMEGPU->setVariable<float>("radius", CELL_RADIUS / 2);
+      FLAMEGPU->setVariable<float>("nucleus_radius", CELL_NUCLEUS_RADIUS / 2);
+      FLAMEGPU->setVariable<float>("eps_xx", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_yy", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_zz", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_xy", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_xz", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_yz", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_xx", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_yy", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_zz", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_xy", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_xz", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_yz", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eig_1", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eig_2", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eig_3", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec1_x", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec1_y", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec1_z", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec2_x", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec2_y", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec2_z", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec3_x", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec3_y", 0.0f);
+      FLAMEGPU->setVariable<float>("sig_eigvec3_z", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eig_1", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eig_2", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eig_3", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec1_x", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec1_y", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec1_z", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec2_x", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec2_y", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec2_z", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec3_x", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec3_y", 0.0f);
+      FLAMEGPU->setVariable<float>("eps_eigvec3_z", 0.0f);
+
+      const float damage_share = 0.5f * agent_damage;
+      FLAMEGPU->setVariable<float>("damage", damage_share);
+
+      for (int i = 0; i < N_SPECIES; i++) {
+        const float parent_daughter_mass = 0.5f * agent_M_sp[i];
+        FLAMEGPU->setVariable<float, N_SPECIES>("M_sp", i, parent_daughter_mass);
+        FLAMEGPU->setVariable<float, N_SPECIES>("C_sp", i, agent_C_sp[i]);
+      }
+
+      const float new_nucleus_radius = CELL_NUCLEUS_RADIUS / 2;
+      for (int i = 0; i < N_ANCHOR_POINTS; i++) {
+        FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("x_i", i, parent_new_x + new_nucleus_radius * agent_u_ref_x_i[i]);
+        FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("y_i", i, parent_new_y + new_nucleus_radius * agent_u_ref_y_i[i]);
+        FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("z_i", i, parent_new_z + new_nucleus_radius * agent_u_ref_z_i[i]);
+      }
+
+      agent_completed_cycles += 1;
+      FLAMEGPU->setVariable<int>("completed_cycles", agent_completed_cycles);
+      FLAMEGPU->setVariable<float>("clock", 0.0 + FLAMEGPU->random.uniform<float>(0.0, 0.1) * CYCLE_PHASE_G1_DURATION);
+      FLAMEGPU->setVariable<int>("cycle_phase", 1);
+
+      // New cell agent
+      float rand_dir_x = FLAMEGPU->random.uniform<float>(-1.0, 1.0);
+      float rand_dir_y = FLAMEGPU->random.uniform<float>(-1.0, 1.0);
+      float rand_dir_z = FLAMEGPU->random.uniform<float>(-1.0, 1.0);
+      float rand_dir_length = vec3Length(rand_dir_x, rand_dir_y, rand_dir_z);
+      if (rand_dir_length < 1e-6f) {
+        rand_dir_x = 1.0f;
+        rand_dir_y = 0.0f;
+        rand_dir_z = 0.0f;
+      } else {
+        vec3Div(rand_dir_x, rand_dir_y, rand_dir_z, rand_dir_length);
+      }
+      const int daughter_cell_id = MACRO_MAX_GLOBAL_CELL_ID.addAtomic(1);
+      FLAMEGPU->setVariable<int>("dead", 0);
+      FLAMEGPU->setVariable<int>("dead_by", -1);
+      FLAMEGPU->setVariable<int>("mother_id", -1);
+      FLAMEGPU->setVariable<int>("just_divided", 1);
+      FLAMEGPU->setVariable<int>("daughter_id", daughter_cell_id);
+      FLAMEGPU->setVariable<int>("marked_for_removal", 0);
+
+      FLAMEGPU->agent_out.setVariable<int>("id", daughter_cell_id);
+      FLAMEGPU->agent_out.setVariable<int>("max_global_cell_id", daughter_cell_id);
+      FLAMEGPU->agent_out.setVariable<float>("x", daughter_x);
+      FLAMEGPU->agent_out.setVariable<float>("y", daughter_y);
+      FLAMEGPU->agent_out.setVariable<float>("z", daughter_z);
+      FLAMEGPU->agent_out.setVariable<float>("vx", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("vy", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("vz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("trajectory_length", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("trajectory_time", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("birth_x", daughter_x);
+      FLAMEGPU->agent_out.setVariable<float>("birth_y", daughter_y);
+      FLAMEGPU->agent_out.setVariable<float>("birth_z", daughter_z);
+      FLAMEGPU->agent_out.setVariable<float>("orx", rand_dir_x);
+      FLAMEGPU->agent_out.setVariable<float>("ory", rand_dir_y);
+      FLAMEGPU->agent_out.setVariable<float>("orz", rand_dir_z);
+      FLAMEGPU->agent_out.setVariable<float>("k_elast", agent_k_elast);
+      FLAMEGPU->agent_out.setVariable<float>("d_dumping", agent_d_dumping);
+      FLAMEGPU->agent_out.setVariable<float>("alignment", agent_alignment);
+      for (int i = 0; i < N_SPECIES; i++) {
+        FLAMEGPU->agent_out.setVariable<float, N_SPECIES>("k_consumption", i, agent_k_consumption[i]);
+        FLAMEGPU->agent_out.setVariable<float, N_SPECIES>("k_production", i, agent_k_production[i]);
+        FLAMEGPU->agent_out.setVariable<float, N_SPECIES>("k_reaction", i, agent_k_reaction[i]);
+        FLAMEGPU->agent_out.setVariable<float, N_SPECIES>("C_sp", i, agent_C_sp[i]);
+        FLAMEGPU->agent_out.setVariable<float, N_SPECIES>("M_sp", i, 0.5f * agent_M_sp[i]);
+      }
+      FLAMEGPU->agent_out.setVariable<float>("speed_ref", agent_speed_ref);
+      FLAMEGPU->agent_out.setVariable<float>("radius", CELL_RADIUS / 2);
+      FLAMEGPU->agent_out.setVariable<float>("nucleus_radius", CELL_NUCLEUS_RADIUS / 2);
+      FLAMEGPU->agent_out.setVariable<float>("cc_dvx", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cc_dvy", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cc_dvz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cf_dvx", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cf_dvy", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("cf_dvz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("clock", 0.0 + FLAMEGPU->random.uniform<float>(0.0, 0.1) * CYCLE_PHASE_G1_DURATION);
+      FLAMEGPU->agent_out.setVariable<int>("cycle_phase", 1);
+      // [ORGANOID PATCH B] ─────────────────────────────────────────────────
+      // Asymmetric division: apical progenitors (type 0) produce luminal (type 1)
+      // daughters.  All other cell types inherit the parent type.
+      const int out_cell_type = (agent_cell_type == 0) ? 1 : agent_cell_type;
+      FLAMEGPU->agent_out.setVariable<int>("cell_type", out_cell_type);
+      // ────────────────────────────────────────────────────────────────────
+      FLAMEGPU->agent_out.setVariable<int>("completed_cycles", 0);
+      FLAMEGPU->agent_out.setVariable<int>("dead", 0);
+      FLAMEGPU->agent_out.setVariable<int>("dead_by", -1);
+      FLAMEGPU->agent_out.setVariable<int>("mother_id", id);
+      FLAMEGPU->agent_out.setVariable<int>("just_divided", 0);
+      FLAMEGPU->agent_out.setVariable<int>("daughter_id", -1);
+      FLAMEGPU->agent_out.setVariable<int>("marked_for_removal", 0);
+      FLAMEGPU->agent_out.setVariable<float>("focad_birth_cooldown", fmaxf(0.0f, agent_focad_birth_cooldown));
+      FLAMEGPU->agent_out.setVariable<float>("damage", damage_share);
+
+      const float daughter_nucleus_radius = CELL_NUCLEUS_RADIUS / 2;
+      for (int i = 0; i < N_ANCHOR_POINTS; i++) {
+        FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("x_i", i, daughter_x + daughter_nucleus_radius * agent_u_ref_x_i[i]);
+        FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("y_i", i, daughter_y + daughter_nucleus_radius * agent_u_ref_y_i[i]);
+        FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("z_i", i, daughter_z + daughter_nucleus_radius * agent_u_ref_z_i[i]);
+        FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("u_ref_x_i", i, agent_u_ref_x_i[i]);
+        FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("u_ref_y_i", i, agent_u_ref_y_i[i]);
+        FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("u_ref_z_i", i, agent_u_ref_z_i[i]);
+      }
+
+      FLAMEGPU->agent_out.setVariable<float>("eps_xx", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_yy", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_zz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_xy", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_xz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_yz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_xx", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_yy", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_zz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_xy", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_xz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_yz", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_eig_1", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_eig_2", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_eig_3", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_eigvec1_x", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_eigvec1_y", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_eigvec1_z", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_eigvec2_x", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_eigvec2_y", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_eigvec2_z", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_eigvec3_x", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_eigvec3_y", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("sig_eigvec3_z", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_eig_1", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_eig_2", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_eig_3", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_eigvec1_x", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_eigvec1_y", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_eigvec1_z", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_eigvec2_x", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_eigvec2_y", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_eigvec2_z", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_eigvec3_x", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_eigvec3_y", 0.0f);
+      FLAMEGPU->agent_out.setVariable<float>("eps_eigvec3_z", 0.0f);
+
+      agent_vx = 0.0f;
+      agent_vy = 0.0f;
+      agent_vz = 0.0f;
+    }
+  } else {
+    agent_radius += ((CELL_RADIUS / 2) / CYCLE_PHASE_M_START) * TIME_STEP;
+    agent_nucleus_radius += ((CELL_NUCLEUS_RADIUS / 2) / CYCLE_PHASE_M_START) * TIME_STEP;
+    FLAMEGPU->setVariable<float>("radius", fminf(agent_radius, CELL_RADIUS));
+    FLAMEGPU->setVariable<float>("nucleus_radius", fminf(agent_nucleus_radius, CELL_NUCLEUS_RADIUS));
+  }
+
+  // Recompute anchor positions from u_ref at current nucleus_radius.
+  agent_nucleus_radius = FLAMEGPU->getVariable<float>("nucleus_radius");
+  agent_x = FLAMEGPU->getVariable<float>("x");
+  agent_y = FLAMEGPU->getVariable<float>("y");
+  agent_z = FLAMEGPU->getVariable<float>("z");
+  for (int i = 0; i < N_ANCHOR_POINTS; i++) {
+    FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("x_i", i, agent_x + agent_nucleus_radius * agent_u_ref_x_i[i]);
+    FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("y_i", i, agent_y + agent_nucleus_radius * agent_u_ref_y_i[i]);
+    FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("z_i", i, agent_z + agent_nucleus_radius * agent_u_ref_z_i[i]);
+  }
+
+  FLAMEGPU->setVariable<float>("vx", agent_vx);
+  FLAMEGPU->setVariable<float>("vy", agent_vy);
+  FLAMEGPU->setVariable<float>("vz", agent_vz);
+  return flamegpu::ALIVE;
+}

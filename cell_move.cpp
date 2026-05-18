@@ -99,13 +99,13 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   float agent_vx = 0.0f;
   float agent_vy = 0.0f;
   float agent_vz = 0.0f;
-  const float agent_cc_dvx = FLAMEGPU->getVariable<float>("cc_dvx");
+  const float agent_cc_dvx = FLAMEGPU->getVariable<float>("cc_dvx"); // cell-cell
   const float agent_cc_dvy = FLAMEGPU->getVariable<float>("cc_dvy");
   const float agent_cc_dvz = FLAMEGPU->getVariable<float>("cc_dvz");
-  const float agent_cf_dvx = FLAMEGPU->getVariable<float>("cf_dvx");
+  const float agent_cf_dvx = FLAMEGPU->getVariable<float>("cf_dvx"); // cell-fnode
   const float agent_cf_dvy = FLAMEGPU->getVariable<float>("cf_dvy");
   const float agent_cf_dvz = FLAMEGPU->getVariable<float>("cf_dvz");
-  const float agent_cl_dvx = FLAMEGPU->getVariable<float>("cl_dvx");
+  const float agent_cl_dvx = FLAMEGPU->getVariable<float>("cl_dvx"); // cell-lumen
   const float agent_cl_dvy = FLAMEGPU->getVariable<float>("cl_dvy");
   const float agent_cl_dvz = FLAMEGPU->getVariable<float>("cl_dvz");
 

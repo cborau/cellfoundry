@@ -127,6 +127,7 @@ def run_trial_subprocess(
     model_script: str,
     result_dir: str,
     timeout: int = 0,
+    variant: str | None = None,
 ) -> dict:
     """Run model.py as a subprocess with the given parameter overrides.
 
@@ -140,6 +141,9 @@ def run_trial_subprocess(
         Directory where the trial results will be written.
     timeout : int
         Maximum wall-clock seconds to wait (0 = unlimited).
+    variant : str or None
+        Name of the variant module to load (passed as ``--variant <name>``).
+        None means no variant (base model).
 
     Returns
     -------
@@ -155,6 +159,8 @@ def run_trial_subprocess(
         "--overrides", override_path,
         "--result-dir", result_dir,
     ]
+    if variant:
+        cmd.extend(["--variant", variant])
     print(f"  [trial] Running: {' '.join(cmd)}")
     t0 = time.time()
     stdout_log = os.path.join(result_dir, "stdout.log")
@@ -241,6 +247,7 @@ def make_objective(config: dict, model_script: str, base_result_dir: str):
     model_overrides = config.get("model", {}).get("extra_overrides", {})
     trial_timeout = config.get("model", {}).get("timeout", 0)
     cleanup_trials = config.get("model", {}).get("cleanup_trials", False)
+    variant_name = config.get("model", {}).get("variant", None)
 
     def objective(trial: "optuna.Trial"):
         # 1. Suggest parameter values
@@ -295,6 +302,7 @@ def make_objective(config: dict, model_script: str, base_result_dir: str):
                 model_script=model_script,
                 result_dir=trial_dir,
                 timeout=trial_timeout,
+                variant=variant_name,
             )
         except (RuntimeError, FileNotFoundError, subprocess.TimeoutExpired) as e:
             print(f"  [trial {trial.number}] FAILED: {e}")

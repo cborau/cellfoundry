@@ -1,0 +1,111 @@
+# ============================================================================
+# CellFoundry — Organoid Growth Optimization (variant-aware)
+# ============================================================================
+#
+# This config is identical in intent to optuna_config_organoid.yaml but uses
+# the variant system to load the organoid-specific parameter baseline and
+# custom cell_cycle.cpp override.  Only the parameters being *searched* need
+# to appear in the `parameters:` block below — everything else is set by
+# variants/organoid.py.
+#
+# Usage:
+#    python -m optimizer.optimize \
+#        --config optimizer/optuna_config_organoid_variant.yaml
+#
+# Key differences from optuna_config_organoid.yaml
+# -------------------------------------------------
+#   model.variant: organoid
+#       Loads variants/organoid.py before each trial subprocess.
+#       Provides the calibrated baseline (STEPS, TIME_STEP, ORGANOID_ASSAY,
+#       N_CELLS, CELL_RADIUS, etc.) so this YAML stays minimal.
+#
+#   The `parameters:` block contains only the quantities being searched.
+#   Any key here overrides the variant PARAMS for that trial.
+# ============================================================================
+
+study:
+  name: "cellfoundry_organoid_variant"
+  n_trials: 30
+  sampler: NSGA-II
+  seed: 42
+  directions: [minimize, minimize]
+  storage: "sqlite:///cellfoundry_organoid_variant.db"
+
+# ---------------------------------------------------------------------------
+# Model configuration
+# ---------------------------------------------------------------------------
+model:
+  # Name of the variant module in the variants/ folder (no .py extension).
+  variant: organoid
+
+  # Fixed overrides applied on top of the variant PARAMS for *every* trial.
+  # Use this to lock settings that are not being searched but differ from
+  # both the base model and the variant defaults.
+  extra_overrides:
+    VISUALISATION: false
+    SAVE_DATA_TO_FILE: true
+    SAVE_PICKLE: true
+    DEBUG_PRINTING: false
+
+  # Maximum wall-clock seconds per trial (0 = unlimited).
+  timeout: 0
+
+  # Set to true to delete per-trial output folders after reading the pickle.
+  # Saves disk space during large sweeps; disable if you need VTK files.
+  cleanup_trials: false
+
+# ---------------------------------------------------------------------------
+# Objectives
+# ---------------------------------------------------------------------------
+objectives:
+  - function: organoid_error
+    reference: "optimizer/reference_data/target_organoid_equiv_sphere.csv"
+    kwargs:
+      metric: equivalent_sphere_radius
+
+  - function: organoid_error
+    kwargs:
+      metric: mean_nn_distance
+      target_metric: 40.0     # ≈ 2 × CELL_RADIUS → tight contact packing
+      time_point: "last"
+
+# ---------------------------------------------------------------------------
+# Parameters to search
+# ---------------------------------------------------------------------------
+parameters:
+
+  CELL_SPEED_REF:
+    type: float
+    low: 0.0001
+    high: 0.02
+    log: true
+
+  ROTATIONAL_DIFFUSION_RATE:
+    type: float
+    low: 0.0001
+    high: 0.01
+    log: true
+
+  CELL_CELL_DV_MAX:
+    type: float
+    low: 1.0e-5
+    high: 1.0e-2
+    log: true
+
+  CELL_CELL_ADHESION_K:
+    type: float
+    low: 0.5
+    high: 50.0
+    log: true
+
+  CELL_CELL_REPULSION_K:
+    type: float
+    low: 5.0
+    high: 200.0
+    log: true
+
+  N_CELLS:
+    type: int
+    low: 5
+    high: 50
+    log: false
