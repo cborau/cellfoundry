@@ -14,7 +14,7 @@
  *   Must run before vasc_Csp_update so parent messages are available for reading.
  */
 FLAMEGPU_AGENT_FUNCTION(vasc_bucket_location_data, flamegpu::MessageNone, flamegpu::MessageBucket) {
-    const uint8_t N_SPECIES = 2;             // WARNING: hard-coded, must match model.py
+    const uint8_t N_SPECIES = 3;             // WARNING: hard-coded, must match model.py
     const uint8_t MAX_VASC_CONNECTIVITY = 2; // WARNING: hard-coded, must match model.py
 
     // Broadcast identity and topology

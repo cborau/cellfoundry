@@ -27,7 +27,7 @@ FLAMEGPU_DEVICE_FUNCTION float vec3Length_dsp_lumen(const float x, const float y
  */
 FLAMEGPU_AGENT_FUNCTION(ecm_Dsp_lumen_update, flamegpu::MessageSpatial3D, flamegpu::MessageNone) {
   const float ECM_ECM_EQUILIBRIUM_DISTANCE = FLAMEGPU->environment.getProperty<float>("ECM_ECM_EQUILIBRIUM_DISTANCE");
-  const uint8_t N_SPECIES = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  const uint8_t N_SPECIES = 3; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
 
   // Agent position
   const float agent_x = FLAMEGPU->getVariable<float>("x");

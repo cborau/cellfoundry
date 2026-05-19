@@ -22,7 +22,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_grid_location_data, flamegpu::MessageNone, flamegpu:
   FLAMEGPU->message_out.setVariable<uint8_t>("grid_k", FLAMEGPU->getVariable<uint8_t>("grid_k"));
   FLAMEGPU->message_out.setVariable<uint32_t>("grid_lin_id", FLAMEGPU->getVariable<uint32_t>("grid_lin_id"));
   // Agent array variables
-  const uint8_t N_SPECIES = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  const uint8_t N_SPECIES = 3; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
 
   for (int i = 0; i < N_SPECIES; i++) {
     float ncol = FLAMEGPU->getVariable<float, N_SPECIES>("D_sp", i);

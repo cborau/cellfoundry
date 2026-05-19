@@ -363,7 +363,7 @@ def _fmt_val(v: object) -> str:
 
 
 def _resize_species6_block(
-    block: list[str], var: str, old_sp: int, new_sp: int
+    block: list[str], var: str, old_sp: int, new_sp: int, force: bool = False
 ) -> tuple[list[str] | None, list[str]]:
     """Resize the outer (species) dimension of a N_SPECIES×6 multi-line variable."""
     log: list[str] = []
@@ -371,11 +371,20 @@ def _resize_species6_block(
     if parsed is None:
         log.append(f"  WARNING: {var}: could not parse multi-line block, skipping")
         return None, log
-    if len(parsed) != old_sp:
+    actual_old = len(parsed)
+    if actual_old != old_sp:
+        if not force:
+            log.append(
+                f"  WARNING: {var}: expected {old_sp} rows but found {actual_old}, skipping"
+            )
+            return None, log
         log.append(
-            f"  WARNING: {var}: expected {old_sp} rows but found {len(parsed)}, skipping"
+            f"  {var}: actual rows ({actual_old}) differ from N_SPECIES ({old_sp}); "
+            f"resizing from actual length (--force)"
         )
-        return None, log
+        old_sp = actual_old
+    if old_sp == new_sp:
+        return block, log  # already correct length
 
     # Compute new value
     if new_sp > old_sp:
@@ -556,6 +565,7 @@ def resize_model_py(
     new_ct: int | None,
     new_sp: int | None,
     dry: bool,
+    force: bool = False,
 ) -> list[str]:
     """Resize arrays in model.py.  Returns change log."""
     text = MODEL_PY.read_text(encoding="utf-8")
@@ -565,8 +575,8 @@ def resize_model_py(
     old_ct = _detect_old_N(text, RE_NCELL_PY, "N_CELL_TYPES") if new_ct is not None else None
     old_sp = _detect_old_N(text, RE_NSPEC_PY, "N_SPECIES") if new_sp is not None else None
 
-    do_ct = new_ct is not None and new_ct != old_ct
-    do_sp = new_sp is not None and new_sp != old_sp
+    do_ct = new_ct is not None and (new_ct != old_ct or force)
+    do_sp = new_sp is not None and (new_sp != old_sp or force)
 
     if not do_ct and not do_sp:
         msgs = []
@@ -574,12 +584,18 @@ def resize_model_py(
             msgs.append(f"N_CELL_TYPES already {new_ct}")
         if new_sp is not None:
             msgs.append(f"N_SPECIES already {new_sp}")
-        return [f"model.py: {', '.join(msgs)}, nothing to do."]
+        return [f"model.py: {', '.join(msgs)}, nothing to do. (use --force to re-check arrays)"]
 
     if do_ct:
-        log.append(f"model.py: N_CELL_TYPES {old_ct} → {new_ct}")
+        if new_ct == old_ct:
+            log.append(f"model.py: N_CELL_TYPES = {new_ct} (forced re-check of arrays)")
+        else:
+            log.append(f"model.py: N_CELL_TYPES {old_ct} → {new_ct}")
     if do_sp:
-        log.append(f"model.py: N_SPECIES {old_sp} → {new_sp}")
+        if new_sp == old_sp:
+            log.append(f"model.py: N_SPECIES = {new_sp} (forced re-check of arrays)")
+        else:
+            log.append(f"model.py: N_SPECIES {old_sp} → {new_sp}")
 
     # --- Pre-scan for suspicious unknown variables ---
     suspects_ct, suspects_sp = _scan_suspects(
@@ -606,7 +622,7 @@ def resize_model_py(
             block, end_i = _collect_multiline_block(lines, i)
             if do_sp:
                 new_block, block_log = _resize_species6_block(
-                    block, lhs, old_sp, new_sp  # type: ignore[arg-type]
+                    block, lhs, old_sp, new_sp, force  # type: ignore[arg-type]
                 )
                 log.extend(block_log)
                 new_lines.extend(new_block if new_block is not None else block)
@@ -679,20 +695,24 @@ def resize_model_py(
             inner = m_expl.group(2)
             elems = _parse_list_elements(inner)
             if elems is not None:
-                if do_ct and lhs and lhs in ct_vars and len(elems) == old_ct:
-                    resized = _resize_list(elems, new_ct)  # type: ignore[arg-type]
-                    new_line = f"{m_expl.group(1)}[{', '.join(resized)}]{m_expl.group(3)}\n"
-                    log.append(f"  L{lineno}: {lhs} list {old_ct} → {new_ct} elem(s)")
-                    new_lines.append(new_line)
-                    i += 1
-                    continue
-                if do_sp and lhs and lhs in sp_vars and len(elems) == old_sp:
-                    resized = _resize_list(elems, new_sp)  # type: ignore[arg-type]
-                    new_line = f"{m_expl.group(1)}[{', '.join(resized)}]{m_expl.group(3)}\n"
-                    log.append(f"  L{lineno}: {lhs} list {old_sp} → {new_sp} elem(s)")
-                    new_lines.append(new_line)
-                    i += 1
-                    continue
+                if do_ct and lhs and lhs in ct_vars:
+                    actual_len = len(elems)
+                    if actual_len == old_ct or (force and actual_len != new_ct):
+                        resized = _resize_list(elems, new_ct)  # type: ignore[arg-type]
+                        new_line = f"{m_expl.group(1)}[{', '.join(resized)}]{m_expl.group(3)}\n"
+                        log.append(f"  L{lineno}: {lhs} list {actual_len} → {new_ct} elem(s)")
+                        new_lines.append(new_line)
+                        i += 1
+                        continue
+                if do_sp and lhs and lhs in sp_vars:
+                    actual_len = len(elems)
+                    if actual_len == old_sp or (force and actual_len != new_sp):
+                        resized = _resize_list(elems, new_sp)  # type: ignore[arg-type]
+                        new_line = f"{m_expl.group(1)}[{', '.join(resized)}]{m_expl.group(3)}\n"
+                        log.append(f"  L{lineno}: {lhs} list {actual_len} → {new_sp} elem(s)")
+                        new_lines.append(new_line)
+                        i += 1
+                        continue
 
         # Default: keep line unchanged
         new_lines.append(line)
@@ -740,7 +760,7 @@ def resize_cpp_files(
         if file_log:
             log.append(f"{cpp.name}:")
             log.extend(file_log)
-            if not dry:
+            if not dry and new_text != text:
                 _backup(cpp, dry)
                 cpp.write_text(new_text, encoding="utf-8")
 
@@ -779,6 +799,14 @@ def main() -> None:
         action="store_true",
         help="Print what would change without modifying any files.",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Re-check and resize arrays even when N_CELL_TYPES/N_SPECIES already "
+            "equal the requested value (useful when array contents were edited manually)."
+        ),
+    )
     args = parser.parse_args()
 
     if args.cell_types is None and args.species is None:
@@ -798,7 +826,7 @@ def main() -> None:
     print(f"{tag}Resizing {', '.join(parts)}\n")
 
     # 1. model.py
-    for msg in resize_model_py(args.cell_types, args.species, args.dry_run):
+    for msg in resize_model_py(args.cell_types, args.species, args.dry_run, args.force):
         print(msg)
 
     print()

@@ -89,7 +89,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_Dsp_update, flamegpu::MessageSpatial3D, flamegpu::Me
   int id = FLAMEGPU->getVariable<int>("id");
   const float ECM_ECM_EQUILIBRIUM_DISTANCE = FLAMEGPU->environment.getProperty<float>("ECM_ECM_EQUILIBRIUM_DISTANCE");
   const unsigned int AVG_NETWORK_VOXEL_DENSITY = FLAMEGPU->environment.getProperty<unsigned int>("AVG_NETWORK_VOXEL_DENSITY");
-  const uint8_t N_SPECIES = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  const uint8_t N_SPECIES = 3; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
   float D_sp[N_SPECIES] = {}; 
   for (int i = 0; i < N_SPECIES; i++) {
     D_sp[i] = FLAMEGPU->environment.getProperty<float>("DIFFUSION_COEFF_MULTI", i); // Read base value each step to avoid compounding reduction

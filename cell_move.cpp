@@ -168,7 +168,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   // ---------------------------------------------------------------------------
   const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
 
-  const uint8_t N_SPECIES = 2; // WARNING: must match main python
+  const uint8_t N_SPECIES = 3; // WARNING: must match main python
   const uint32_t ECM_POPULATION_SIZE = 9261; // WARNING: must match Nx*Ny*Nz
   auto C_SP_MACRO = FLAMEGPU->environment.getMacroProperty<float, N_SPECIES, ECM_POPULATION_SIZE>("C_SP_MACRO");
 

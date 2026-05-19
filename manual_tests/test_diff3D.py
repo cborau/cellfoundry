@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # --------------------------- DATA ---------------------------
-N_SPECIES = 2
+N_SPECIES = 3
 DIFFUSION_COEFF_MULTI = [300.0, 300.0]
  
 BOUNDARY_CONC_INIT_MULTI = [

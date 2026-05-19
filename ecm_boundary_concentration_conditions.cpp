@@ -19,7 +19,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_boundary_concentration_conditions, flamegpu::Message
   float agent_z = FLAMEGPU->getVariable<float>("z");
  
   // Agent array variables
-  const uint8_t N_SPECIES  = 2; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  const uint8_t N_SPECIES  = 3; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
   float C_sp[N_SPECIES ] = {};
   for (int i = 0; i < N_SPECIES ; i++) {
     C_sp[i] = FLAMEGPU->getVariable<float, N_SPECIES >("C_sp", i);

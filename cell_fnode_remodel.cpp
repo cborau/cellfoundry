@@ -55,7 +55,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_fnode_remodel, flamegpu::MessageSpatial3D, flamegpu
 
   const uint8_t N_CELL_TYPES = 3;           // must match model.py
   const uint8_t MAX_CONNECTIVITY = 8;      // must match model.py
-  const uint8_t N_SPECIES = 2;             // must match model.py
+  const uint8_t N_SPECIES = 3;             // must match model.py
 
   const int agent_cell_type = FLAMEGPU->getVariable<int>("cell_type");
   const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");

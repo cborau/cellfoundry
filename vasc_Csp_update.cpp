@@ -29,7 +29,7 @@ FLAMEGPU_AGENT_FUNCTION(vasc_Csp_update, flamegpu::MessageBucket, flamegpu::Mess
         return flamegpu::ALIVE;
     }
 
-    const uint8_t N_SPECIES = 2;             // WARNING: hard-coded, must match model.py
+    const uint8_t N_SPECIES = 3;             // WARNING: hard-coded, must match model.py
     const uint8_t MAX_VASC_CONNECTIVITY = 2; // WARNING: hard-coded, must match model.py
 
     // Collect all parent ids; determine if this is a source node (first entry == -2)

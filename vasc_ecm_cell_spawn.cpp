@@ -36,7 +36,7 @@ FLAMEGPU_AGENT_FUNCTION(vasc_ecm_cell_spawn, flamegpu::MessageNone, flamegpu::Me
         return flamegpu::ALIVE;
     }
 
-    const uint8_t  N_SPECIES         = 2;    // WARNING: hard-coded, must match model.py
+    const uint8_t  N_SPECIES         = 3;    // WARNING: hard-coded, must match model.py
     const uint32_t ECM_POPULATION_SIZE = 9261; // WARNING: hard-coded, must match model.py
     const uint8_t  N_ANCHOR_POINTS   = 50;   // WARNING: hard-coded, must match model.py
 

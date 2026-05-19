@@ -16,7 +16,7 @@
  *   Must run before ecm_vasc_Csp_update so ECM agents see updated VASC concentrations.
  */
 FLAMEGPU_AGENT_FUNCTION(vasc_spatial_location_data, flamegpu::MessageNone, flamegpu::MessageSpatial3D) {
-    const uint8_t N_SPECIES = 2; // WARNING: hard-coded, must match model.py
+    const uint8_t N_SPECIES = 3; // WARNING: hard-coded, must match model.py
 
     FLAMEGPU->message_out.setVariable<float>("x", FLAMEGPU->getVariable<float>("x"));
     FLAMEGPU->message_out.setVariable<float>("y", FLAMEGPU->getVariable<float>("y"));

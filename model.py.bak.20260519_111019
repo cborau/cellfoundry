@@ -196,13 +196,13 @@ INCLUDE_DIFFUSION = False
 N_SPECIES = 3
 # Use check_hard_coded_values.py to automatically update all c++ files using N_SPECIES
 # Use tools/resize_array_variables.py to automatically resize all per-species arrays.
-DIFFUSION_COEFF_MULTI = [5.0, 5.0, 5.0]  # diffusion coefficient in [um^2/s] per specie
+DIFFUSION_COEFF_MULTI = [5.0, 5.0]  # diffusion coefficient in [um^2/s] per specie
 BOUNDARY_CONC_INIT_MULTI = [[2.5, 2.5, 2.5, 2.5, 2.5, 2.5],
-                            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                            # initial concentration at each surface (+X,-X,+Y,-Y,+Z,-Z) [ng/ml]. -1.0 means no condition assigned. All agents are assigned 0 by default.
                             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
 
 BOUNDARY_CONC_FIXED_MULTI = [[2.5, 2.5, 2.5, 2.5, 2.5, 2.5],
-                             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                             # concentration boundary conditions at each surface. WARNING: -1.0 means initial condition prevails. Don't use 0.0 as initial condition if that value is not fixed. Use -1.0 instead
                              [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
 HETEROGENEOUS_DIFFUSION = False  # if True, diffusion coefficient is multiplied by (1 - local ECM density) to simulate hindered diffusion through the ECM. WARNING: this is a very simple approximation of the phenomenon and highly depends on grid density (N). 
 # +====================================================================+
@@ -271,14 +271,14 @@ MAX_SEARCH_RADIUS_LUMEN_LUMEN_INTERACTION = 3.0 * LUMEN_RADIUS  # [um] Spatial m
 MAX_SEARCH_RADIUS_LUMEN_CELL_INTERACTION = 2.0 * (max(CELL_RADIUS) + LUMEN_RADIUS)  # [um] Spatial message search radius for LUMEN-CELL interactions.
 LUMEN_SECRETION_RATE = 5e-4  # [1/s] Probability rate of secreting a LUMEN droplet per cell per second.
 LUMEN_SECRETION_COOLDOWN = 100.0  # [s] Refractory time after a CELL secretes a LUMEN droplet before it can secrete another.
-LUMEN_DIFFUSION_COEFF_MULTI = [5.0, 5.0, 5.0]  # [um^2/s] Diffusion coefficients inside LUMEN voxels (overrides fibre-adjusted D_sp).
+LUMEN_DIFFUSION_COEFF_MULTI = [5.0, 5.0]  # [um^2/s] Diffusion coefficients inside LUMEN voxels (overrides fibre-adjusted D_sp).
 
 # +====================================================================+
 # | VASCULARIZATION PARAMETERS                                         |
 # +====================================================================+
 INCLUDE_VASCULARIZATION = False  # If True, VASC agents representing a vascular network are included.
 VASC_NETWORK_FILE = 'vascular_network.pickle'  # Path (relative to CURR_PATH) to the vascular network pickle file.
-INIT_VASCULARIZATION_CONCENTRATION_VALS = [2.5, 2.5, 2.5]  # Initial concentration of each species in VASC agents.
+INIT_VASCULARIZATION_CONCENTRATION_VALS = [2.5, 2.5]  # Initial concentration of each species in VASC agents.
 MAX_VASC_CONNECTIVITY = 2  # Maximum number of parents or children per VASC node (fixed array size). Defined during vascular network generation (tools/generate_vascular_network.py).
 INCLUDE_VASCULAR_CELL_RECRUITMENT = False  # If True, cells can be recruited from the vascular network into the simulation based on proximity and chemical cues.
 
@@ -311,14 +311,14 @@ CELL_PRODUCTION_MULTIPLIER = [1.0, 1.0, 1.0]   # [-] per-type scaling of product
 CELL_REACTION_MULTIPLIER = [1.0, 1.0, 1.0]      # [-] per-type scaling of reaction rates
 CELL_INIT_CONCENTRATION_MULTIPLIER = [1.0, 1.0, 1.0]  # [-] per-type scaling of initial species concentrations
 
-INIT_ECM_CONCENTRATION_VALS = [2.5, 2.5, 2.5]  # initial concentration of each species on the ECM agents
-INIT_CELL_CONCENTRATION_VALS = [2.5, 2.5, 2.5]  # initial concentration of each species on the CELL agents
+INIT_ECM_CONCENTRATION_VALS = [2.5, 2.5]  # initial concentration of each species on the ECM agents
+INIT_CELL_CONCENTRATION_VALS = [2.5, 2.5]  # initial concentration of each species on the CELL agents
 # Reference concentrations (actual per-agent mass is computed at init using per-type volume & conc multiplier).
 INIT_CELL_CONC_MASS_VALS = [x for x in INIT_CELL_CONCENTRATION_VALS]
-INIT_ECM_SAT_CONCENTRATION_VALS = [0.0, 0.0, 0.0]  # initial saturation concentration of each species on the ECM agents
-INIT_CELL_CONSUMPTION_RATES = [0.0, 0.0, 0.0]  # base consumption rate of each species by the CELL agents 
-INIT_CELL_PRODUCTION_RATES = [0.0, 0.0, 0.0]  # base production rate of each species by the CELL agents 
-INIT_CELL_REACTION_RATES = [0.0, 0.0, 0.0]  # base metabolic reaction rates of each species by the CELL agents 
+INIT_ECM_SAT_CONCENTRATION_VALS = [0.0, 0.0]  # initial saturation concentration of each species on the ECM agents
+INIT_CELL_CONSUMPTION_RATES = [0.0, 0.0]  # base consumption rate of each species by the CELL agents 
+INIT_CELL_PRODUCTION_RATES = [0.0, 0.0]  # base production rate of each species by the CELL agents 
+INIT_CELL_REACTION_RATES = [0.0, 0.0]  # base metabolic reaction rates of each species by the CELL agents 
 
 # Species index mapping for death pathways
 OXYGEN_SPECIES_INDEX = 0    # index into C_sp[] used as oxygen proxy in cell_cycle
@@ -419,20 +419,20 @@ NUCLEUS_EPS_CLAMP = [0.30, 0.30, 0.30]      # [-] Clamp for each strain componen
 # | CHEMOTAXIS                                                         |
 # +====================================================================+
 INCLUDE_CHEMOTAXIS = False
-CHEMOTAXIS_SENSITIVITY = [1.0, 0.0, 0.0] # [-1.0 to +1.0] Chemotactic sensitivity for each species. Positive: attraction, Negative: repulsion towards higher concentrations.
+CHEMOTAXIS_SENSITIVITY = [1.0, 0.0] # [-1.0 to +1.0] Chemotactic sensitivity for each species. Positive: attraction, Negative: repulsion towards higher concentrations.
 CHEMOTAXIS_ONLY_DIR = True # if True, chemotaxis only affects cell orientation, not speed. If False, chemotaxis affects both orientation and speed (e.g. by making cells move faster when they are oriented towards higher concentration gradient)
 CHEMOTAXIS_CHI = [0.1, 0.1, 0.10] # [um^2/s] Chemotactic coefficient (χ) per cell-type. Typical range: 0.1–10 µm²/s.
 # +====================================================================+
 # | CHEMOKINESIS                                                         |
 # +====================================================================+
 INCLUDE_CHEMOKINESIS = False
-CHEMOKINESIS_SENSITIVITY = [-100.0, 0.0, 0.0] # [-1.0 to +1.0] Chemokinesis sensitivity for each species. Positive: speed increases with higher concentrations, Negative: speed decreases with higher concentrations.
+CHEMOKINESIS_SENSITIVITY = [-100.0, 0.0] # [-1.0 to +1.0] Chemokinesis sensitivity for each species. Positive: speed increases with higher concentrations, Negative: speed decreases with higher concentrations.
 CHEMOKINESIS_ALPHA = [0.5, 0.5, 0.5] # [-] Baseline speed is multiplied by (1 + alpha * f(C_sp)) 
 CHEMOKINESIS_K = [2.0, 2.0, 2.0] # [concentration units] Chemokinesis half-saturation constant for concentration-dependent speed modulation.
 CHEMOKINESIS_HILL_N = [2.0, 2.0, 2.0] # Hill coefficient for chemokinesis response curve.
 CHEMOKINESIS_ADAPT_TAU = [60.0, 60.0, 60.0] # [s] Time constant for chemokinesis adaptation (how quickly cells adjust their internal state to changes in chemoattractant concentration).
 CHEMOKINESIS_SIGNAL_SAT_MULTIPLIER = [1.0, 1.0, 1.0] # Multiplier for chemokinesis signal saturation level per cell-type.
-CHEMOKINESIS_SIGNAL_SAT = [20.0, 20.0, 20.0] # [concentration units] Saturation level of the chemokinesis signal for each species. Can be tuned together with CHEMOKINESIS_SIGNAL_SAT_MULTIPLIER to adjust per-species per cell-type sensitivity.
+CHEMOKINESIS_SIGNAL_SAT = [20.0, 20.0] # [concentration units] Saturation level of the chemokinesis signal for each species. Can be tuned together with CHEMOKINESIS_SIGNAL_SAT_MULTIPLIER to adjust per-species per cell-type sensitivity.
 
 # +====================================================================+
 # | CELL MIGRATION RELATED PARAMETERS                                  |
