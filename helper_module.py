@@ -2,6 +2,7 @@ import math
 import os
 import pickle
 import time
+import warnings
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -707,6 +708,315 @@ def getRadialOrientations(
 
     return orientations.astype(float)  # float64, matching pyflamegpu setVariableFloat expectations
 
+
+def getCoordsOnPlane(
+    plane_axis,
+    pos,
+    n_points,
+    boundary_coords,
+    mode="random",
+    min_dist=None,
+    grid_dist=None,
+    rng=None,
+    max_attempts=100_000,
+):
+    """
+    Generate 3D coordinates distributed on a plane.
+
+    Parameters
+    ----------
+    plane_axis : str
+        Axis normal to the plane. Must be one of "x", "y", or "z".
+
+        For example, if plane_axis = "z", all returned points will have
+        z = pos, while x and y will be distributed inside the x/y boundaries.
+
+    pos : float
+        Position of the plane along the chosen axis.
+
+    n_points : int
+        Number of coordinates to return.
+
+    boundary_coords : list of float
+        List with 6 boundary values in the order:
+
+            [+x, -x, +y, -y, +z, -z]
+
+        The bounds corresponding to the chosen plane axis are not used to
+        distribute the points.
+
+    mode : str
+        Point placement mode. Must be either:
+
+        - "random": random uniform points with optional minimum distance.
+        - "grid": points placed on a regular grid.
+
+    min_dist : float or None
+        Minimum allowed distance between points in random mode.
+
+        If None, no minimum distance is enforced.
+
+    grid_dist : float or None
+        Grid spacing used in grid mode.
+
+        If None, a grid is generated automatically based on the plane size and
+        n_points.
+
+    rng : int, np.random.Generator, or None
+        Random seed or NumPy random generator used in random mode.
+
+    max_attempts : int
+        Maximum number of attempts used to place points in random mode when
+        min_dist is enforced.
+
+    Returns
+    -------
+    coords : np.ndarray
+        Array of shape (n_points, 3), containing coordinates [x, y, z].
+    """
+
+    plane_axis = plane_axis.lower()
+    mode = mode.lower()
+
+    axis_to_idx = {"x": 0, "y": 1, "z": 2}
+
+    if plane_axis not in axis_to_idx:
+        raise ValueError("plane_axis must be one of 'x', 'y', or 'z'.")
+
+    if mode not in {"random", "grid"}:
+        raise ValueError("mode must be either 'random' or 'grid'.")
+
+    if not isinstance(n_points, int) or n_points <= 0:
+        raise ValueError("n_points must be a positive integer.")
+
+    if len(boundary_coords) != 6:
+        raise ValueError(
+            "boundary_coords must contain 6 values in the order "
+            "[+x, -x, +y, -y, +z, -z]."
+        )
+
+    b = np.asarray(boundary_coords, dtype=float)
+
+    bounds = {
+        "x": (min(b[1], b[0]), max(b[1], b[0])),
+        "y": (min(b[3], b[2]), max(b[3], b[2])),
+        "z": (min(b[5], b[4]), max(b[5], b[4])),
+    }
+
+    plane_min, plane_max = bounds[plane_axis]
+    if not (plane_min <= pos <= plane_max):
+        warnings.warn(
+            f"pos={pos} is outside the {plane_axis}-axis boundaries "
+            f"[{plane_min}, {plane_max}]. Points will still be generated.",
+            UserWarning,
+        )
+
+    free_axes = [axis for axis in ("x", "y", "z") if axis != plane_axis]
+    free_axis_a = free_axes[0]
+    free_axis_b = free_axes[1]
+
+    a_min, a_max = bounds[free_axis_a]
+    b_min, b_max = bounds[free_axis_b]
+
+    if a_min == a_max or b_min == b_max:
+        raise ValueError("The plane has zero area based on boundary_coords.")
+
+    plane_idx = axis_to_idx[plane_axis]
+    a_idx = axis_to_idx[free_axis_a]
+    b_idx = axis_to_idx[free_axis_b]
+
+    coords = np.empty((n_points, 3), dtype=float)
+    coords[:, plane_idx] = pos
+
+    if mode == "random":
+        if min_dist is None:
+            min_dist = 0.0
+
+        if min_dist < 0:
+            raise ValueError("min_dist must be non-negative.")
+
+        if isinstance(rng, np.random.Generator):
+            random_generator = rng
+        else:
+            random_generator = np.random.default_rng(rng)
+
+        if min_dist == 0:
+            coords[:, a_idx] = random_generator.uniform(a_min, a_max, n_points)
+            coords[:, b_idx] = random_generator.uniform(b_min, b_max, n_points)
+            return coords
+
+        points_2d = []
+        min_dist_sq = min_dist**2
+        attempts = 0
+
+        while len(points_2d) < n_points and attempts < max_attempts:
+            attempts += 1
+
+            candidate = np.array(
+                [
+                    random_generator.uniform(a_min, a_max),
+                    random_generator.uniform(b_min, b_max),
+                ],
+                dtype=float,
+            )
+
+            if not points_2d:
+                points_2d.append(candidate)
+                continue
+
+            existing = np.asarray(points_2d)
+            dist_sq = np.sum((existing - candidate) ** 2, axis=1)
+
+            if np.all(dist_sq >= min_dist_sq):
+                points_2d.append(candidate)
+
+        if len(points_2d) < n_points:
+            raise RuntimeError(
+                f"Could only place {len(points_2d)} points out of {n_points} "
+                f"after {max_attempts} attempts. Try decreasing min_dist, "
+                f"reducing n_points, or increasing the plane size."
+            )
+
+        points_2d = np.asarray(points_2d)
+        coords[:, a_idx] = points_2d[:, 0]
+        coords[:, b_idx] = points_2d[:, 1]
+
+        return coords
+
+    if mode == "grid":
+        width_a = a_max - a_min
+        width_b = b_max - b_min
+
+        if grid_dist is not None:
+            if grid_dist <= 0:
+                raise ValueError("grid_dist must be positive.")
+
+            n_a = int(np.floor(width_a / grid_dist)) + 1
+            n_b = int(np.floor(width_b / grid_dist)) + 1
+
+            values_a = a_min + np.arange(n_a) * grid_dist
+            values_b = b_min + np.arange(n_b) * grid_dist
+
+            if np.isclose(values_a[-1], a_max):
+                values_a[-1] = a_max
+
+            if np.isclose(values_b[-1], b_max):
+                values_b[-1] = b_max
+
+        else:
+            aspect_ratio = width_a / width_b
+
+            n_a = max(1, int(round(np.sqrt(n_points * aspect_ratio))))
+            n_b = max(1, int(np.ceil(n_points / n_a)))
+
+            values_a = np.linspace(a_min, a_max, n_a)
+            values_b = np.linspace(b_min, b_max, n_b)
+
+        aa, bb = np.meshgrid(values_a, values_b, indexing="ij")
+        grid_points_2d = np.column_stack([aa.ravel(), bb.ravel()])
+
+        n_grid_points = grid_points_2d.shape[0]
+
+        if n_grid_points != n_points:
+            if n_grid_points > n_points:
+                warnings.warn(
+                    f"Requested n_points={n_points}, but the grid produces "
+                    f"{n_grid_points} available positions. A subset of "
+                    f"{n_points} points will be returned.",
+                    UserWarning,
+                )
+            else:
+                warnings.warn(
+                    f"Requested n_points={n_points}, but the grid only produces "
+                    f"{n_grid_points} available positions.",
+                    UserWarning,
+                )
+
+        if n_grid_points < n_points:
+            raise ValueError(
+                f"Cannot return {n_points} points because the grid only "
+                f"contains {n_grid_points} positions."
+            )
+
+        if n_grid_points > n_points:
+            selected_idx = np.linspace(
+                0,
+                n_grid_points - 1,
+                n_points,
+                dtype=int,
+            )
+            grid_points_2d = grid_points_2d[selected_idx]
+
+        coords[:, a_idx] = grid_points_2d[:, 0]
+        coords[:, b_idx] = grid_points_2d[:, 1]
+
+        return coords  
+
+def getRandomOrientationOnPlane(plane_axis, n_points):
+    """
+    Generate random normalized 3D orientation vectors lying on a plane.
+
+    Parameters
+    ----------
+    plane_axis : str
+        Axis normal to the plane. Must be one of "x", "y", or "z".
+
+        The coordinate corresponding to this axis will be set to 0.
+
+        For example, if plane_axis = "z", the generated orientations lie in
+        the x/y plane and have the form:
+
+            [ox, oy, 0]
+
+    n_points : int
+        Number of orientations to generate.
+
+    Returns
+    -------
+    orientations : np.ndarray
+        Array of shape (n_points, 3), containing normalized orientation vectors.
+
+        Each vector has length 1, and the component corresponding to
+        plane_axis is 0.
+
+    Examples
+    --------
+    Generate 10 random orientations in the x/y plane:
+
+    >>> orientations = getRandomOrientationOnPlane("z", 10)
+
+    Generate 5 random orientations in the y/z plane:
+
+    >>> orientations = getRandomOrientationOnPlane("x", 5)
+    """
+
+    plane_axis = plane_axis.lower()
+
+    axis_to_idx = {"x": 0, "y": 1, "z": 2}
+
+    if plane_axis not in axis_to_idx:
+        raise ValueError("plane_axis must be one of 'x', 'y', or 'z'.")
+
+    if not isinstance(n_points, int) or n_points <= 0:
+        raise ValueError("n_points must be a positive integer.")
+
+    angles = np.random.uniform(0.0, 2.0 * np.pi, n_points)
+
+    orientations = np.zeros((n_points, 3), dtype=float)
+
+    if plane_axis == "x":
+        orientations[:, 1] = np.cos(angles)
+        orientations[:, 2] = np.sin(angles)
+
+    elif plane_axis == "y":
+        orientations[:, 0] = np.cos(angles)
+        orientations[:, 2] = np.sin(angles)
+
+    elif plane_axis == "z":
+        orientations[:, 0] = np.cos(angles)
+        orientations[:, 1] = np.sin(angles)
+
+    return orientations.astype(float)
 
 def compute_u_ref_from_anchor_pos(anchor_pos: np.ndarray,
                                  cell_center: np.ndarray,

@@ -21,7 +21,7 @@ import os
 import pickle
 import matplotlib.pyplot as plt
 import check_hard_coded_values
-from helper_module import compute_expected_boundary_pos_from_corners, getRandomVectors3D, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, getRandomCoords3D, compute_u_ref_from_anchor_pos, getRadialOrientations, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary, apply_param_overrides, load_param_overrides_from_cli, loadCachedCellInitialization, generateCellInitializationData, recompute_derived_params
+from helper_module import compute_expected_boundary_pos_from_corners, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, compute_u_ref_from_anchor_pos, getRadialOrientations, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary, apply_param_overrides, load_param_overrides_from_cli, loadCachedCellInitialization, generateCellInitializationData, recompute_derived_params, getRandomOrientationOnPlane, getCoordsOnPlane
 
 # TODO LIST:
 # A- Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
@@ -60,7 +60,7 @@ N = 21
 # Time simulation parameters
 # ----------------------------------------------------------------------
 TIME_STEP = 1.0 # s. WARNING: diffusion and cell migration events might need different scales
-STEPS = 200
+STEPS = 2
 
 # +====================================================================+
 # | BOUNDARY CONDITIONS                                                |
@@ -147,7 +147,7 @@ if OSCILLATORY_SHEAR_ASSAY:
 # +====================================================================+
 # | FIBRE NETWORK PARAMETERS                                           |
 # +====================================================================+
-INCLUDE_FIBRE_NETWORK = True
+INCLUDE_FIBRE_NETWORK = False
 NETWORK_FILE = 'network_medium_density.pkl'  # path to the .pkl file with node_coords + connectivity
 ALLOW_IRREGULAR_NETWORK = False  # default: False, meaning that all boundaries must have network nodes attached (e.g. a network going from -y to y and touching the other boundaries should have this variable set to True)
 
@@ -192,7 +192,7 @@ FNODE_BIRTH_REFRACTORY = [20.0, 20.0, 20.0]  # [s]
 # +====================================================================+
 # | DIFFUSION PARAMETERS                                               |
 # +====================================================================+
-INCLUDE_DIFFUSION = True
+INCLUDE_DIFFUSION = False
 N_SPECIES = 2  # number of diffusing species.WARNING: make sure that the value coincides with the one declared in TODO
 DIFFUSION_COEFF_MULTI = [5.0, 5.0]  # diffusion coefficient in [um^2/s] per specie
 BOUNDARY_CONC_INIT_MULTI = [[2.5, 2.5, 2.5, 2.5, 2.5, 2.5],
@@ -202,7 +202,7 @@ BOUNDARY_CONC_INIT_MULTI = [[2.5, 2.5, 2.5, 2.5, 2.5, 2.5],
 BOUNDARY_CONC_FIXED_MULTI = [[2.5, 2.5, 2.5, 2.5, 2.5, 2.5],
                              # concentration boundary conditions at each surface. WARNING: -1.0 means initial condition prevails. Don't use 0.0 as initial condition if that value is not fixed. Use -1.0 instead
                              [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
-HETEROGENEOUS_DIFFUSION = True  # if True, diffusion coefficient is multiplied by (1 - local ECM density) to simulate hindered diffusion through the ECM. WARNING: this is a very simple approximation of the phenomenon and highly depends on grid density (N). 
+HETEROGENEOUS_DIFFUSION = False  # if True, diffusion coefficient is multiplied by (1 - local ECM density) to simulate hindered diffusion through the ECM. WARNING: this is a very simple approximation of the phenomenon and highly depends on grid density (N). 
 # +====================================================================+
 # | CELL PARAMETERS                                                    |
 # +====================================================================+
@@ -217,9 +217,9 @@ HETEROGENEOUS_DIFFUSION = True  # if True, diffusion coefficient is multiplied b
 # --------------------------------------------------------------------------
 N_CELL_TYPES = 3
 
-INCLUDE_CELLS = False
+INCLUDE_CELLS = True
 INCLUDE_CELL_CELL_INTERACTION = True # If True, cells interact with each other through short-range repulsion and adhesion forces. 
-INCLUDE_CELL_CYCLE = True # If True, cells go through a simplified cell cycle with G1, S, G2 and M phases, which can affect their behavior. Also includes birth/death dynamics (WARNING: USER-DEFINED in cell_cycle.cpp).
+INCLUDE_CELL_CYCLE = False # If True, cells go through a simplified cell cycle with G1, S, G2 and M phases, which can affect their behavior. Also includes birth/death dynamics (WARNING: USER-DEFINED in cell_cycle.cpp).
 DEAD_CELLS_DISAPPEAR = False  # If True, dead CELL agents are removed; if False, they remain inert with dead=1.
 PERIODIC_BOUNDARIES_FOR_CELLS = False
 INCLUDE_CELL_FNODE_REPULSION = False
@@ -227,6 +227,8 @@ N_CELLS = 100
 ORGANOID_ASSAY = False  # If True, cells are initialized in a small cluster in the center of the domain to simulate an organoid. If False, they are initialized randomly in the whole domain.
 ORGANOID_INIT_RADIUS = 20.0  # [um] Radius of the initial cell cluster when ORGANOID_ASSAY is True. Cells are placed randomly within a sphere of this radius centered at the domain origin.
 ORGANOID_ORIENTATION_NOISE = 0.0  # [rad] Std-dev of Gaussian angular noise added to the initial radially-outward cell orientations when ORGANOID_ASSAY is True. 0 = perfectly radial; ~0.3 = ~17 deg RMS jitter; increase towards pi for fully random.
+MONOLAYER_ASSAY = True  # If True, cells are initialized in a monolayer at the bottom of the domain (e.g. near -Z boundary) to simulate a 2D culture. 
+
 
 # Per-cell-type mechanical & morphological properties
 # Each is a list of length N_CELL_TYPES.  A scalar is broadcast to all types.
@@ -254,8 +256,8 @@ print(f'Initial cell speed reference (per type): {CELL_SPEED_REF} um/s')
 print(f'Initial Brownian motion strength (per type): {BROWNIAN_MOTION_STRENGTH} um/s')
 print(f'Rotational diffusion rate (per type): {ROTATIONAL_DIFFUSION_RATE} rad^2/s')
 
-# LUMEN parameters — only active when INCLUDE_CELLS and ORGANOID_ASSAY are both True.
-INCLUDE_LUMEN = False  # If True, LUMEN agents are present (secreted by cells into the organoid interior).
+# LUMEN parameters — only active when INCLUDE_CELLS and (ORGANOID_ASSAY or MONOLAYER_ASSAY) are both True.
+INCLUDE_LUMEN = False  # If True, LUMEN agents are present (secreted by cells in the apical direction).
 LUMEN_RADIUS = 3.0  # [um] Radius of a single LUMEN droplet.
 LUMEN_ETA = 0.15  # [nN·s/um] Overdamped drag coefficient for LUMEN agents.
 LUMEN_K_LUMEN_LUMEN_REPULSION = 4.0  # [nN/um] Stiffness of volume-exclusion repulsion between LUMEN agents.
@@ -421,7 +423,7 @@ CHEMOTAXIS_CHI = [0.1, 0.1, 0.10] # [um^2/s] Chemotactic coefficient (χ) per ce
 # +====================================================================+
 # | CHEMOKINESIS                                                         |
 # +====================================================================+
-INCLUDE_CHEMOKINESIS = True
+INCLUDE_CHEMOKINESIS = False
 CHEMOKINESIS_SENSITIVITY = [-100.0, 0.0] # [-1.0 to +1.0] Chemokinesis sensitivity for each species. Positive: speed increases with higher concentrations, Negative: speed decreases with higher concentrations.
 CHEMOKINESIS_ALPHA = [0.5, 0.5, 0.5] # [-] Baseline speed is multiplied by (1 + alpha * f(C_sp)) 
 CHEMOKINESIS_K = [2.0, 2.0, 2.0] # [concentration units] Chemokinesis half-saturation constant for concentration-dependent speed modulation.
@@ -660,8 +662,11 @@ if INCLUDE_DIFFUSION:
 
 if INCLUDE_CELLS:
     _max_cell_radius = max(CELL_RADIUS) if isinstance(CELL_RADIUS, list) else CELL_RADIUS
-    if INCLUDE_LUMEN and not ORGANOID_ASSAY:
-        print('ERROR: INCLUDE_LUMEN requires ORGANOID_ASSAY to be True')
+    if INCLUDE_LUMEN and not ORGANOID_ASSAY and not MONOLAYER_ASSAY:
+        print('ERROR: INCLUDE_LUMEN requires either ORGANOID_ASSAY or MONOLAYER_ASSAY to be True')
+        critical_error = True
+    if ORGANOID_ASSAY and MONOLAYER_ASSAY:
+        print('ERROR: ORGANOID_ASSAY and MONOLAYER_ASSAY cannot both be True')
         critical_error = True
     if INCLUDE_FOCAL_ADHESIONS and not INCLUDE_FIBRE_NETWORK: 
         print('ERROR: focal adhesions cannot be included if there is no fibre network to interact with')
@@ -890,7 +895,7 @@ env.newMacroPropertyFloat("BOUNDARY_CONC_FIXED_MULTI", N_SPECIES,
                           6)  # a 2D matrix with the 6 boundary conditions (columns) for each species (rows)
 env.newMacroPropertyInt("MACRO_MAX_GLOBAL_CELL_ID", 1)  # shared current max CELL id across all proliferating cells
 env.newMacroPropertyInt("MACRO_MAX_GLOBAL_FNODE_ID", 1)  # shared current max FNODE id across all remodeling cells
-if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+if INCLUDE_CELLS and (ORGANOID_ASSAY or MONOLAYER_ASSAY) and INCLUDE_LUMEN:
     env.newMacroPropertyInt("MACRO_MAX_GLOBAL_LUMEN_ID", 1)  # shared current max LUMEN id across all secreted lumen droplets
 env.newPropertyUInt("ECM_POPULATION_SIZE", ECM_POPULATION_SIZE)
 
@@ -1072,7 +1077,7 @@ env.newPropertyUInt("MOVING_BOUNDARIES", MOVING_BOUNDARIES)
 env.newPropertyUInt("ABORT_ON_UNSTABLE_FNODE_MOVE", ABORT_ON_UNSTABLE_FNODE_MOVE)
 
 # LUMEN agent properties (only registered when LUMEN is active)
-if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+if INCLUDE_CELLS and (ORGANOID_ASSAY or MONOLAYER_ASSAY) and INCLUDE_LUMEN:
     env.newPropertyFloat("LUMEN_RADIUS", LUMEN_RADIUS)
     env.newPropertyFloat("LUMEN_ETA", LUMEN_ETA)
     env.newPropertyFloat("LUMEN_K_LUMEN_LUMEN_REPULSION", LUMEN_K_LUMEN_LUMEN_REPULSION)
@@ -1169,7 +1174,7 @@ if INCLUDE_FIBRE_NETWORK:
     FNODE_bucket_location_message_postmove.newVariableFloat("vz")
 
 
-if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+if INCLUDE_CELLS and (ORGANOID_ASSAY or MONOLAYER_ASSAY) and INCLUDE_LUMEN:
     # LUMEN spatial location message — broadcast radius must cover the larger of lumen-lumen and lumen-cell search radii
     lumen_spatial_radius = max(MAX_SEARCH_RADIUS_LUMEN_LUMEN_INTERACTION, MAX_SEARCH_RADIUS_LUMEN_CELL_INTERACTION)
     # Also ensure ECM can find lumen for diffusion override
@@ -1479,7 +1484,7 @@ ECM_agent.newRTCFunctionFile("ecm_boundary_concentration_conditions", ecm_bounda
 ECM_agent.newRTCFunctionFile("ecm_Csp_update", ecm_Csp_update_file)
 if HETEROGENEOUS_DIFFUSION and INCLUDE_FIBRE_NETWORK:
     ECM_agent.newRTCFunctionFile("ecm_Dsp_update", ecm_Dsp_update_file).setMessageInput("fnode_spatial_location_message")
-if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN and HETEROGENEOUS_DIFFUSION:
+if INCLUDE_CELLS and (ORGANOID_ASSAY or MONOLAYER_ASSAY) and INCLUDE_LUMEN and HETEROGENEOUS_DIFFUSION:
     ECM_agent.newRTCFunctionFile("ecm_Dsp_lumen_update", ecm_Dsp_lumen_update_file).setMessageInput("lumen_spatial_location_message")
 if MOVING_BOUNDARIES:
     ECM_agent.newRTCFunctionFile("ecm_move", ecm_move_file)
@@ -1578,7 +1583,7 @@ if INCLUDE_CELLS:
         cfr.setAgentOutput(FNODE_agent)
     CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ecm_grid_location_message")
     CELL_agent.newRTCFunctionFile("cell_move", cell_move_file)
-    if ORGANOID_ASSAY and INCLUDE_LUMEN:
+    if (ORGANOID_ASSAY or MONOLAYER_ASSAY) and INCLUDE_LUMEN:
         CELL_agent.newRTCFunctionFile("cell_lumen_interaction", cell_lumen_interaction_file).setMessageInput("lumen_spatial_location_message")
         cls_fn = CELL_agent.newRTCFunctionFile("cell_lumen_secretion", cell_lumen_secretion_file)
         # agent_out for lumen is set after LUMEN_agent is defined (below)
@@ -1708,7 +1713,7 @@ if INCLUDE_FOCAL_ADHESIONS:
 """
   LUMEN agent
 """
-if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+if INCLUDE_CELLS and (ORGANOID_ASSAY or MONOLAYER_ASSAY) and INCLUDE_LUMEN:
     LUMEN_agent = model.newAgent("LUMEN")
     LUMEN_agent.newVariableInt("id", 0)       # unique LUMEN agent id
     LUMEN_agent.newVariableFloat("x", 0.0)   # LUMEN position [um]
@@ -1938,6 +1943,11 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 )
                 print(f"  |-> Organoid assay: cells clustered in sphere of radius {ORGANOID_INIT_RADIUS} um at origin")
                 print(f"  |-> Cell orientations: radially outward (noise_sigma={ORGANOID_ORIENTATION_NOISE:.3f} rad)")
+            elif MONOLAYER_ASSAY:
+                cell_pos = getCoordsOnPlane("z", coord_boundary_z_neg, N_CELLS, coord_boundary, mode="random")
+                cell_orientations = getRandomOrientationOnPlane("z",N_CELLS)
+                print(f"  |-> Monolayer assay: cells randomly distributed in a monolayer at z={coord_boundary_z_neg} um")
+                print(f"  |-> Cell orientations: random")
             else:
                 cached_cell_init = loadCachedCellInitialization(N_CELLS, coord_boundary, CELL_INIT_CACHE_DIR, atol=EPSILON)
                 if cached_cell_init is not None:
