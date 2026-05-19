@@ -468,11 +468,23 @@ for _vi, _varg in enumerate(_ORIGINAL_ARGV):
         break
 if _VARIANT_NAME:
     import importlib.util as _iutil
-    _variant_path = CURR_PATH / "variants" / f"{_VARIANT_NAME}.py"
-    if not _variant_path.exists():
-        _available = [p.stem for p in (CURR_PATH / "variants").glob("*.py") if p.stem != "__init__"]
+    # Resolve variant path: prefer package layout variants/<name>/__init__.py,
+    # fall back to legacy flat layout variants/<name>.py.
+    _variant_path_pkg  = CURR_PATH / "variants" / _VARIANT_NAME / "__init__.py"
+    _variant_path_flat = CURR_PATH / "variants" / f"{_VARIANT_NAME}.py"
+    if _variant_path_pkg.exists():
+        _variant_path = _variant_path_pkg
+    elif _variant_path_flat.exists():
+        _variant_path = _variant_path_flat
+    else:
+        _available_flat = [p.stem for p in (CURR_PATH / "variants").glob("*.py") if p.stem != "__init__"]
+        _available_pkg  = [p.name for p in (CURR_PATH / "variants").iterdir()
+                           if p.is_dir() and (p / "__init__.py").exists()]
+        _available = sorted(set(_available_flat + _available_pkg))
         raise FileNotFoundError(
-            f"Variant '{_VARIANT_NAME}' not found: expected {_variant_path}\n"
+            f"Variant '{_VARIANT_NAME}' not found.\n"
+            f"Searched: {_variant_path_pkg}\n"
+            f"       and {_variant_path_flat}\n"
             f"Available variants: {_available}"
         )
     _vspec = _iutil.spec_from_file_location(f"variants.{_VARIANT_NAME}", str(_variant_path))
@@ -2711,123 +2723,140 @@ if INCLUDE_FOCAL_ADHESIONS:
 # ++==================================================================++
 """
   Control flow
+
+  _build_default_layers() contains the full default L0-L8 layer sequence.
+  It is called directly when no variant is loaded, or when a variant does
+  not define configure_layers().
+
+  Variants that need to insert, reorder, or remove layers define their own
+  configure_layers(model, g) and are responsible for the full sequence.
+  They may call g['_build_default_layers']() to include the defaults and
+  then add variant-specific layers around or after that call — but note
+  that once a layer is registered it cannot be repositioned, so true
+  insertion between default layers requires the variant to replicate the
+  relevant portion of the block manually.  See Tutorial-Model-Variants.md.
 """
 
-# L0: VASC concentration update — runs BEFORE L1 so the ECM grid message
-# (broadcast in L1) already reflects the VASC-imposed concentration floor.
-if INCLUDE_VASCULARIZATION:
-    model.newLayer("L0_VASC_Bucket_Locations").addAgentFunction("VASC", "vasc_bucket_location_data")
-    model.newLayer("L0_VASC_Csp_Update").addAgentFunction("VASC", "vasc_Csp_update")
-    model.newLayer("L0_VASC_Spatial_Locations").addAgentFunction("VASC", "vasc_spatial_location_data")
-    model.newLayer("L0_ECM_VASC_Csp_Update").addAgentFunction("ECM", "ecm_vasc_Csp_update")
-    if INCLUDE_CELLS and INCLUDE_VASCULAR_CELL_RECRUITMENT:
-        model.newLayer("L0_VASC_Cell_Spawn").addAgentFunction("VASC", "vasc_ecm_cell_spawn")
-
-# L1: Agent_Locations
-model.newLayer("L1_Agent_Locations").addAgentFunction("BCORNER", "bcorner_output_location_data")
-if INCLUDE_DIFFUSION:
-    model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_grid_location_data")
-if INCLUDE_CELLS:
-    model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_spatial_location_data")
-    if INCLUDE_FOCAL_ADHESIONS:
-        model.newLayer("L1_CELL_Locations_2").addAgentFunction("CELL", "cell_bucket_location_data")  # these functions share data of the same agent, so must be in separate layers
-if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
-    model.newLayer("L1_LUMEN_Locations").addAgentFunction("LUMEN", "lumen_spatial_location_data")
-if INCLUDE_FIBRE_NETWORK:
-    model.newLayer("L1_FNODE_Locations_1").addAgentFunction("FNODE", "fnode_spatial_location_data")
-    # These functions share data of the same agent, so must be in separate layers
-    model.newLayer("L1_FNODE_Locations_2").addAgentFunction("FNODE", "fnode_bucket_location_data")
-    
-
-# L2: Boundary_Interactions  
-if INCLUDE_DIFFUSION:
-    model.newLayer("L2_ECM_Boundary_Interactions").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
-if INCLUDE_FIBRE_NETWORK:
-    model.newLayer("L2_FNODE_Boundary_Interactions").addAgentFunction("FNODE", "fnode_boundary_interaction")    
-if INCLUDE_FIBRE_NETWORK and INCLUDE_CELLS and INCLUDE_NETWORK_REMODELING:
-    model.newLayer("L2_CELL_FNODE_Remodel").addAgentFunction("CELL", "cell_fnode_remodel")
-    model.newLayer("L2_FNODE_Remodel").addAgentFunction("FNODE", "fnode_remodel")
-    model.newLayer("L2_FNODE_Remodel_Apply").addAgentFunction("FNODE", "fnode_apply_remodel_updates")
-    model.newLayer("L2_FNODE_Update_Links").addAgentFunction("FNODE", "fnode_update_links")
-
-# L3: Metabolism & Cell Cycle
-if INCLUDE_CELLS and INCLUDE_DIFFUSION:    
-    model.newLayer("L3_Metabolism").addAgentFunction("CELL", "cell_ecm_interaction_metabolism")
-if INCLUDE_CELLS and INCLUDE_CELL_CYCLE:
-    model.newLayer("L3_Cell_MaxID_Update").addAgentFunction("CELL", "cell_MaxID_update")
-    model.newLayer("L3_Cell_Cycle").addAgentFunction("CELL", "cell_cycle")
-    if INCLUDE_FOCAL_ADHESIONS:
-        model.newLayer("L3_Cell_Bucket_PostCycle").addAgentFunction("CELL", "cell_bucket_location_data")
-        model.newLayer("L3_FOCAD_PostCycle_Update").addAgentFunction("FOCAD", "focad_post_cycle_update")
-if INCLUDE_DIFFUSION:
-    # L4_ECM_Csp_Update
-    model.newLayer("L4_ECM_Csp_Update").addAgentFunction("ECM", "ecm_Csp_update")
-    if HETEROGENEOUS_DIFFUSION and INCLUDE_FIBRE_NETWORK:
-        model.newLayer("L4_ECM_Dsp_Update").addAgentFunction("ECM", "ecm_Dsp_update")
-    if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
-        model.newLayer("L4_ECM_Dsp_Lumen_Update").addAgentFunction("ECM", "ecm_Dsp_lumen_update")
-    # L5_Diffusion
-    model.newLayer("L5_Diffusion").addAgentFunction("ECM", "ecm_ecm_interaction")
-    # L6_Diffusion_Boundary (called twice to ensure concentration at boundaries is properly shown visually)
-    model.newLayer("L6_Diffusion_Boundary").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
-if INCLUDE_FIBRE_NETWORK:
-    # L7_Fibre_Network Mechanical interactions
-    model.newLayer("L7_FNODE_Repulsion").addAgentFunction("FNODE", "fnode_fnode_spatial_interaction")
-    model.newLayer("L7_FNODE_Network_Mechanics").addAgentFunction("FNODE", "fnode_fnode_bucket_interaction")
-    if INCLUDE_FOCAL_ADHESIONS:
-        model.newLayer("L7_FOCAD_Mechanics").addAgentFunction("FOCAD", "focad_fnode_interaction")
-        # These FOCAD location functions are placed here because they require updated force information to be broadcasted to  FNODE and CELL update functions
-        model.newLayer("L7_FOCAD_Locations_1").addAgentFunction("FOCAD", "focad_spatial_location_data")
-        model.newLayer("L7_FOCAD_Locations_2").addAgentFunction("FOCAD", "focad_bucket_location_data")
-        model.newLayer("L7_FNODE_Force_Update").addAgentFunction("FNODE", "fnode_focad_interaction") 
-        model.newLayer("L7_CELL_Stress_Update").addAgentFunction("CELL", "cell_focad_update") 
-
-if INCLUDE_CELLS and INCLUDE_CELL_CELL_INTERACTION:
-    model.newLayer("L7_CELL_CELL_Interaction").addAgentFunction("CELL", "cell_cell_interaction")
-if INCLUDE_CELLS and INCLUDE_FIBRE_NETWORK and INCLUDE_CELL_FNODE_REPULSION:
-    model.newLayer("L7_CELL_FNODE_Repulsion").addAgentFunction("CELL", "cell_fnode_repulsion")
-    model.newLayer("L7_FNODE_CELL_Repulsion").addAgentFunction("FNODE", "fnode_cell_repulsion")
-if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
-    model.newLayer("L7_LUMEN_LUMEN_Interaction").addAgentFunction("LUMEN", "lumen_lumen_interaction")
-    model.newLayer("L7_LUMEN_CELL_Interaction").addAgentFunction("LUMEN", "lumen_cell_interaction")
-    model.newLayer("L7_CELL_LUMEN_Interaction").addAgentFunction("CELL", "cell_lumen_interaction")
-# Unified nucleus stress finalization 
-if INCLUDE_CELLS:
-    model.newLayer("L7_CELL_Stress_State_Update").addAgentFunction("CELL", "cell_stress_state_update")
-
-# L8_Agent_Movement
-if INCLUDE_CELLS:
-    model.newLayer("L8_CELL_Movement").addAgentFunction("CELL", "cell_move")
-    if INCLUDE_FOCAL_ADHESIONS:
-        # Re-broadcast CELL bucket after movement so FOCAD anchor update
-        # reads post-move anchor positions instead of stale L1 data.
-        model.newLayer("L8_CELL_Bucket_Post_Move").addAgentFunction("CELL", "cell_bucket_location_data")
-if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
-    model.newLayer("L8_LUMEN_Movement").addAgentFunction("LUMEN", "lumen_move")
-    model.newLayer("L8_CELL_LUMEN_Secretion").addAgentFunction("CELL", "cell_lumen_secretion")
-if INCLUDE_FIBRE_NETWORK:
-    model.newLayer("L8_FNODE_Movement").addAgentFunction("FNODE", "fnode_move")
-    if INCLUDE_FOCAL_ADHESIONS:
-        # Broadcast FNODE post-move positions into dedicated message list
-        # so focad_move reads current-step coordinates.
-        model.newLayer("L8_FNODE_Locations_Post_Move").addAgentFunction("FNODE", "fnode_bucket_location_data_postmove")
-        # Sync FOCAD anchor (x_i) with post-move cell position before focad_move,
-        # so the ori vector (x_i - x) is consistent at step end.
-        model.newLayer("L8_FOCAD_Anchor_Post_Move").addAgentFunction("FOCAD", "focad_anchor_update")
-        model.newLayer("L8_FOCAD_Movement").addAgentFunction("FOCAD", "focad_move")
-# If boundaries are not moving, the ECM grid does not need to be updated
-if MOVING_BOUNDARIES:
-    model.newLayer("L8_BCORNER_Movement").addAgentFunction("BCORNER", "bcorner_move")
-    model.newLayer("L8_ECM_Movement").addAgentFunction("ECM", "ecm_move")
+def _build_default_layers():
+    # L0: VASC concentration update — runs BEFORE L1 so the ECM grid message
+    # (broadcast in L1) already reflects the VASC-imposed concentration floor.
     if INCLUDE_VASCULARIZATION:
-        model.newLayer("L8_VASC_Movement").addAgentFunction("VASC", "vasc_move")
+        model.newLayer("L0_VASC_Bucket_Locations").addAgentFunction("VASC", "vasc_bucket_location_data")
+        model.newLayer("L0_VASC_Csp_Update").addAgentFunction("VASC", "vasc_Csp_update")
+        model.newLayer("L0_VASC_Spatial_Locations").addAgentFunction("VASC", "vasc_spatial_location_data")
+        model.newLayer("L0_ECM_VASC_Csp_Update").addAgentFunction("ECM", "ecm_vasc_Csp_update")
+        if INCLUDE_CELLS and INCLUDE_VASCULAR_CELL_RECRUITMENT:
+            model.newLayer("L0_VASC_Cell_Spawn").addAgentFunction("VASC", "vasc_ecm_cell_spawn")
 
-# Variant layer injection point — called after ALL default layers.
-# Variants use configure_layers() to append new layers at the end of the
-# default layer stack.
+    # L1: Agent_Locations
+    model.newLayer("L1_Agent_Locations").addAgentFunction("BCORNER", "bcorner_output_location_data")
+    if INCLUDE_DIFFUSION:
+        model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_grid_location_data")
+    if INCLUDE_CELLS:
+        model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_spatial_location_data")
+        if INCLUDE_FOCAL_ADHESIONS:
+            model.newLayer("L1_CELL_Locations_2").addAgentFunction("CELL", "cell_bucket_location_data")  # these functions share data of the same agent, so must be in separate layers
+    if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+        model.newLayer("L1_LUMEN_Locations").addAgentFunction("LUMEN", "lumen_spatial_location_data")
+    if INCLUDE_FIBRE_NETWORK:
+        model.newLayer("L1_FNODE_Locations_1").addAgentFunction("FNODE", "fnode_spatial_location_data")
+        # These functions share data of the same agent, so must be in separate layers
+        model.newLayer("L1_FNODE_Locations_2").addAgentFunction("FNODE", "fnode_bucket_location_data")
+
+    # L2: Boundary_Interactions
+    if INCLUDE_DIFFUSION:
+        model.newLayer("L2_ECM_Boundary_Interactions").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
+    if INCLUDE_FIBRE_NETWORK:
+        model.newLayer("L2_FNODE_Boundary_Interactions").addAgentFunction("FNODE", "fnode_boundary_interaction")
+    if INCLUDE_FIBRE_NETWORK and INCLUDE_CELLS and INCLUDE_NETWORK_REMODELING:
+        model.newLayer("L2_CELL_FNODE_Remodel").addAgentFunction("CELL", "cell_fnode_remodel")
+        model.newLayer("L2_FNODE_Remodel").addAgentFunction("FNODE", "fnode_remodel")
+        model.newLayer("L2_FNODE_Remodel_Apply").addAgentFunction("FNODE", "fnode_apply_remodel_updates")
+        model.newLayer("L2_FNODE_Update_Links").addAgentFunction("FNODE", "fnode_update_links")
+
+    # L3: Metabolism & Cell Cycle
+    if INCLUDE_CELLS and INCLUDE_DIFFUSION:
+        model.newLayer("L3_Metabolism").addAgentFunction("CELL", "cell_ecm_interaction_metabolism")
+    if INCLUDE_CELLS and INCLUDE_CELL_CYCLE:
+        model.newLayer("L3_Cell_MaxID_Update").addAgentFunction("CELL", "cell_MaxID_update")
+        model.newLayer("L3_Cell_Cycle").addAgentFunction("CELL", "cell_cycle")
+        if INCLUDE_FOCAL_ADHESIONS:
+            model.newLayer("L3_Cell_Bucket_PostCycle").addAgentFunction("CELL", "cell_bucket_location_data")
+            model.newLayer("L3_FOCAD_PostCycle_Update").addAgentFunction("FOCAD", "focad_post_cycle_update")
+    if INCLUDE_DIFFUSION:
+        # L4_ECM_Csp_Update
+        model.newLayer("L4_ECM_Csp_Update").addAgentFunction("ECM", "ecm_Csp_update")
+        if HETEROGENEOUS_DIFFUSION and INCLUDE_FIBRE_NETWORK:
+            model.newLayer("L4_ECM_Dsp_Update").addAgentFunction("ECM", "ecm_Dsp_update")
+        if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+            model.newLayer("L4_ECM_Dsp_Lumen_Update").addAgentFunction("ECM", "ecm_Dsp_lumen_update")
+        # L5_Diffusion
+        model.newLayer("L5_Diffusion").addAgentFunction("ECM", "ecm_ecm_interaction")
+        # L6_Diffusion_Boundary (called twice to ensure concentration at boundaries is properly shown visually)
+        model.newLayer("L6_Diffusion_Boundary").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
+    if INCLUDE_FIBRE_NETWORK:
+        # L7_Fibre_Network Mechanical interactions
+        model.newLayer("L7_FNODE_Repulsion").addAgentFunction("FNODE", "fnode_fnode_spatial_interaction")
+        model.newLayer("L7_FNODE_Network_Mechanics").addAgentFunction("FNODE", "fnode_fnode_bucket_interaction")
+        if INCLUDE_FOCAL_ADHESIONS:
+            model.newLayer("L7_FOCAD_Mechanics").addAgentFunction("FOCAD", "focad_fnode_interaction")
+            # These FOCAD location functions are placed here because they require updated force information to be broadcasted to  FNODE and CELL update functions
+            model.newLayer("L7_FOCAD_Locations_1").addAgentFunction("FOCAD", "focad_spatial_location_data")
+            model.newLayer("L7_FOCAD_Locations_2").addAgentFunction("FOCAD", "focad_bucket_location_data")
+            model.newLayer("L7_FNODE_Force_Update").addAgentFunction("FNODE", "fnode_focad_interaction")
+            model.newLayer("L7_CELL_Stress_Update").addAgentFunction("CELL", "cell_focad_update")
+
+    if INCLUDE_CELLS and INCLUDE_CELL_CELL_INTERACTION:
+        model.newLayer("L7_CELL_CELL_Interaction").addAgentFunction("CELL", "cell_cell_interaction")
+    if INCLUDE_CELLS and INCLUDE_FIBRE_NETWORK and INCLUDE_CELL_FNODE_REPULSION:
+        model.newLayer("L7_CELL_FNODE_Repulsion").addAgentFunction("CELL", "cell_fnode_repulsion")
+        model.newLayer("L7_FNODE_CELL_Repulsion").addAgentFunction("FNODE", "fnode_cell_repulsion")
+    if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+        model.newLayer("L7_LUMEN_LUMEN_Interaction").addAgentFunction("LUMEN", "lumen_lumen_interaction")
+        model.newLayer("L7_LUMEN_CELL_Interaction").addAgentFunction("LUMEN", "lumen_cell_interaction")
+        model.newLayer("L7_CELL_LUMEN_Interaction").addAgentFunction("CELL", "cell_lumen_interaction")
+    # Unified nucleus stress finalization
+    if INCLUDE_CELLS:
+        model.newLayer("L7_CELL_Stress_State_Update").addAgentFunction("CELL", "cell_stress_state_update")
+
+    # L8_Agent_Movement
+    if INCLUDE_CELLS:
+        model.newLayer("L8_CELL_Movement").addAgentFunction("CELL", "cell_move")
+        if INCLUDE_FOCAL_ADHESIONS:
+            # Re-broadcast CELL bucket after movement so FOCAD anchor update
+            # reads post-move anchor positions instead of stale L1 data.
+            model.newLayer("L8_CELL_Bucket_Post_Move").addAgentFunction("CELL", "cell_bucket_location_data")
+    if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+        model.newLayer("L8_LUMEN_Movement").addAgentFunction("LUMEN", "lumen_move")
+        model.newLayer("L8_CELL_LUMEN_Secretion").addAgentFunction("CELL", "cell_lumen_secretion")
+    if INCLUDE_FIBRE_NETWORK:
+        model.newLayer("L8_FNODE_Movement").addAgentFunction("FNODE", "fnode_move")
+        if INCLUDE_FOCAL_ADHESIONS:
+            # Broadcast FNODE post-move positions into dedicated message list
+            # so focad_move reads current-step coordinates.
+            model.newLayer("L8_FNODE_Locations_Post_Move").addAgentFunction("FNODE", "fnode_bucket_location_data_postmove")
+            # Sync FOCAD anchor (x_i) with post-move cell position before focad_move,
+            # so the ori vector (x_i - x) is consistent at step end.
+            model.newLayer("L8_FOCAD_Anchor_Post_Move").addAgentFunction("FOCAD", "focad_anchor_update")
+            model.newLayer("L8_FOCAD_Movement").addAgentFunction("FOCAD", "focad_move")
+    # If boundaries are not moving, the ECM grid does not need to be updated
+    if MOVING_BOUNDARIES:
+        model.newLayer("L8_BCORNER_Movement").addAgentFunction("BCORNER", "bcorner_move")
+        model.newLayer("L8_ECM_Movement").addAgentFunction("ECM", "ecm_move")
+        if INCLUDE_VASCULARIZATION:
+            model.newLayer("L8_VASC_Movement").addAgentFunction("VASC", "vasc_move")
+
+
+# If the active variant defines configure_layers(), hand full control of the
+# layer sequence to it.  The variant is responsible for calling
+# g['_build_default_layers']() if it wants the default L0-L8 layers.
+# If no variant is loaded, or the variant has no configure_layers(), run the
+# default sequence directly.
 if _ACTIVE_VARIANT is not None and hasattr(_ACTIVE_VARIANT, "configure_layers"):
     print(f"[VARIANT] Calling configure_layers for variant '{_VARIANT_NAME}'")
     _ACTIVE_VARIANT.configure_layers(model, globals())
+else:
+    _build_default_layers()
 
 # ++==================================================================++
 # ++ Logging                                                           |

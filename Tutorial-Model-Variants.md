@@ -10,10 +10,290 @@ CellFoundry is a general-purpose agent-based simulation platform.  Different bio
 
 - Parameter values (cell speed, adhesion strength, domain size, etc.)
 - Agent function logic (e.g. a custom `cell_cycle.cpp` with asymmetric division)
-- Layer execution order (e.g. run cell cycle *after* movement for fast-proliferating organoids)
+- Layer execution order (e.g. insert a differentiation step between L3 and L7)
 - Variant-specific environment properties registered on the FLAMEGPU2 model
 
-The variant system lets you encode all of these differences in a single Python file (`variants/<name>.py`) plus any modified `.cpp` files (`variants/<name>/`), leaving `model.py` untouched.
+The variant system lets you encode all of these differences in a single Python package (`variants/<name>/`) plus any modified `.cpp` files, leaving `model.py` untouched.
+
+---
+
+## Directory layout
+
+```
+cellfoundry/
+├── model.py                          ← base model (never edited per-variant)
+├── cell_cycle.cpp                    ← base agent functions
+├── cell_move.cpp
+│   ...
+├── variants/
+│   └── organoid/
+│       ├── __init__.py               ← organoid variant module
+│       └── cell_cycle.cpp            ← organoid-specific override
+└── optimizer/
+    ├── optuna_config_organoid_variant.yaml
+    └── ...
+```
+
+Each variant lives in its own subfolder `variants/<name>/`.  The entry point is `variants/<name>/__init__.py`.  The same folder holds only the `.cpp` files that differ from the base model.
+
+> **Path note**: `.cpp` file paths in the `FILES` dict are always relative to the project root (the folder containing `model.py`), e.g. `"variants/organoid/cell_cycle.cpp"`.  
+
+---
+
+## Anatomy of a variant module
+
+A variant module (`__init__.py`) exports up to four objects.  All are optional.
+
+```python
+# variants/my_variant/__init__.py
+
+PARAMS: dict        # parameter overrides  (applied before JSON --overrides)
+FILES:  dict        # *_file variable redirections (applied after all parameters)
+
+def configure_globals(g: dict) -> None: ...   # inject new global flags
+def configure_layers(model, g: dict) -> None: # full layer sequence for this variant
+```
+
+### `PARAMS`
+
+A plain dict mapping parameter names to values.  Any key that exists as a global variable in `model.py` can be overridden.  Scalars are broadcast to lists automatically (same behaviour as `--overrides` JSON).
+
+```python
+PARAMS = {
+    "ORGANOID_ASSAY": True,
+    "N_CELLS": 13,
+    "CELL_RADIUS": [20.0, 20.0, 20.0],     # explicit list
+    "CELL_SPEED_REF": 0.006,                # scalar → broadcast to all types
+    "CYCLE_PHASE_G1_DURATION": [12000.0, 24000.0, 36000.0],
+}
+```
+
+**Priority**: `--overrides` JSON always wins over `PARAMS`.  This means the optimizer can tune any variant parameter without editing the variant file.
+
+### `FILES`
+
+A dict mapping the `*_file` variable names in `model.py` to variant-specific `.cpp` paths (relative to the project root).
+
+```python
+FILES = {
+    "cell_cycle_file": "variants/organoid/cell_cycle.cpp",
+    "cell_move_file":  "variants/organoid/cell_move.cpp",
+}
+```
+
+Only list files that actually differ from the base model.  Unmentioned functions use the base `.cpp` as usual.
+
+### `configure_globals(g)`
+
+Called after `PARAMS` and `FILES` are applied but **before** `model.py` builds the FLAMEGPU2 `ModelDescription`.  Use it to inject global flags that don't exist in the base model and therefore cannot go into `PARAMS`.
+
+```python
+def configure_globals(g: dict) -> None:
+    # Inject a new flag that the custom cell_cycle.cpp relies on.
+    g["CONTACT_INHIBIT_SIGMA"] = 1.5   # [kPa]
+    g["CONTACT_INHIBIT_FACTOR"] = 3.0
+```
+
+Values set here are available as `g["KEY"]` inside `configure_layers`.
+
+### `configure_layers(model, g)`
+
+**This function owns the complete layer sequence** when defined.  If it is present in the variant, `model.py` does *not* call `_build_default_layers()` itself — the variant is responsible for the full L0-L8 stack plus any additions.
+
+Call `g['_build_default_layers']()` to include the standard sequence, then add any variant-specific layers after it.  To insert layers *between* default layers, copy the relevant portion of `_build_default_layers` inline and add your layers at the correct position.
+
+```python
+def configure_layers(model, g: dict) -> None:
+    # --- Register variant-specific environment properties ---
+    _env = g.get("env")
+    if _env is not None:
+        try:
+            _env.newPropertyFloat("CONTACT_INHIBIT_SIGMA",
+                                  g.get("CONTACT_INHIBIT_SIGMA", 1.5))
+            _env.newPropertyFloat("CONTACT_INHIBIT_FACTOR",
+                                  g.get("CONTACT_INHIBIT_FACTOR", 3.0))
+        except Exception:
+            pass  # already registered (safe guard for re-runs)
+
+    # --- Build the full layer sequence ---
+    # Option A: use defaults unchanged (append-style — layers added after L8
+    # are visible to model.py's L7 result only from the next step).
+    g['_build_default_layers']()
+
+    # Option B: insert a layer between L3 and L4 (see section below).
+```
+
+If `configure_layers` is **not** defined, `model.py` runs `_build_default_layers()` automatically.
+
+---
+
+## Running a variant
+
+```bash
+# Basic run
+python model.py --variant organoid
+
+# With additional parameter overrides (JSON wins over variant PARAMS)
+python model.py --variant organoid --overrides configs/organoid_paper.json
+
+# Specify result directory
+python model.py --variant organoid --result-dir result_files/organoid_run_01
+```
+
+If the variant name is not found in `variants/`, the model exits with a clear error listing available variants.
+
+---
+
+## Using variants with the optimizer
+
+Add `model.variant: <name>` to any Optuna YAML config.  The optimizer forwards `--variant <name>` to every trial subprocess automatically.
+
+```yaml
+# optimizer/optuna_config_organoid_variant.yaml
+
+model:
+  variant: organoid          # ← loads variants/organoid/__init__.py for every trial
+  extra_overrides:
+    DEBUG_PRINTING: false
+  timeout: 0
+  cleanup_trials: false
+
+parameters:
+  CELL_SPEED_REF:
+    type: float
+    low: 0.0001
+    high: 0.02
+    log: true
+  # ...
+```
+
+The `parameters:` block is the search space; it overrides only the specific values being tuned while the variant provides all other calibrated defaults.
+
+```bash
+python -m optimizer.optimize --config optimizer/optuna_config_organoid_variant.yaml
+```
+
+---
+
+## Inserting layers between default layers — worked example
+
+**Motivation:** A radial-glia variant needs to run `cell_rg_differentiation` between L3 (metabolism) and L7 (cell–cell interaction) so that updated `epithelialization_level` values are visible to the adhesion function within the same step.
+
+Because FLAMEGPU2 layers are executed in registration order, the only way to insert between existing layers is to register the default layers yourself, with your new layers added at the right positions.  Copy the relevant portion of `_build_default_layers` and expand it:
+
+```python
+# variants/radial_glia/__init__.py
+
+def configure_layers(model, g: dict) -> None:
+    # Register variant env properties first.
+    _env = g.get("env")
+    if _env is not None:
+        try:
+            _env.newPropertyFloat("RG_COMMIT_THRESHOLD", g.get("RG_COMMIT_THRESHOLD", 0.5))
+            # ... other RG properties ...
+        except Exception:
+            pass
+
+    # --- Replicate _build_default_layers with RG layers inserted ---
+    # L0 (VASC) — unchanged, call the default block up to here or copy it:
+    # (copy the L0 block from _build_default_layers as-is)
+
+    # L1: Agent Locations
+    model.newLayer("L1_Agent_Locations").addAgentFunction("BCORNER", "bcorner_output_location_data")
+    if g["INCLUDE_DIFFUSION"]:
+        model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_grid_location_data")
+    if g["INCLUDE_CELLS"]:
+        model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_spatial_location_data")
+    # ... (copy remaining L1 lines) ...
+
+    # L2 — copy from _build_default_layers unchanged
+
+    # L3: Metabolism & Cell Cycle — copy from _build_default_layers unchanged
+
+    # *** INSERT: RG differentiation reads L1 spatial message, updates
+    #             epithelialization_level before L7 cell–cell interaction. ***
+    if g["INCLUDE_CELLS"]:
+        model.newLayer("L3b_RG_Differentiation").addAgentFunction("CELL", "cell_rg_differentiation")
+
+    # L4-L6: Diffusion — copy from _build_default_layers unchanged
+
+    # *** INSERT: RG polarity update reads updated diffusion field. ***
+    if g["INCLUDE_CELLS"]:
+        model.newLayer("L6b_RG_Polarity_Update").addAgentFunction("CELL", "cell_rg_polarity_update")
+
+    # L7-L8: Mechanics and Movement — copy from _build_default_layers unchanged
+```
+
+The complete `_build_default_layers` source is in `model.py` (search for `def _build_default_layers`).  Copy only the portions you need to replicate; omit subsystems your variant disables.
+
+> **Maintenance note**: if `_build_default_layers` in `model.py` ever gains a new layer, variants that replicate it manually will not pick up the change automatically.  
+
+---
+
+## Adding variant-specific environment properties
+
+Register them inside `configure_layers` using the live `env` object from globals:
+
+```python
+def configure_layers(model, g: dict) -> None:
+    _env = g.get("env")
+    if _env is not None:
+        try:
+            _env.newPropertyFloat("MY_PARAM", g.get("MY_PARAM", 1.0))
+        except Exception:
+            pass  # already registered (safe guard for re-runs)
+    g['_build_default_layers']()
+```
+
+The `try/except` guard prevents errors if the model is restarted or called multiple times in the same process.
+
+---
+
+## Creating a new variant — step-by-step checklist
+
+1. **Create `variants/<name>/`** with an `__init__.py` containing `PARAMS`, `FILES`, and (optionally) `configure_globals` / `configure_layers`.
+2. **Add only the `.cpp` files that differ** from the base model to the same folder.  Copy the relevant base `.cpp`, apply your changes, and document the diff clearly.
+3. **Test the direct run**:
+   ```bash
+   python model.py --variant <name>
+   ```
+4. If optimizing, **create `optimizer/optuna_config_<name>_variant.yaml`** with `model.variant: <name>` and the search space.
+5. **Do not edit `model.py`** unless you need a new feature flag pre-defined with a sensible default (add it near the other `INCLUDE_*` flags and override it via `PARAMS`).  For new agent variables or message variables there is no alternative — add them to `model.py` behind an `INCLUDE_*` guard.
+
+---
+
+## What variants cannot do (and what to do instead)
+
+| Need | Solution |
+|---|---|
+| Add a brand-new agent type with its own message list | Add it to `model.py` behind an `INCLUDE_*` flag; enable it via `PARAMS` |
+| Add new agent variables or message variables | Add them to `model.py`; they default to zero and are harmless in unrelated assays |
+| Override a parameter that doesn't yet exist in `model.py` | Add it to `model.py` with a sensible default, then override in `PARAMS` |
+
+The principle is: **variants encode biological deltas; structural additions go into the main model**.  This keeps `model.py` as the single source of truth for what the simulator is capable of.
+
+---
+
+## Reference: execution flow with a variant loaded
+
+```
+python model.py --variant organoid --overrides configs/extra.json
+
+  1. model.py default parameters defined
+  2. --variant organoid parsed from _ORIGINAL_ARGV
+  3. variants/organoid/__init__.py loaded via importlib
+  4. variant.PARAMS applied  →  organoid baseline set
+  5. --overrides extra.json parsed and applied  →  JSON wins over PARAMS
+  6. _file variables assigned (e.g. cell_cycle_file = "cell_cycle.cpp")
+  7. variant.FILES applied   →  cell_cycle_file = "variants/organoid/cell_cycle.cpp"
+  8. variant.configure_globals(globals()) called  →  new flags injected
+  9. FLAMEGPU2 ModelDescription built (agents, messages, env properties)
+ 10. variant.configure_layers(model, globals()) called
+       → variant calls g['_build_default_layers']() for the standard L0-L8 stack
+       → variant registers extra env properties
+       (if configure_layers is absent, model.py calls _build_default_layers() directly)
+ 11. Logging, simulation run, output saved
+```
 
 ---
 

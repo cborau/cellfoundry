@@ -23,13 +23,14 @@ Structure of this file
               broadcast to all cell types automatically.
     FILES   — maps *_file variable names to variant-specific .cpp paths.
               Paths are relative to the project root (CURR_PATH).
+    configure_globals(g)
+            — optional callback called before model.py builds the
+              ModelDescription.  Receives the current module globals dict.
     configure_layers(model, g)
-            — optional callback injected into the layer-building section of
-              model.py.  Receives the pyflamegpu.ModelDescription object and
-              the current module globals dict.  Use it to:
-                (a) insert new layers at a named injection point, or
-                (b) re-add a suppressed default layer at a different position
-                    (suppress it via a boolean in PARAMS, see tutorial).
+            — owns the full layer sequence for this variant.  Calls
+              g['_build_default_layers']() to include the base L0-L8 stack,
+              then registers variant-specific environment properties.
+              See Tutorial-Model-Variants.md for details.
 """
 
 from __future__ import annotations
@@ -125,49 +126,36 @@ def configure_globals(g: dict) -> None:
 
     Use this for feature flags that are brand-new to this variant and therefore
     cannot be pre-listed in PARAMS (which only overrides *existing* globals).
-
-    For the organoid variant, no new flags are required by default.  The
-    contact-inhibition environment properties needed by the custom
-    cell_cycle.cpp are registered in configure_layers() below.
     """
-    # Example (not needed unless VARIANT_SUPPRESS_LAYERS is active):
     g["ORGANOID_CONTACT_INHIBIT_SIGMA"] = 1.5  # [kPa]
     g["ORGANOID_CONTACT_INHIBIT_FACTOR"] = 3.0
-    pass
 
 
 # ---------------------------------------------------------------------------
-# configure_layers — layer injection callback
+# configure_layers — full layer sequence for this variant
 # ---------------------------------------------------------------------------
 def configure_layers(model, g: dict) -> None:
-    """Inject variant-specific simulation layers and environment properties.
+    """Define the full simulation layer sequence for the organoid variant.
 
-    Called from model.py immediately after all default layers have been added.
-    ``model`` is the live ``pyflamegpu.ModelDescription`` instance.
-    ``g`` is ``globals()`` from model.py at the time of the call.
+    This variant does not change layer ordering, so it delegates to the
+    default L0-L8 stack via g['_build_default_layers']() and then registers
+    the variant-specific environment properties consumed by cell_cycle.cpp.
 
-    New layers added here appear AFTER all default layers.  Layer reordering
-    (moving an existing layer to a different position) is not supported via
-    this hook — it requires a surgical guard in model.py for that specific
-    layer.  See Tutorial-Model-Variants.md for details.
-
-    New environment properties
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Variant-specific environment properties read by custom .cpp files must be
-    registered here on ``g["env"]`` (the ModelDescription's environment
-    object, already stored in model.py globals).
+    Variants that need to insert or reorder layers should replicate the
+    relevant portion of _build_default_layers inline — see
+    Tutorial-Model-Variants.md for the full pattern.
     """
+    # Build the standard L0-L8 layer sequence unchanged.
+    g["_build_default_layers"]()
+
     # Register contact-inhibition parameters read by the custom cell_cycle.cpp.
     # Guard with try/except so re-running in the same Python process is safe.
     _env = g.get("env")
     if _env is not None:
         try:
-            _env.newPropertyFloat("ORGANOID_CONTACT_INHIBIT_SIGMA", 1.5)
-            _env.newPropertyFloat("ORGANOID_CONTACT_INHIBIT_FACTOR", 3.0)
+            _env.newPropertyFloat("ORGANOID_CONTACT_INHIBIT_SIGMA",
+                                  g.get("ORGANOID_CONTACT_INHIBIT_SIGMA", 1.5))
+            _env.newPropertyFloat("ORGANOID_CONTACT_INHIBIT_FACTOR",
+                                  g.get("ORGANOID_CONTACT_INHIBIT_FACTOR", 3.0))
         except Exception:
-            pass  # property already registered (safe to ignore)
-
-    # Example: add a custom stats layer (requires a matching RTC function).
-    # if g.get("INCLUDE_ORGANOID_STATS", False):
-    #     model.newLayer("L9_Organoid_Stats").addAgentFunction("CELL", "cell_organoid_stats")
-
+            pass  # property already registered (safe to ignore on re-runs)
