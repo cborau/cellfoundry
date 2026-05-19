@@ -2709,6 +2709,7 @@ class ModelParameterConfig:
         init_cell_conc_mass_vals: list = None,
         init_cell_consumption_rates: list = None,
         init_cell_production_rates: list = None,
+        de_novo_production: list = None,
         init_cell_reaction_rates: list = None,
         # Cell interactions & derived
         dead_cells_disappear: bool = None,
@@ -2922,6 +2923,7 @@ class ModelParameterConfig:
         self.INIT_CELL_CONC_MASS_VALS = init_cell_conc_mass_vals
         self.INIT_CELL_CONSUMPTION_RATES = init_cell_consumption_rates
         self.INIT_CELL_PRODUCTION_RATES = init_cell_production_rates
+        self.DE_NOVO_PRODUCTION = de_novo_production
         self.INIT_CELL_REACTION_RATES = init_cell_reaction_rates
         self.DEAD_CELLS_DISAPPEAR = dead_cells_disappear
         self.INCLUDE_CELL_FNODE_REPULSION = include_cell_fnode_repulsion
@@ -3478,6 +3480,7 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         init_cell_conc_mass_vals=ns.get("INIT_CELL_CONC_MASS_VALS"),
         init_cell_consumption_rates=ns.get("INIT_CELL_CONSUMPTION_RATES"),
         init_cell_production_rates=ns.get("INIT_CELL_PRODUCTION_RATES"),
+        de_novo_production=ns.get("DE_NOVO_PRODUCTION"),
         init_cell_reaction_rates=ns.get("INIT_CELL_REACTION_RATES"),
         dead_cells_disappear=ns.get("DEAD_CELLS_DISAPPEAR"),
         include_cell_fnode_repulsion=ns.get("INCLUDE_CELL_FNODE_REPULSION"),

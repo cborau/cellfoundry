@@ -87,7 +87,12 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
   gk = (gk < 0) ? 0 : (gk >= Nz ? Nz - 1 : gk);
   const uint32_t c_idx = (uint32_t)(gi * (Ny * Nz) + gj * Nz + gk);
 
-  // Local morphogen (species 2) concentration
+  // Local morphogen (species 2) concentration – sampled from the ECM macro grid at this cell's
+  // nearest voxel.  This is the EXTRACELLULAR concentration (µM), NOT the cell's intracellular
+  // sp2 amount stored in the cell variable C_sp[2].  The intracellular quantity is managed by
+  // cell_ecm_interaction_metabolism and represents morphogen that has been taken up or retained
+  // inside the cell.  Only morphogen_local (the ECM gradient) drives differentiation; C_sp[2] is
+  // a different compartment and is not used here.
   const float local_sp2 = fmaxf((float)C_SP_MACRO[2][c_idx], 0.0f);
 
   // -------------------------------------------------------------------------

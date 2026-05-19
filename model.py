@@ -43,6 +43,7 @@ SAVE_PICKLE = True  # If True, dumps model configuration into a pickle file for 
 SHOW_PLOTS = False  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
 SAVE_EVERY_N_STEPS = 20 # Affects both the .vtk files and the Dataframes storing boundary data
+DEBUG_PRINT_INTERVAL = 0  # [steps] Print live debug stats every N steps (0 = disabled). Only active when INCLUDE_RG_VARIABLES is True.
 
 CURR_PATH = pathlib.Path(__file__).resolve().parent
 RES_PATH = CURR_PATH / 'result_files'
@@ -73,7 +74,7 @@ ECM_D_DUMPING = 0.04  # [nN·s/um]
 ECM_ETA = 0.15  # [nN·s/µm] Effective drag for overdamped FNODE motion (calibration parameter)
 
 #BOUNDARY_COORDS = [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]  # +X,-X,+Y,-Y,+Z,-Z
-BOUNDARY_COORDS = [500.0, -500.0, 500.0, -500.0, 500.0, -500.0]# microdevice dimensions in um
+BOUNDARY_COORDS = [75.0, -75.0, 75.0, -75.0, 75.0, -75.0]  # microdevice dimensions in um
 #BOUNDARY_COORDS = [coord / 1000.0 for coord in BOUNDARY_COORDS] # in mm
 BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
 BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[um/s]
@@ -232,6 +233,7 @@ ORGANOID_ORIENTATION_NOISE = 0.0  # [rad] Std-dev of Gaussian angular noise adde
 MONOLAYER_ASSAY = True  # If True, cells are initialized in a monolayer at the bottom of the domain (e.g. near -Z boundary) to simulate a 2D culture. 
 MONOLAYER_CELL_TYPE_RATIOS = [70, 20, 10]  # Relative proportions of each cell type in the MONOLAYER_ASSAY init. Must have length N_CELL_TYPES.
 MONOLAYER_CLUSTER_RADIUS = None  # [µm] If set, cells are seeded inside a disc of this radius centred at (0,0) on the monolayer plane, rather than spread over the full domain. Useful when the ECM domain is large but cells must start close enough to interact mechanically.
+MONOLAYER_Z = None  # [µm] z-coordinate of the monolayer plane for MONOLAYER_ASSAY. If None, defaults to coord_boundary_z_neg (the bottom boundary). Set to 0.0 to place cells in the centre of the domain, away from absorbing boundaries.
 
 
 # Per-cell-type mechanical & morphological properties
@@ -320,6 +322,9 @@ INIT_CELL_CONC_MASS_VALS = [x for x in INIT_CELL_CONCENTRATION_VALS]
 INIT_ECM_SAT_CONCENTRATION_VALS = [0.0, 0.0, 0.0]  # initial saturation concentration of each species on the ECM agents
 INIT_CELL_CONSUMPTION_RATES = [0.0, 0.0, 0.0]  # base consumption rate of each species by the CELL agents 
 INIT_CELL_PRODUCTION_RATES = [0.0, 0.0, 0.0]  # base production rate of each species by the CELL agents 
+DE_NOVO_PRODUCTION = [0, 0, 0]  # [bool per species] 1 = cells synthesise this species de-novo (no intracellular-pool
+                                # depletion on secretion; PhysiCell-style source term). 0 = mass-conservative:
+                                # the cell can only secrete what it already holds in its intracellular pool.
 INIT_CELL_REACTION_RATES = [0.0, 0.0, 0.0]  # base metabolic reaction rates of each species by the CELL agents 
 
 # Species index mapping for death pathways
@@ -948,6 +953,8 @@ env.newPropertyUInt("INCLUDE_CELL_CELL_INTERACTION", INCLUDE_CELL_CELL_INTERACTI
 env.newPropertyUInt("INCLUDE_CELL_FNODE_REPULSION", INCLUDE_CELL_FNODE_REPULSION)
 env.newPropertyUInt("DEAD_CELLS_DISAPPEAR", DEAD_CELLS_DISAPPEAR)
 env.newPropertyUInt("PERIODIC_BOUNDARIES_FOR_CELLS", PERIODIC_BOUNDARIES_FOR_CELLS)
+env.newPropertyUInt("MONOLAYER_ASSAY", MONOLAYER_ASSAY)
+env.newPropertyFloat("MONOLAYER_Z_PLANE", float(MONOLAYER_Z) if MONOLAYER_Z is not None else float(BOUNDARY_COORDS[5]))
 env.newPropertyUInt("N_CELLS", N_CELLS)
 env.newPropertyArrayFloat("CELL_K_ELAST", CELL_K_ELAST)
 env.newPropertyArrayFloat("CELL_D_DUMPING", CELL_D_DUMPING)
@@ -981,6 +988,7 @@ env.newPropertyArrayFloat("DAMAGE_DEATH_THRESHOLD", DAMAGE_DEATH_THRESHOLD)
 env.newPropertyArrayFloat("CELL_CONSUMPTION_MULTIPLIER", CELL_CONSUMPTION_MULTIPLIER)
 env.newPropertyArrayFloat("CELL_PRODUCTION_MULTIPLIER", CELL_PRODUCTION_MULTIPLIER)
 env.newPropertyArrayFloat("INIT_CELL_PRODUCTION_RATES", INIT_CELL_PRODUCTION_RATES)  # base rates as env property for variant access in C++
+env.newPropertyArrayUInt("DE_NOVO_PRODUCTION", DE_NOVO_PRODUCTION)  # 1 = de-novo secretion (no pool depletion), 0 = mass-conserved
 env.newPropertyArrayFloat("CELL_REACTION_MULTIPLIER", CELL_REACTION_MULTIPLIER)
 # Species index mapping for death pathways
 env.newPropertyUInt("OXYGEN_SPECIES_INDEX", OXYGEN_SPECIES_INDEX)
@@ -1820,7 +1828,7 @@ if INCLUDE_VASCULARIZATION:
 class initAgentPopulations(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
         global INCLUDE_CELLS, N_CELLS, INIT_CELL_CONCENTRATION_VALS, INIT_CELL_REACTION_RATES
-        global INIT_CELL_CONC_MASS_VALS, INIT_CELL_CONSUMPTION_RATES, INIT_CELL_PRODUCTION_RATES
+        global INIT_CELL_CONC_MASS_VALS, INIT_CELL_CONSUMPTION_RATES, INIT_CELL_PRODUCTION_RATES, DE_NOVO_PRODUCTION
         global INCLUDE_FOCAL_ADHESIONS, N_ANCHOR_POINTS, INIT_N_FOCAD_PER_CELL, CELL_RADIUS, CELL_NUCLEUS_RADIUS
         global FOCAD_REST_LENGTH_0, FOCAD_K_FA, FOCAD_F_MAX, FOCAD_K_ON, FOCAD_K_OFF_0, FOCAD_F_C, FOCAD_K_REINF
         global INCLUDE_DIFFUSION, N_SPECIES, DIFFUSION_COEFF_MULTI
@@ -1836,6 +1844,8 @@ class initAgentPopulations(pyflamegpu.HostFunction):
         coord_boundary_y_neg = coord_boundary[3]
         coord_boundary_z_pos = coord_boundary[4]
         coord_boundary_z_neg = coord_boundary[5]
+        # Monolayer z-plane: use explicit MONOLAYER_Z override if set, else default to z-neg boundary.
+        _monolayer_z = MONOLAYER_Z if (MONOLAYER_Z is not None) else coord_boundary_z_neg
         print("--- Initializing CORNERS (8)")
         print("  |-> current_id:", current_id)
 
@@ -1988,15 +1998,15 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 print(f"  |-> Organoid assay: cells clustered in sphere of radius {ORGANOID_INIT_RADIUS} um at origin")
                 print(f"  |-> Cell orientations: radially outward (noise_sigma={ORGANOID_ORIENTATION_NOISE:.3f} rad)")
             elif MONOLAYER_ASSAY:
-                cell_pos = getCoordsOnPlane("z", coord_boundary_z_neg, N_CELLS, coord_boundary,
+                cell_pos = getCoordsOnPlane("z", _monolayer_z, N_CELLS, coord_boundary,
                                             min_dist=CELL_RADIUS[0], mode="random",
                                             cluster_radius=MONOLAYER_CLUSTER_RADIUS)
                 cell_orientations = getRandomOrientationOnPlane("z",N_CELLS)
                 cell_types = getCellTypeList(N_CELLS, N_CELL_TYPES, MONOLAYER_CELL_TYPE_RATIOS, shuffle=True)
                 if MONOLAYER_CLUSTER_RADIUS is not None:
-                    print(f"  |-> Monolayer assay: cells seeded in a cluster of radius {MONOLAYER_CLUSTER_RADIUS} um at z={coord_boundary_z_neg} um")
+                    print(f"  |-> Monolayer assay: cells seeded in a cluster of radius {MONOLAYER_CLUSTER_RADIUS} um at z={_monolayer_z} um")
                 else:
-                    print(f"  |-> Monolayer assay: cells randomly distributed in a monolayer at z={coord_boundary_z_neg} um")
+                    print(f"  |-> Monolayer assay: cells randomly distributed in a monolayer at z={_monolayer_z} um")
                 print(f"  |-> Cell orientations: random")
             else:
                 cached_cell_init = loadCachedCellInitialization(N_CELLS, coord_boundary, CELL_INIT_CACHE_DIR, atol=EPSILON)
@@ -2768,6 +2778,64 @@ class UpdateAgentCount(pyflamegpu.HostFunction): # if cells proliferate, N_CELLS
         FLAMEGPU.environment.setPropertyUInt("N_CELLS", FLAMEGPU.agent("CELL").count())
 
 
+class PrintDebugStats(pyflamegpu.HostFunction):
+    """Print per-step summary of cell-type counts and RG differentiation state.
+
+    Activated only when INCLUDE_RG_VARIABLES is True and DEBUG_PRINT_INTERVAL > 0.
+    Runs every DEBUG_PRINT_INTERVAL steps (and at step 1) to give a live
+    progress indicator without cluttering the output every step.
+    """
+    def __init__(self):
+        super().__init__()
+
+    def run(self, FLAMEGPU):
+        global INCLUDE_RG_VARIABLES, DEBUG_PRINT_INTERVAL, N_CELL_TYPES
+
+        if not INCLUDE_RG_VARIABLES or DEBUG_PRINT_INTERVAL <= 0:
+            return
+
+        step = FLAMEGPU.getStepCounter() + 1
+        if step != 1 and step % DEBUG_PRINT_INTERVAL != 0:
+            return
+
+        time_h = step * FLAMEGPU.environment.getPropertyFloat("TIME_STEP") / 3600.0
+        type_counts = [0] * N_CELL_TYPES
+        commit_sum = 0.0
+        commit_max = 0.0
+        morph_sum  = 0.0
+        morph_max  = 0.0
+        n_alive = 0
+
+        for ai in FLAMEGPU.agent("CELL").getPopulationData():
+            if int(ai.getVariableInt("dead")) == 1:
+                continue
+            ct = int(ai.getVariableInt("cell_type"))
+            if 0 <= ct < N_CELL_TYPES:
+                type_counts[ct] += 1
+            commit = float(ai.getVariableFloat("rg_commit_level"))
+            morph  = float(ai.getVariableFloat("morphogen_local"))
+            commit_sum += commit
+            morph_sum  += morph
+            if commit > commit_max:
+                commit_max = commit
+            if morph > morph_max:
+                morph_max = morph
+            n_alive += 1
+
+        mean_commit = commit_sum / n_alive if n_alive > 0 else 0.0
+        mean_morph  = morph_sum  / n_alive if n_alive > 0 else 0.0
+        _names = ["iPSC", "NPC", "RG"]
+        type_str = "  ".join(
+            f"{(_names[i] if i < len(_names) else f'type{i}')}={type_counts[i]}"
+            for i in range(N_CELL_TYPES)
+        )
+        print(
+            f"[DBG t={time_h:6.2f}h step={step:5d}]  {type_str}"
+            f"  | rg_commit mean={mean_commit:.4f} max={commit_max:.4f}"
+            f"  | morphogen mean={mean_morph:.3e} max={morph_max:.3e}"
+        )
+
+
 if INCLUDE_DIFFUSION:
     ubcm = UpdateBoundaryConcentrationMulti()
     model.addStepFunction(ubcm)
@@ -2788,6 +2856,10 @@ if INCLUDE_FIBRE_NETWORK:
 sdf = SaveDataToFile()
 # SaveDataToFile host function; behavior is controlled by SAVE_DATA_TO_FILE flag.
 model.addStepFunction(sdf)
+
+if INCLUDE_RG_VARIABLES and DEBUG_PRINT_INTERVAL > 0:
+    pds = PrintDebugStats()
+    model.addStepFunction(pds)
 
 if SAVE_PICKLE and INCLUDE_CELLS:
     csm = CollectCellMetrics()

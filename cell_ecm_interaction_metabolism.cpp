@@ -123,7 +123,11 @@ FLAMEGPU_AGENT_FUNCTION(cell_ecm_interaction_metabolism, flamegpu::MessageArray3
     //
     // Clamp BOTH directions to prevent negative concentrations/amounts:
     //   - Uptake (deltaM_voxel_prop < 0): cannot remove more than M_voxel_old
-    //   - Secretion (deltaM_voxel_prop > 0): cannot remove more than M_cell_old
+    //   - Secretion (deltaM_voxel_prop > 0):
+    //       DE_NOVO_PRODUCTION[i] == 1 → de-novo synthesis: no intracellular-pool
+    //         depletion (PhysiCell-style source term, cell creates mass in situ).
+    //       DE_NOVO_PRODUCTION[i] == 0 → mass-conserved: cell can only secrete
+    //         what it already holds; clamped to M_cell_old.
     // -------------------------------------------------------------------------
 
     // ECM concentration at t^n (read-only message snapshot)
@@ -131,6 +135,10 @@ FLAMEGPU_AGENT_FUNCTION(cell_ecm_interaction_metabolism, flamegpu::MessageArray3
     C_sp_sat[i] = message.getVariable<float, N_SPECIES>("C_sp_sat", i);
     // Cell amount at t^n (mass-like)
     const float M_cell_old = M_sp[i];
+
+    // De-novo flag: 1 = cells synthesise this species from other substrates
+    // (secretion is not limited by the intracellular pool).
+    const unsigned int de_novo = FLAMEGPU->environment.getProperty<unsigned int, N_SPECIES>("DE_NOVO_PRODUCTION", i);
 
     // Volume coupling
     const float alpha = agent_volume / ECM_VOXEL_VOLUME;
@@ -156,17 +164,24 @@ FLAMEGPU_AGENT_FUNCTION(cell_ecm_interaction_metabolism, flamegpu::MessageArray3
       const float uptake_clamped = fminf(uptake, M_voxel_old);
       deltaM_voxel = -uptake_clamped;
     } else if (deltaM_voxel_prop > 0.0f) {
-      // Secretion: voxel gains mass, cell loses mass
-      const float secretion = deltaM_voxel_prop;
-      const float secretion_clamped = fminf(secretion, M_cell_old);
-      deltaM_voxel = secretion_clamped;
+      if (de_novo) {
+        // De-novo secretion: ECM gains mass, cell synthesises in situ — no pool depletion.
+        deltaM_voxel = deltaM_voxel_prop;
+      } else {
+        // Mass-conserved secretion: cell can only give what it already holds.
+        deltaM_voxel = fminf(deltaM_voxel_prop, M_cell_old);
+      }
     }
 
     //printf("  Species %d: alpha=%2.6f, C_ecm_old=%2.6f, C_ecm_prop=%2.6f, C_sp_sat=%2.6f, M_voxel_old=%2.6f, M_cell_old=%2.6f, deltaM_voxel_prop=%2.6f, deltaM_voxel=%2.6f \n", i, alpha, C_ecm_old, C_ecm_prop, C_sp_sat[i], M_voxel_old, M_cell_old, deltaM_voxel_prop, deltaM_voxel);
 
-    // Apply clamped mass transfer (conservative)
+    // Apply mass transfer.
     const float M_voxel_new = M_voxel_old + deltaM_voxel;
-    const float M_cell_new  = M_cell_old  - deltaM_voxel;
+    // Uptake (deltaM_voxel < 0): cell gains mass from ECM.
+    // De-novo secretion (de_novo=1, deltaM_voxel >= 0): cell pool unchanged.
+    // Mass-conserved secretion (de_novo=0, deltaM_voxel >= 0): cell pool depleted.
+    const float M_cell_new  = de_novo ? M_cell_old - fminf(deltaM_voxel, 0.0f)
+                                      : M_cell_old - deltaM_voxel;
 
     // Convert back to concentrations
     const float C_ecm_new = M_voxel_new / ECM_VOXEL_VOLUME;
