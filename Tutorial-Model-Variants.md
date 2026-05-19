@@ -249,6 +249,160 @@ The `try/except` guard prevents errors if the model is restarted or called multi
 
 ---
 
+## Variant-gated agent variables
+
+Some variants introduce per-cell biological state (e.g. RG differentiation progress, apical polarity vector) that is irrelevant — and wastes GPU register pressure, shared memory, and VTK file size — for every unrelated assay running on the same codebase.
+
+The solution is to guard the new variables behind a boolean flag that is `True` only when the appropriate variant is loaded.
+
+### Pattern
+
+**Step 1 — model.py: define the gate flag**
+
+Add one list of variant names and one derived boolean near the other `INCLUDE_*` flags:
+
+```python
+# model.py  (~line 235, near other INCLUDE_* flags)
+VARIANTS_WITH_RG_VARIABLES = ["radial_glia"]        # extend if another variant reuses them
+INCLUDE_RG_VARIABLES = (_VARIANT_NAME in VARIANTS_WITH_RG_VARIABLES)
+```
+
+`_VARIANT_NAME` is the string passed via `--variant` (empty string / `None` when no variant is active), so `INCLUDE_RG_VARIABLES` is `False` for all base runs and all non-RG variants at zero cost.
+
+**Step 2 — model.py: gate CELL agent variable declarations**
+
+Wrap the new `newVariable*` calls behind the flag.  FLAMEGPU2 allocates GPU memory per-variable per-agent at compile time, so any variable registered here occupies memory for every cell in every run:
+
+```python
+# model.py — in the CELL agent variable section
+if INCLUDE_RG_VARIABLES:
+    CELL_agent.newVariableFloat("rg_commit_level",         0.0)  # [-] logistic commit state
+    CELL_agent.newVariableFloat("epithelialization_level", 0.0)  # [-] junction coverage
+    CELL_agent.newVariableFloat("rosette_maturity",        0.0)  # [-] rosette formation index
+    CELL_agent.newVariableFloat("apx", 0.0)  # apical vector x
+    CELL_agent.newVariableFloat("apy", 0.0)  # apical vector y
+    CELL_agent.newVariableFloat("apz", 0.0)  # apical vector z
+    CELL_agent.newVariableFloat("rg_neighbour_density", 0.0)  # local RG count (normalised)
+    CELL_agent.newVariableFloat("ecm_macro_sp2",        0.0)  # cached ECM morphogen sample
+    CELL_agent.newVariableInt("rg_committed", 0)              # 0/1 irreversible commit flag
+```
+
+**Step 3 — model.py: gate spatial-message variable declarations**
+
+Spatial messages are broadcast to every cell within the search radius on every step.  Each extra float adds 4 bytes to every message packet:
+
+```python
+# model.py — in the cell_spatial_location_message variable block
+if INCLUDE_RG_VARIABLES:
+    CELL_spatial_location_message.newVariableFloat("rg_commit_level")
+    CELL_spatial_location_message.newVariableFloat("epithelialization_level")
+    CELL_spatial_location_message.newVariableFloat("apx")
+    CELL_spatial_location_message.newVariableFloat("apy")
+    CELL_spatial_location_message.newVariableFloat("apz")
+```
+
+**Step 4 — model.py: gate host-init values**
+
+Inside the CELL host-init loop, set the extra variables only when the flag is active:
+
+```python
+# model.py — inside the "for i in range(N_CELLS):" loop
+if INCLUDE_RG_VARIABLES:
+    _ap_angle = np.random.uniform(0.0, 2.0 * np.pi)  # random in-plane apical direction
+    instance.setVariableFloat("apx", float(np.cos(_ap_angle)))
+    instance.setVariableFloat("apy", float(np.sin(_ap_angle)))
+    instance.setVariableFloat("apz", 0.0)
+    instance.setVariableFloat("rg_commit_level",         0.0)
+    instance.setVariableFloat("epithelialization_level", 0.0)
+    instance.setVariableFloat("rosette_maturity",        0.0)
+    instance.setVariableFloat("rg_neighbour_density",    0.0)
+    instance.setVariableFloat("ecm_macro_sp2",           0.0)
+    instance.setVariableInt("rg_committed", 0)
+```
+
+**Step 5 — model.py: build the extra-VTK lists**
+
+Define two lists in `model.py` (where `SaveDataToFile.run` can pick them up via globals) that describe which extra per-cell scalars and vectors to write:
+
+```python
+# model.py — near the SaveDataToFile class or just before the simulation run
+CELL_VTK_EXTRA_SCALARS = []   # list of (vtk_name, agent_variable_name, dtype_str)
+CELL_VTK_EXTRA_VECTORS = []   # list of (vtk_name, vx_var, vy_var, vz_var)
+if INCLUDE_RG_VARIABLES:
+    CELL_VTK_EXTRA_SCALARS = [
+        ("rg_commit_level",         "rg_commit_level",         "float"),
+        ("epithelialization_level", "epithelialization_level", "float"),
+        ("rosette_maturity",        "rosette_maturity",        "float"),
+        ("rg_neighbour_density",    "rg_neighbour_density",    "float"),
+        ("ecm_macro_sp2",           "ecm_macro_sp2",           "float"),
+        ("rg_committed",            "rg_committed",            "int"),
+    ]
+    CELL_VTK_EXTRA_VECTORS = [
+        ("apical_vector", "apx", "apy", "apz"),
+    ]
+```
+
+Pass them through the config dict in `SaveDataToFile.run()`:
+```python
+config={
+    # ... existing keys ...
+    "CELL_VTK_EXTRA_SCALARS": CELL_VTK_EXTRA_SCALARS,
+    "CELL_VTK_EXTRA_VECTORS": CELL_VTK_EXTRA_VECTORS,
+}
+```
+
+**Step 6 — helper_module.py: write the extra fields**
+
+In `save_data_to_file_step`, after the fixed orientation VECTORS block and still inside the `with open(...)` block, add:
+
+```python
+# Extra per-cell scalars injected by variants
+for vtk_name, var_name, dtype in config.get("CELL_VTK_EXTRA_SCALARS", []):
+    fmt = "{:.4f} \n" if dtype == "float" else "{} \n"
+    file.write(f"SCALARS {vtk_name} {dtype} 1\n")
+    file.write("LOOKUP_TABLE default\n")
+    extra_data = []
+    for ai in av:
+        val = ai.getVariableFloat(var_name) if dtype == "float" else ai.getVariableInt(var_name)
+        extra_data.append(val)
+    for val in extra_data:
+        file.write(fmt.format(val))
+    for i in range(num_cells):
+        for _ in range(num_anchor_points):
+            file.write(fmt.format(extra_data[i]))
+
+# Extra per-cell vectors injected by variants
+for vtk_name, vx_var, vy_var, vz_var in config.get("CELL_VTK_EXTRA_VECTORS", []):
+    file.write(f"VECTORS {vtk_name} float\n")
+    for ai in av:
+        vx = ai.getVariableFloat(vx_var)
+        vy = ai.getVariableFloat(vy_var)
+        vz = ai.getVariableFloat(vz_var)
+        file.write(f"{vx:.4f} {vy:.4f} {vz:.4f} \n")
+    for _ in range(num_total_anchor_points):
+        file.write("0.0 0.0 0.0 \n")
+```
+
+### Why this pattern works
+
+| Scenario | `INCLUDE_RG_VARIABLES` | GPU memory | VTK output |
+|---|---|---|---|
+| Base run / any non-RG variant | `False` | no extra | no extra |
+| `--variant radial_glia` | `True` | +9 floats + 1 int per cell | RG fields appended |
+
+The lists `CELL_VTK_EXTRA_SCALARS` / `CELL_VTK_EXTRA_VECTORS` are the only coupling point between `model.py` and `helper_module.py`; no other changes to `helper_module.py` are needed when new variables are added.
+
+### Generalising to other variants
+
+Follow the same naming convention for any variant group that adds biologically-specific per-agent state:
+
+```python
+VARIANTS_WITH_INVASION_VARIABLES = ["tumour_invasion", "wound_healing"]
+INCLUDE_INVASION_VARIABLES = (_VARIANT_NAME in VARIANTS_WITH_INVASION_VARIABLES)
+```
+
+---
+
 ## Creating a new variant — step-by-step checklist
 
 1. **Create `variants/<name>/`** with an `__init__.py` containing `PARAMS`, `FILES`, and (optionally) `configure_globals` / `configure_layers`.

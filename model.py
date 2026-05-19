@@ -230,6 +230,8 @@ ORGANOID_ASSAY = False  # If True, cells are initialized in a small cluster in t
 ORGANOID_INIT_RADIUS = 20.0  # [um] Radius of the initial cell cluster when ORGANOID_ASSAY is True. Cells are placed randomly within a sphere of this radius centered at the domain origin.
 ORGANOID_ORIENTATION_NOISE = 0.0  # [rad] Std-dev of Gaussian angular noise added to the initial radially-outward cell orientations when ORGANOID_ASSAY is True. 0 = perfectly radial; ~0.3 = ~17 deg RMS jitter; increase towards pi for fully random.
 MONOLAYER_ASSAY = True  # If True, cells are initialized in a monolayer at the bottom of the domain (e.g. near -Z boundary) to simulate a 2D culture. 
+MONOLAYER_CELL_TYPE_RATIOS = [70, 20, 10]  # Relative proportions of each cell type in the MONOLAYER_ASSAY init. Must have length N_CELL_TYPES.
+MONOLAYER_CLUSTER_RADIUS = None  # [µm] If set, cells are seeded inside a disc of this radius centred at (0,0) on the monolayer plane, rather than spread over the full domain. Useful when the ECM domain is large but cells must start close enough to interact mechanically.
 
 
 # Per-cell-type mechanical & morphological properties
@@ -496,6 +498,11 @@ if _VARIANT_NAME:
         apply_param_overrides(globals(), _variant_params)
     print(f"[VARIANT] Loaded variant '{_VARIANT_NAME}' from {_variant_path}")
 
+# Variant-gated feature flags.
+# Variants listed here activate extra per-cell variables that would waste GPU memory and VTK bandwidth in unrelated assays.
+VARIANTS_WITH_RG_VARIABLES = ["radial_glia"]  # add variant names here to activate RG variables
+INCLUDE_RG_VARIABLES = (_VARIANT_NAME in VARIANTS_WITH_RG_VARIABLES) if _VARIANT_NAME else False
+
 
 # +====================================================================+
 # | PARAMETER OVERRIDES (for optimization / batch runs)                |
@@ -546,6 +553,7 @@ BPOS_OVER_TIME = pd.DataFrame([BPOS(BOUNDARY_COORDS[0], BOUNDARY_COORDS[1], BOUN
 OSOT = make_dataclass("OSOT", [("strain", float)])
 OSCILLATORY_STRAIN_OVER_TIME = pd.DataFrame([OSOT(0)])
 CELL_SPEED_METRICS = pd.DataFrame()
+RG_METRICS = pd.DataFrame()       # per-cell RG snapshot at final step (radial_glia variant only)
 ORGANOID_METRICS_OVER_TIME = pd.DataFrame()
 
 # Checking for incompatible conditions
@@ -972,6 +980,7 @@ env.newPropertyArrayFloat("DAMAGE_REPAIR_MULTIPLIER", DAMAGE_REPAIR_MULTIPLIER)
 env.newPropertyArrayFloat("DAMAGE_DEATH_THRESHOLD", DAMAGE_DEATH_THRESHOLD)
 env.newPropertyArrayFloat("CELL_CONSUMPTION_MULTIPLIER", CELL_CONSUMPTION_MULTIPLIER)
 env.newPropertyArrayFloat("CELL_PRODUCTION_MULTIPLIER", CELL_PRODUCTION_MULTIPLIER)
+env.newPropertyArrayFloat("INIT_CELL_PRODUCTION_RATES", INIT_CELL_PRODUCTION_RATES)  # base rates as env property for variant access in C++
 env.newPropertyArrayFloat("CELL_REACTION_MULTIPLIER", CELL_REACTION_MULTIPLIER)
 # Species index mapping for death pathways
 env.newPropertyUInt("OXYGEN_SPECIES_INDEX", OXYGEN_SPECIES_INDEX)
@@ -1255,6 +1264,13 @@ if INCLUDE_CELLS:
     CELL_spatial_location_message.newVariableInt("dead")
     CELL_spatial_location_message.newVariableInt("dead_by")
     CELL_spatial_location_message.newVariableInt("cell_type")
+    # Radial-glia variant message variables — registered only when INCLUDE_RG_VARIABLES is True
+    if INCLUDE_RG_VARIABLES:
+        CELL_spatial_location_message.newVariableFloat("rg_commit_level")
+        CELL_spatial_location_message.newVariableFloat("epithelialization_level")
+        CELL_spatial_location_message.newVariableFloat("apx")
+        CELL_spatial_location_message.newVariableFloat("apy")
+        CELL_spatial_location_message.newVariableFloat("apz")
         
     # Set the range and bounds.
     if INCLUDE_FOCAL_ADHESIONS:
@@ -1643,6 +1659,17 @@ if INCLUDE_CELLS:
     CELL_agent.newVariableFloat("eps_eigvec3_x", 0.0) # third principal-strain direction
     CELL_agent.newVariableFloat("eps_eigvec3_y", 0.0)
     CELL_agent.newVariableFloat("eps_eigvec3_z", 0.0)
+    # Radial-glia variant variables — registered only when INCLUDE_RG_VARIABLES is True
+    if INCLUDE_RG_VARIABLES:
+        CELL_agent.newVariableFloat("rg_commit_level",         0.0)  # [-] logistic commit state (0=iPSC, 1=RG)
+        CELL_agent.newVariableFloat("epithelialization_level", 0.0)  # [-] junction coverage (0=unpolarised, 1=epithelial)
+        CELL_agent.newVariableFloat("rosette_maturity",        0.0)  # [-] rosette formation index
+        CELL_agent.newVariableFloat("apx", 0.0)  # apical polarity vector x
+        CELL_agent.newVariableFloat("apy", 0.0)  # apical polarity vector y
+        CELL_agent.newVariableFloat("apz", 0.0)  # apical polarity vector z
+        CELL_agent.newVariableFloat("rg_neighbour_density", 0.0)  # normalised local RG-cell count
+        CELL_agent.newVariableFloat("morphogen_local",      0.0)  # cached ECM morphogen concentration sample (sp2) at cell location
+        CELL_agent.newVariableInt("rg_committed", 0)              # 0/1 irreversible commit flag
     if INCLUDE_FOCAL_ADHESIONS:  
         CELL_agent.newRTCFunctionFile("cell_bucket_location_data", cell_bucket_location_data_file).setMessageOutput("cell_bucket_location_message")
         cell_focad_update_fn = CELL_agent.newRTCFunctionFile("cell_focad_update", cell_focad_update_file)
@@ -1961,10 +1988,15 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 print(f"  |-> Organoid assay: cells clustered in sphere of radius {ORGANOID_INIT_RADIUS} um at origin")
                 print(f"  |-> Cell orientations: radially outward (noise_sigma={ORGANOID_ORIENTATION_NOISE:.3f} rad)")
             elif MONOLAYER_ASSAY:
-                cell_pos = getCoordsOnPlane("z", coord_boundary_z_neg, N_CELLS, coord_boundary,min_dist= CELL_RADIUS[0], mode="random")
+                cell_pos = getCoordsOnPlane("z", coord_boundary_z_neg, N_CELLS, coord_boundary,
+                                            min_dist=CELL_RADIUS[0], mode="random",
+                                            cluster_radius=MONOLAYER_CLUSTER_RADIUS)
                 cell_orientations = getRandomOrientationOnPlane("z",N_CELLS)
-                cell_types = getCellTypeList(N_CELLS, N_CELL_TYPES, [70, 20, 10], shuffle=True)
-                print(f"  |-> Monolayer assay: cells randomly distributed in a monolayer at z={coord_boundary_z_neg} um")
+                cell_types = getCellTypeList(N_CELLS, N_CELL_TYPES, MONOLAYER_CELL_TYPE_RATIOS, shuffle=True)
+                if MONOLAYER_CLUSTER_RADIUS is not None:
+                    print(f"  |-> Monolayer assay: cells seeded in a cluster of radius {MONOLAYER_CLUSTER_RADIUS} um at z={coord_boundary_z_neg} um")
+                else:
+                    print(f"  |-> Monolayer assay: cells randomly distributed in a monolayer at z={coord_boundary_z_neg} um")
                 print(f"  |-> Cell orientations: random")
             else:
                 cached_cell_init = loadCachedCellInitialization(N_CELLS, coord_boundary, CELL_INIT_CACHE_DIR, atol=EPSILON)
@@ -2054,6 +2086,17 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableFloat("focad_birth_cooldown", 0.0)
                 instance.setVariableArrayFloat("chemokinesis_promotive_adapt_state", [r * CELL_INIT_CONCENTRATION_MULTIPLIER[cell_type_i] for r in INIT_CELL_CONCENTRATION_VALS])
                 instance.setVariableArrayFloat("chemokinesis_inhibitory_adapt_state", [r * CELL_INIT_CONCENTRATION_MULTIPLIER[cell_type_i] for r in INIT_CELL_CONCENTRATION_VALS])
+                if INCLUDE_RG_VARIABLES:
+                    _ap_angle = np.random.uniform(0.0, 2.0 * np.pi)  # random in-plane apical direction (no established z-polarity)
+                    instance.setVariableFloat("apx", float(np.cos(_ap_angle)))
+                    instance.setVariableFloat("apy", float(np.sin(_ap_angle)))
+                    instance.setVariableFloat("apz", 0.0)
+                    instance.setVariableFloat("rg_commit_level",         0.0)
+                    instance.setVariableFloat("epithelialization_level", 0.0)
+                    instance.setVariableFloat("rosette_maturity",        0.0)
+                    instance.setVariableFloat("rg_neighbour_density",    0.0)
+                    instance.setVariableFloat("morphogen_local",           0.0)
+                    instance.setVariableInt("rg_committed", 0)
 
                 anchor_pos = getRandomCoordsAroundPoint(N_ANCHOR_POINTS, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_NUCLEUS_RADIUS[cell_type_i], on_surface=True)
                 instance.setVariableArrayFloat("x_i", anchor_pos[:, 0].tolist())
@@ -2438,7 +2481,22 @@ class MoveBoundaries(pyflamegpu.HostFunction):
 
         # print ("End of step: ", stepCounter)
 
-
+# VTK extra-field lists — populated by variant-gated flags; empty for base runs
+CELL_VTK_EXTRA_SCALARS = []   # list of (vtk_name, agent_variable_name, dtype_str)
+CELL_VTK_EXTRA_VECTORS = []   # list of (vtk_name, vx_var, vy_var, vz_var)
+if INCLUDE_RG_VARIABLES:
+    CELL_VTK_EXTRA_SCALARS = [
+        ("rg_commit_level",         "rg_commit_level",         "float"),
+        ("epithelialization_level", "epithelialization_level", "float"),
+        ("rosette_maturity",        "rosette_maturity",        "float"),
+        ("rg_neighbour_density",    "rg_neighbour_density",    "float"),
+        ("morphogen_local",        "morphogen_local",        "float"),
+        ("rg_committed",            "rg_committed",            "int"),
+    ]
+    CELL_VTK_EXTRA_VECTORS = [
+        ("apical_vector", "apx", "apy", "apz"),
+    ]
+# TODO: add extra fields for future variants.
 
 class SaveDataToFile(pyflamegpu.HostFunction):
     def __init__(self):
@@ -2476,6 +2534,8 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                 "INCLUDE_VASCULARIZATION": INCLUDE_VASCULARIZATION,
                 "N_VASC_NODES": N_VASC_NODES,
                 "pyflamegpu": pyflamegpu,
+                "CELL_VTK_EXTRA_SCALARS": CELL_VTK_EXTRA_SCALARS,
+                "CELL_VTK_EXTRA_VECTORS": CELL_VTK_EXTRA_VECTORS,
             },
         )
 
@@ -2487,6 +2547,7 @@ class CollectCellMetrics(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
         global INCLUDE_CELLS, STEPS, CELL_SPEED_METRICS, ORGANOID_METRICS_OVER_TIME
         global ORGANOID_ASSAY, SAVE_EVERY_N_STEPS, N_CELL_TYPES
+        global INCLUDE_RG_VARIABLES, RG_METRICS
 
         if not INCLUDE_CELLS:
             return
@@ -2605,6 +2666,28 @@ class CollectCellMetrics(pyflamegpu.HostFunction):
                 "veff": veff,
             })
         CELL_SPEED_METRICS = pd.DataFrame(rows)
+
+        # --- RG final snapshot (radial_glia variant only, final step only) ---
+        if INCLUDE_RG_VARIABLES and is_final:
+            rg_rows = []
+            cell_agent = FLAMEGPU.agent("CELL")
+            for ai in cell_agent.getPopulationData():
+                rg_rows.append({
+                    "id":                    int(ai.getVariableInt("id")),
+                    "cell_type":             int(ai.getVariableInt("cell_type")),
+                    "dead":                  int(ai.getVariableInt("dead")),
+                    "mother_id":             int(ai.getVariableInt("mother_id")),
+                    "rg_commit_level":       float(ai.getVariableFloat("rg_commit_level")),
+                    "epithelialization_level": float(ai.getVariableFloat("epithelialization_level")),
+                    "rosette_maturity":      float(ai.getVariableFloat("rosette_maturity")),
+                    "rg_neighbour_density":  float(ai.getVariableFloat("rg_neighbour_density")),
+                    "morphogen_local":       float(ai.getVariableFloat("morphogen_local")),
+                    "rg_committed":          int(ai.getVariableInt("rg_committed")),
+                    "apx":                   float(ai.getVariableFloat("apx")),
+                    "apy":                   float(ai.getVariableFloat("apy")),
+                    "apz":                   float(ai.getVariableFloat("apz")),
+                })
+            RG_METRICS = pd.DataFrame(rg_rows)
 
 
 class CheckFNODEStability(pyflamegpu.HostFunction):
@@ -3118,7 +3201,7 @@ POISSON_RATIO_OVER_TIME = -1 * incL_dir1 / incL_dir2
 def manageLogs(steps, is_ensemble, idx):
     global SAVE_EVERY_N_STEPS, SAVE_PICKLE, SHOW_PLOTS, RES_PATH, MODEL_CONFIG, EXECUTION_TIME, STEPS
     global BPOS_OVER_TIME, BFORCE_OVER_TIME, BFORCE_SHEAR_OVER_TIME, POISSON_RATIO_OVER_TIME, OSCILLATORY_STRAIN_OVER_TIME
-    global CELL_SPEED_METRICS, ORGANOID_METRICS_OVER_TIME
+    global CELL_SPEED_METRICS, ORGANOID_METRICS_OVER_TIME, RG_METRICS, INCLUDE_RG_VARIABLES
     global INCLUDE_FIBRE_NETWORK, INCLUDE_CELLS, INCLUDE_FOCAL_ADHESIONS, ORGANOID_ASSAY
     ecm_agent_counts = [None] * len(steps)
     counter = 0
@@ -3366,6 +3449,11 @@ def manageLogs(steps, is_ensemble, idx):
             print("FINAL CELL SPEED METRICS")
             print(CELL_SPEED_METRICS)
             print()
+        if INCLUDE_RG_VARIABLES and len(RG_METRICS) > 0:
+            print("============================")
+            print("RG FINAL CELL METRICS")
+            print(RG_METRICS)
+            print()
         if ORGANOID_ASSAY and len(ORGANOID_METRICS_OVER_TIME) > 0:
             print("============================")
             print("ORGANOID METRICS OVER TIME")
@@ -3388,6 +3476,7 @@ def manageLogs(steps, is_ensemble, idx):
                          'FNODE_METRICS_OVER_TIME': FNODE_METRICS_OVER_TIME,
                          'CELL_METRICS_OVER_TIME': CELL_METRICS_OVER_TIME,
                          'CELL_SPEED_METRICS': CELL_SPEED_METRICS,
+                         'RG_FINAL_METRICS': RG_METRICS,
                          'ORGANOID_METRICS_OVER_TIME': ORGANOID_METRICS_OVER_TIME,
                          'POISSON_RATIO_OVER_TIME': POISSON_RATIO_OVER_TIME,
                          'OSCILLATORY_STRAIN_OVER_TIME': OSCILLATORY_STRAIN_OVER_TIME,

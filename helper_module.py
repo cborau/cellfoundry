@@ -717,6 +717,8 @@ def getCoordsOnPlane(
     mode="random",
     min_dist=None,
     grid_dist=None,
+    cluster_radius=None,
+    cluster_center=None,
     rng=None,
     max_attempts=100_000,
 ):
@@ -761,6 +763,20 @@ def getCoordsOnPlane(
 
         If None, a grid is generated automatically based on the plane size and
         n_points.
+
+    cluster_radius : float or None
+        If given (random mode only), all points are placed within a circle of
+        this radius on the plane.  The circle is centred at ``cluster_center``
+        (default: centre of the domain in the two free axes).  Points outside
+        the circle are rejected during sampling.
+
+        Useful when cells should start close enough to interact mechanically
+        while the ECM domain remains large for gradient development.
+
+    cluster_center : tuple of two floats or None
+        Centre of the cluster circle in the two free axes (a, b order
+        following the free-axis ordering: for plane_axis="z" this is (x, y)).
+        Defaults to the midpoint of the domain.
 
     rng : int, np.random.Generator, or None
         Random seed or NumPy random generator used in random mode.
@@ -825,6 +841,22 @@ def getCoordsOnPlane(
     a_idx = axis_to_idx[free_axis_a]
     b_idx = axis_to_idx[free_axis_b]
 
+    # Resolve cluster restriction (random mode only)
+    _cluster_c = None
+    if cluster_radius is not None:
+        if cluster_center is None:
+            cx = (a_min + a_max) / 2.0
+            cy = (b_min + b_max) / 2.0
+        else:
+            cx, cy = cluster_center
+        # Tighten sampling bounding box to the cluster, clipped to domain
+        a_min = max(a_min, cx - cluster_radius)
+        a_max = min(a_max, cx + cluster_radius)
+        b_min = max(b_min, cy - cluster_radius)
+        b_max = min(b_max, cy + cluster_radius)
+        _cluster_c = np.array([cx, cy], dtype=float)
+        _cluster_r2 = float(cluster_radius) ** 2
+
     coords = np.empty((n_points, 3), dtype=float)
     coords[:, plane_idx] = pos
 
@@ -840,7 +872,8 @@ def getCoordsOnPlane(
         else:
             random_generator = np.random.default_rng(rng)
 
-        if min_dist == 0:
+        if min_dist == 0 and _cluster_c is None:
+            # Fast path: no overlap or cluster constraint
             coords[:, a_idx] = random_generator.uniform(a_min, a_max, n_points)
             coords[:, b_idx] = random_generator.uniform(b_min, b_max, n_points)
             return coords
@@ -859,6 +892,11 @@ def getCoordsOnPlane(
                 ],
                 dtype=float,
             )
+
+            # Reject if outside cluster circle
+            if _cluster_c is not None:
+                if np.sum((candidate - _cluster_c) ** 2) > _cluster_r2:
+                    continue
 
             if not points_2d:
                 points_2d.append(candidate)
@@ -1745,6 +1783,32 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
                 file.write("{:.4f} {:.4f} {:.4f} \n".format(o_ai[0], o_ai[1], o_ai[2]))
             for _ in range(num_total_anchor_points):
                 file.write("0.0 0.0 0.0 \n")
+
+            # Extra per-cell scalars injected by variants (CELL_VTK_EXTRA_SCALARS)
+            for vtk_name, var_name, dtype in config.get("CELL_VTK_EXTRA_SCALARS", []):
+                fmt = "{:.4f} \n" if dtype == "float" else "{} \n"
+                file.write(f"SCALARS {vtk_name} {dtype} 1\n")
+                file.write("LOOKUP_TABLE default\n")
+                extra_data = []
+                for ai in av:
+                    val = ai.getVariableFloat(var_name) if dtype == "float" else ai.getVariableInt(var_name)
+                    extra_data.append(val)
+                for val in extra_data:
+                    file.write(fmt.format(val))
+                for i in range(num_cells):
+                    for _ in range(num_anchor_points):
+                        file.write(fmt.format(extra_data[i]))
+
+            # Extra per-cell vectors injected by variants (CELL_VTK_EXTRA_VECTORS)
+            for vtk_name, vx_var, vy_var, vz_var in config.get("CELL_VTK_EXTRA_VECTORS", []):
+                file.write(f"VECTORS {vtk_name} float\n")
+                for ai in av:
+                    vx = ai.getVariableFloat(vx_var)
+                    vy = ai.getVariableFloat(vy_var)
+                    vz = ai.getVariableFloat(vz_var)
+                    file.write(f"{vx:.4f} {vy:.4f} {vz:.4f} \n")
+                for _ in range(num_total_anchor_points):
+                    file.write("0.0 0.0 0.0 \n")
 
     if include_focal_adhesions:
         focad_coords = list()

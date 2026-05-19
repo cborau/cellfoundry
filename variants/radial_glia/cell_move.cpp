@@ -555,6 +555,27 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   agent_vx += agent_cc_dvx + agent_cf_dvx + agent_cl_dvx;
   agent_vy += agent_cc_dvy + agent_cf_dvy + agent_cl_dvy;
   agent_vz += agent_cc_dvz + agent_cf_dvz + agent_cl_dvz;
+  // RG variant: substrate spring - confine cell toward z-rest plane  [um/s]
+  {
+    const float RG_SUBSTRATE_K  = FLAMEGPU->environment.getProperty<float>("RG_SUBSTRATE_K");
+    const float RG_SUBSTRATE_Z0 = FLAMEGPU->environment.getProperty<float>("RG_SUBSTRATE_Z0");
+    const float z_rest = COORD_BOUNDARY_Z_NEG + RG_SUBSTRATE_Z0;
+    const float agent_d_dumping = FLAMEGPU->getVariable<float>("d_dumping");
+    const float inv_damp = (agent_d_dumping > 1e-12f) ? (1.0f / agent_d_dumping) : 0.0f;
+    agent_vz += RG_SUBSTRATE_K * (z_rest - agent_z) * inv_damp;
+  }
+
+  // RG variant: apical migration bias (NPC and RG types only)  [um/s]
+  if (agent_cell_type >= 1) {
+    const float bias_strength = (agent_cell_type == 2)
+        ? FLAMEGPU->environment.getProperty<float>("RG_APICAL_BIAS_RG")
+        : FLAMEGPU->environment.getProperty<float>("RG_APICAL_BIAS_NPC");
+    const float epith = FLAMEGPU->getVariable<float>("epithelialization_level");
+    const float effective_bias = bias_strength * epith;
+    agent_vx += effective_bias * FLAMEGPU->getVariable<float>("apx");
+    agent_vy += effective_bias * FLAMEGPU->getVariable<float>("apy");
+    agent_vz += effective_bias * FLAMEGPU->getVariable<float>("apz");
+  }
 
   // ---------------------------------------------------------------------------
   // Update agent position based on velocity
