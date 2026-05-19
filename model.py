@@ -21,7 +21,7 @@ import os
 import pickle
 import matplotlib.pyplot as plt
 import check_hard_coded_values
-from helper_module import compute_expected_boundary_pos_from_corners, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, compute_u_ref_from_anchor_pos, getRadialOrientations, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary, apply_param_overrides, load_param_overrides_from_cli, loadCachedCellInitialization, generateCellInitializationData, recompute_derived_params, getRandomOrientationOnPlane, getCoordsOnPlane
+from helper_module import compute_expected_boundary_pos_from_corners, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, compute_u_ref_from_anchor_pos, getRadialOrientations, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary, apply_param_overrides, load_param_overrides_from_cli, loadCachedCellInitialization, generateCellInitializationData, recompute_derived_params, getRandomOrientationOnPlane, getCoordsOnPlane, getCellTypeList
 
 # TODO LIST:
 # A- Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
@@ -1936,16 +1936,20 @@ class initAgentPopulations(pyflamegpu.HostFunction):
             if N_CELLS == 1: # DEBUGGING. FIX CELL POSITION TO 0,0,0
                 cell_pos = np.array([[0.0, 0.0, 0.0]], dtype=float) # for testing with 1 cell. 
                 cell_orientations = np.array([[1.0, 0.0, 0.0]], dtype=float) 
+                cell_types = [0]
+                print(f"  |-> Single cell initialized at origin with orientation along +x axis")
             elif ORGANOID_ASSAY:
                 cell_pos = getRandomCoordsAroundPoint(N_CELLS, 0.0, 0.0, 0.0, ORGANOID_INIT_RADIUS)
                 cell_orientations = getRadialOrientations(
                     cell_pos, center=(0.0, 0.0, 0.0), noise_sigma=ORGANOID_ORIENTATION_NOISE
                 )
+                cell_types = getCellTypeList(N_CELLS, N_CELL_TYPES, [1, 1, 1], shuffle=False)
                 print(f"  |-> Organoid assay: cells clustered in sphere of radius {ORGANOID_INIT_RADIUS} um at origin")
                 print(f"  |-> Cell orientations: radially outward (noise_sigma={ORGANOID_ORIENTATION_NOISE:.3f} rad)")
             elif MONOLAYER_ASSAY:
                 cell_pos = getCoordsOnPlane("z", coord_boundary_z_neg, N_CELLS, coord_boundary, mode="random")
                 cell_orientations = getRandomOrientationOnPlane("z",N_CELLS)
+                cell_types = getCellTypeList(N_CELLS, N_CELL_TYPES, [70, 20, 10], shuffle=True)
                 print(f"  |-> Monolayer assay: cells randomly distributed in a monolayer at z={coord_boundary_z_neg} um")
                 print(f"  |-> Cell orientations: random")
             else:
@@ -1961,12 +1965,13 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                         f"  |-> Generated cell positions/orientations on the fly "
                         f"(total: {total_gen_time:.3f}s)"
                     )
+                cell_types = getCellTypeList(N_CELLS, N_CELL_TYPES, [1, 1, 1], shuffle=False)
             
             cell_id_list = []
             cell_progress_interval = max(1, N_CELLS // 100)
             for i in range(N_CELLS):
                 count += 1
-                cell_type_i = i % N_CELL_TYPES  # assign cell types round-robin; customize as needed
+                cell_type_i = cell_types[i]  # assign cell types based on the generated list
                 cell_id_list.append(current_id + count) # store the cell ids in a list to be used for focal adhesion initialization if INCLUDE_FOCAL_ADHESIONS is True
                 instance = FLAMEGPU.agent("CELL").newAgent()
                 instance.setVariableInt("id", current_id + count)
@@ -2776,10 +2781,10 @@ if INCLUDE_FIBRE_NETWORK:
         model.newLayer("L7_CELL_Stress_Update").addAgentFunction("CELL", "cell_focad_update") 
 
 if INCLUDE_CELLS and INCLUDE_CELL_CELL_INTERACTION:
-    model.newLayer("L7_CELL_Cell_Interaction").addAgentFunction("CELL", "cell_cell_interaction")
+    model.newLayer("L7_CELL_CELL_Interaction").addAgentFunction("CELL", "cell_cell_interaction")
 if INCLUDE_CELLS and INCLUDE_FIBRE_NETWORK and INCLUDE_CELL_FNODE_REPULSION:
     model.newLayer("L7_CELL_FNODE_Repulsion").addAgentFunction("CELL", "cell_fnode_repulsion")
-    model.newLayer("L7_FNODE_Cell_Repulsion").addAgentFunction("FNODE", "fnode_cell_repulsion")
+    model.newLayer("L7_FNODE_CELL_Repulsion").addAgentFunction("FNODE", "fnode_cell_repulsion")
 if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
     model.newLayer("L7_LUMEN_LUMEN_Interaction").addAgentFunction("LUMEN", "lumen_lumen_interaction")
     model.newLayer("L7_LUMEN_CELL_Interaction").addAgentFunction("LUMEN", "lumen_cell_interaction")

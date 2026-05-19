@@ -1018,6 +1018,110 @@ def getRandomOrientationOnPlane(plane_axis, n_points):
 
     return orientations.astype(float)
 
+import numpy as np
+
+
+def getCellTypeList(n_cells, n_cell_types, ratios, shuffle=False):
+    """
+    Generate a list of cell type IDs according to a desired distribution.
+
+    Parameters
+    ----------
+    n_cells : int
+        Total number of cells. This will be the length of the returned list.
+
+    n_cell_types : int
+        Number of different cell types.
+
+        Cell type IDs will go from:
+
+            0 to n_cell_types - 1
+
+    ratios : list of numbers
+        Desired distribution of each cell type.
+
+        The list must have length n_cell_types.
+
+        These values are interpreted as relative ratios. For example:
+
+            [1, 1, 1] means equal proportions
+            [2, 1, 1] means 50%, 25%, 25%
+            [70, 20, 10] means 70%, 20%, 10%
+
+        If the values are integer counts and they add up exactly to n_cells,
+        they are used directly.
+
+        If they do not add up to n_cells, they are normalized and converted
+        into valid counts automatically.
+
+    shuffle : bool
+        If True, the returned list is randomly shuffled.
+
+        If False, the returned list is ordered by cell type, for example:
+
+            [0, 0, 0, 1, 1, 2, 2]
+
+    Returns
+    -------
+    cell_type_list : list of int
+        List of length n_cells containing cell type IDs.
+    """
+
+    if not isinstance(n_cells, int) or n_cells <= 0:
+        raise ValueError("n_cells must be a positive integer.")
+
+    if not isinstance(n_cell_types, int) or n_cell_types <= 0:
+        raise ValueError("n_cell_types must be a positive integer.")
+
+    if len(ratios) != n_cell_types:
+        raise ValueError("ratios must have length n_cell_types.")
+
+    ratios = np.asarray(ratios, dtype=float)
+
+    if np.any(ratios < 0):
+        raise ValueError("ratios cannot contain negative values.")
+
+    if np.sum(ratios) <= 0:
+        raise ValueError("At least one value in ratios must be greater than 0.")
+
+    ratios_are_integer_counts = np.all(np.isclose(ratios, np.round(ratios)))
+    ratios_sum = np.sum(ratios)
+
+    if ratios_are_integer_counts and np.isclose(ratios_sum, n_cells):
+        counts = np.round(ratios).astype(int)
+
+    else:
+        if ratios_are_integer_counts:
+            print(
+                "Warning: ratios look like integer cell counts, but they do "
+                f"not add up to n_cells. Sum of ratios = {int(ratios_sum)}, "
+                f"n_cells = {n_cells}. Counts will be recomputed from the "
+                "relative proportions."
+            )
+
+        normalized_ratios = ratios / np.sum(ratios)
+
+        raw_counts = normalized_ratios * n_cells
+        counts = np.floor(raw_counts).astype(int)
+
+        remaining_cells = n_cells - np.sum(counts)
+
+        decimal_parts = raw_counts - counts
+        order = np.argsort(decimal_parts)[::-1]
+
+        for i in range(remaining_cells):
+            counts[order[i]] += 1
+
+    cell_type_list = []
+
+    for cell_type_id in range(n_cell_types):
+        cell_type_list.extend([cell_type_id] * counts[cell_type_id])
+
+    if shuffle:
+        np.random.shuffle(cell_type_list)
+
+    return cell_type_list
+
 def compute_u_ref_from_anchor_pos(anchor_pos: np.ndarray,
                                  cell_center: np.ndarray,
                                  eps: float = 1e-12) -> np.ndarray:
