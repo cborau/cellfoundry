@@ -377,6 +377,20 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
       float Fz = DIFFUSION_COEFF * TIME_STEP / powf(dz, 2.0);
       agent_C_sp_prev[i] = C_sp[i];
 
+      // Zero-flux (Neumann) ghost cells for domain-boundary voxels.
+      // When a neighbour is absent in a direction (dist == 0, because the wrap-around
+      // message is excluded by the i/j/k_diff < 2 guard), the ghost concentration is
+      // set to this voxel's own value so the Laplacian contribution from that direction
+      // is zero (∂C/∂n = 0).  This implements zero-flux when BOUNDARY_CONC = -1.
+      // When BOUNDARY_CONC >= 0, ecm_boundary_concentration_conditions pins the
+      // boundary voxel to the prescribed value each step (Dirichlet BC).
+      const float gh_L = (n_left_dist  > 0.0f) ? n_left_C_sp[i]  : agent_C_sp_prev[i];
+      const float gh_R = (n_right_dist > 0.0f) ? n_right_C_sp[i] : agent_C_sp_prev[i];
+      const float gh_F = (n_front_dist > 0.0f) ? n_front_C_sp[i] : agent_C_sp_prev[i];
+      const float gh_B = (n_back_dist  > 0.0f) ? n_back_C_sp[i]  : agent_C_sp_prev[i];
+      const float gh_U = (n_up_dist    > 0.0f) ? n_up_C_sp[i]    : agent_C_sp_prev[i];
+      const float gh_D = (n_down_dist  > 0.0f) ? n_down_C_sp[i]  : agent_C_sp_prev[i];
+
       if (UNSTABLE_DIFFUSION) {
 
         // Stability fix for diffusion when Forward Euler in 3D becomes unstable (too large dt, too small dx/dy/dz, or large D).
@@ -400,9 +414,9 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
         const float S = Fx + Fy + Fz;  // >= 0
         const float numer =
             agent_C_sp_prev[i]
-          + Fx * (n_left_C_sp[i] + n_right_C_sp[i])
-          + Fy * (n_front_C_sp[i] + n_back_C_sp[i])
-          + Fz * (n_up_C_sp[i] + n_down_C_sp[i])
+          + Fx * (gh_L + gh_R)
+          + Fy * (gh_F + gh_B)
+          + Fz * (gh_U + gh_D)
           + R * TIME_STEP;
 
         C_sp[i] = numer / (1.0f + 2.0f * S);
@@ -412,9 +426,9 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
         //   C^{n+1} = C^n + Fx*(C_L - 2C^n + C_R) + Fy*(C_F - 2C^n + C_B) + Fz*(C_U - 2C^n + C_D) + R*dt
         // Requires dt small enough to satisfy the 3D diffusion stability limit.
         C_sp[i] = agent_C_sp_prev[i] 
-        + Fx * (n_left_C_sp[i] - (2 * agent_C_sp_prev[i]) + n_right_C_sp[i]) 
-        + Fy * (n_front_C_sp[i] - (2 * agent_C_sp_prev[i]) + n_back_C_sp[i]) 
-        + Fz * (n_up_C_sp[i] - (2 * agent_C_sp_prev[i]) + n_down_C_sp[i]) 
+        + Fx * (gh_L - (2 * agent_C_sp_prev[i]) + gh_R) 
+        + Fy * (gh_F - (2 * agent_C_sp_prev[i]) + gh_B) 
+        + Fz * (gh_U - (2 * agent_C_sp_prev[i]) + gh_D) 
         + R * TIME_STEP;
       }
 
@@ -429,9 +443,9 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
       //printf("agent id: %d, agent_C_sp AFTER: %.6f, species %d \n", id, C_sp[i], i+1);
       if (DEBUG_DIFFUSION == 1 && i == 0) {  
         //printf("DIFFUSION for agent %d, species %d, [dx,dy,dz] = [%2.6f , %2.6f, %2.6f], [Fx,Fy,Fz] = [%2.6f , %2.6f, %2.6f] \n", id, i+1, dx, dy, dz, Fx, Fy, Fz);
-        printf("agent %d: MULTI left conc = %2.6f, right conc = %2.6f \n", id, n_left_C_sp[i], n_right_C_sp[i]);
-        printf("agent %d: MULTI front conc = %2.6f, back conc = %2.6f \n", id, n_front_C_sp[i], n_back_C_sp[i]);
-        printf("agent %d: MULTI up conc = %2.6f, down conc = %2.6f \n", id, n_up_C_sp[i], n_down_C_sp[i]);
+        printf("agent %d: MULTI left conc = %2.6f, right conc = %2.6f \n", id, gh_L, gh_R);
+        printf("agent %d: MULTI front conc = %2.6f, back conc = %2.6f \n", id, gh_F, gh_B);
+        printf("agent %d: MULTI up conc = %2.6f, down conc = %2.6f \n", id, gh_U, gh_D);
         printf("agent %d: MULTI conc prev = %2.6f, current conc = %2.6f \n", id, agent_C_sp_prev[i], C_sp[i]); 
       }   
     }     

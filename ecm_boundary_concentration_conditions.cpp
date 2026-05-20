@@ -76,11 +76,11 @@ FLAMEGPU_AGENT_FUNCTION(ecm_boundary_concentration_conditions, flamegpu::Message
       }    
       if (fabsf(separations[j]) < (ECM_BOUNDARY_INTERACTION_RADIUS)){
         touching_boundary = 1;
-        if (BOUNDARY_CONC_FIXED_MULTI[i][j] > max_conc){
+        if (BOUNDARY_CONC_FIXED_MULTI[i][j] >= max_conc){
           max_conc = BOUNDARY_CONC_FIXED_MULTI[i][j];
           C_sp[i] = max_conc; 
         }
-        if (BOUNDARY_CONC_INIT_MULTI[i][j] > max_conc){
+        if (BOUNDARY_CONC_INIT_MULTI[i][j] >= max_conc){
           max_conc = BOUNDARY_CONC_INIT_MULTI[i][j];
           C_sp[i] = max_conc; 
         }   

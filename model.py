@@ -74,7 +74,7 @@ ECM_D_DUMPING = 0.04  # [nN·s/um]
 ECM_ETA = 0.15  # [nN·s/µm] Effective drag for overdamped FNODE motion (calibration parameter)
 
 #BOUNDARY_COORDS = [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]  # +X,-X,+Y,-Y,+Z,-Z
-BOUNDARY_COORDS = [75.0, -75.0, 75.0, -75.0, 75.0, -75.0]  # microdevice dimensions in um
+BOUNDARY_COORDS = [150.0, -150.0, 150.0, -150.0, 150.0, -150.0]  # microdevice dimensions in um
 #BOUNDARY_COORDS = [coord / 1000.0 for coord in BOUNDARY_COORDS] # in mm
 BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
 BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[um/s]
@@ -2101,7 +2101,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableFloat("apx", float(np.cos(_ap_angle)))
                     instance.setVariableFloat("apy", float(np.sin(_ap_angle)))
                     instance.setVariableFloat("apz", 0.0)
-                    instance.setVariableFloat("rg_commit_level",         0.0)
+                    instance.setVariableFloat("rg_commit_level",         float(np.random.uniform(0.0, RG_COMMIT_INIT_SPREAD)))
                     instance.setVariableFloat("epithelialization_level", 0.0)
                     instance.setVariableFloat("rosette_maturity",        0.0)
                     instance.setVariableFloat("rg_neighbour_density",    0.0)

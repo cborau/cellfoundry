@@ -583,25 +583,34 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   agent_x += agent_vx * TIME_STEP;
   agent_y += agent_vy * TIME_STEP;
   agent_z += agent_vz * TIME_STEP;
+  const float agent_r = FLAMEGPU->getVariable<float>("radius");
+  if ((agent_z - agent_r) <= COORD_BOUNDARY_Z_NEG) { // prevent agent moving below substrate
+    agent_z = COORD_BOUNDARY_Z_NEG + agent_r; 
+  } 
 
   // Boundary handling: periodic wrapping or simple clamping
   const unsigned int PERIODIC_BOUNDARIES_FOR_CELLS = FLAMEGPU->environment.getProperty<int>("PERIODIC_BOUNDARIES_FOR_CELLS");
   const unsigned int INCLUDE_FOCAL_ADHESIONS = FLAMEGPU->environment.getProperty<int>("INCLUDE_FOCAL_ADHESIONS");
 
   if (PERIODIC_BOUNDARIES_FOR_CELLS == 1 && INCLUDE_FOCAL_ADHESIONS == 0) {
-    // Periodic wrapping for cell position
+    // Periodic wrapping for x and y (infinite monolayer in the xy-plane).
+    // Z is NOT wrapped: the substrate at COORD_BOUNDARY_Z_NEG is solid (floor check above)
+    // and wrapping z would teleport cells that drift just below -z_neg to the top (+z_pos).
     agent_x = wrapf(agent_x, COORD_BOUNDARY_X_NEG, COORD_BOUNDARY_X_POS);
     agent_y = wrapf(agent_y, COORD_BOUNDARY_Y_NEG, COORD_BOUNDARY_Y_POS);
-    agent_z = wrapf(agent_z, COORD_BOUNDARY_Z_NEG, COORD_BOUNDARY_Z_POS);
+    agent_z = clampf(agent_z, COORD_BOUNDARY_Z_NEG, COORD_BOUNDARY_Z_POS);
 
-    // Move anchor points by the raw displacement and wrap individually
-    const float raw_dx = agent_vx * TIME_STEP;
-    const float raw_dy = agent_vy * TIME_STEP;
-    const float raw_dz = agent_vz * TIME_STEP;
+    // Move anchor points: wrap x/y individually to match periodic cell centre;
+    // z uses the ACTUAL cell-centre displacement (after floor check + clamp) so
+    // anchor points on the lower hemisphere stay relative to the cell rather than
+    // being independently clamped to the substrate — which would flatten them.
+    const float raw_dx   = agent_vx * TIME_STEP;
+    const float raw_dy   = agent_vy * TIME_STEP;
+    const float dz_actual = agent_z - agent_z_prev;  // real z displacement after floor+clamp
     for (int i = 0; i < N_ANCHOR_POINTS; i++) {
       agent_x_i[i] = wrapf(agent_x_i[i] + raw_dx, COORD_BOUNDARY_X_NEG, COORD_BOUNDARY_X_POS);
       agent_y_i[i] = wrapf(agent_y_i[i] + raw_dy, COORD_BOUNDARY_Y_NEG, COORD_BOUNDARY_Y_POS);
-      agent_z_i[i] = wrapf(agent_z_i[i] + raw_dz, COORD_BOUNDARY_Z_NEG, COORD_BOUNDARY_Z_POS);
+      agent_z_i[i] += dz_actual;  // rigid translation; no domain clamp on anchor points
     }
   } else {
     // Simple clamp to domain

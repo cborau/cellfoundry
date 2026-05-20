@@ -1,30 +1,30 @@
 /**
- * cell_rg_differentiation  [RG variant — new function]
+ * cell_rg_differentiation  [RG variant - new function]
  *
  * Purpose:
- *   Drive iPSC → NPC → RG differentiation via a logistic ODE gated by
+ *   Drive iPSC -> NPC -> RG differentiation via a logistic ODE gated by
  *   local morphogen concentration (ECM species 2) and autocrine/paracrine
  *   signalling from already-committed RG neighbours.  When rg_commitment
  *   crosses a threshold, the agent's cell_type is updated and its k_production
  *   for species 2 is synchronised with the new type.
  *
- * Layer: L3b_RG_Differentiation — after L3 (metabolism; fresh C_sp values)
+ * Layer: L3b_RG_Differentiation - after L3 (metabolism; fresh C_sp values)
  *        and before L4 (ECM Csp update; so updated k_production is used in
  *        the same step's diffusion solve).
  *
  * Message input: cell_spatial_location_message (same spatial message broadcast
- *                in L1; read-only — neighbours are from the previous step, but
+ *                in L1; read-only - neighbours are from the previous step, but
  *                this one-step lag is acceptable for slow differentiation ODEs).
  *
  * New env properties (registered in variants/radial_glia/__init__.py):
- *   RG_COMMIT_RATE             [1/s]       — morphogen-independent basal rate
- *   RG_COMMIT_AUTOCRINE_RATE   [1/(s·a.u.)]— per-unit morphogen drive
- *   RG_COMMIT_PARACRINE_RATE   [1/s]       — RG neighbour density drive
- *   RG_COMMIT_THRESHOLD_NPC    [-]         — rg_commitment threshold: iPSC→NPC
- *   RG_COMMIT_THRESHOLD_RG     [-]         — rg_commitment threshold: NPC→RG
- *   RG_EPITHELIAL_RATE         [1/s]       — epithelialization kinetics
- *   CELL_PRODUCTION_MULTIPLIER [N_CELL_TYPES] — inherited from base model
- *   INIT_CELL_PRODUCTION_RATES [N_SPECIES] — base k_production per species
+ *   RG_COMMIT_RATE             [1/s]       - morphogen-independent basal rate
+ *   RG_COMMIT_AUTOCRINE_RATE   [1/(s.a.u.)]- per-unit morphogen drive
+ *   RG_COMMIT_PARACRINE_RATE   [1/s]       - RG neighbour density drive
+ *   RG_COMMIT_THRESHOLD_NPC    [-]         - rg_commitment threshold: iPSC->NPC
+ *   RG_COMMIT_THRESHOLD_RG     [-]         - rg_commitment threshold: NPC->RG
+ *   RG_EPITHELIAL_RATE         [1/s]       - epithelialization kinetics
+ *   CELL_PRODUCTION_MULTIPLIER [N_CELL_TYPES] - inherited from base model
+ *   INIT_CELL_PRODUCTION_RATES [N_SPECIES] - base k_production per species
  */
 FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, flamegpu::MessageNone) {
   if (FLAMEGPU->getVariable<int>("dead") == 1) {
@@ -87,8 +87,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
   gk = (gk < 0) ? 0 : (gk >= Nz ? Nz - 1 : gk);
   const uint32_t c_idx = (uint32_t)(gi * (Ny * Nz) + gj * Nz + gk);
 
-  // Local morphogen (species 2) concentration – sampled from the ECM macro grid at this cell's
-  // nearest voxel.  This is the EXTRACELLULAR concentration (µM), NOT the cell's intracellular
+  // Local morphogen (species 2) concentration - sampled from the ECM macro grid at this cell's
+  // nearest voxel.  This is the EXTRACELLULAR concentration (uM), NOT the cell's intracellular
   // sp2 amount stored in the cell variable C_sp[2].  The intracellular quantity is managed by
   // cell_ecm_interaction_metabolism and represents morphogen that has been taken up or retained
   // inside the cell.  Only morphogen_local (the ECM gradient) drives differentiation; C_sp[2] is
@@ -116,7 +116,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
       const float nb_apy = message.getVariable<float>("apy");
       const float nb_apz = message.getVariable<float>("apz");
       const float dot = apx * nb_apx + apy * nb_apy + apz * nb_apz;
-      rg_align_sum += fabsf(dot);   // |cosθ|; 1 = perfectly aligned, 0 = perpendicular
+      rg_align_sum += fabsf(dot);   // |cos(theta)|; 1 = perfectly aligned, 0 = perpendicular
     }
   }
 
@@ -129,22 +129,36 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
   }
 
   // -------------------------------------------------------------------------
-  // Commitment ODE (logistic, forward Euler)
+  // Commitment ODE (logistic, forward Euler + Gaussian noise)
   //   d_commit/dt = (rate_basal + rate_autocrine * sp2 + rate_paracrine * rg_frac)
-  //                 * (1 - rg_commit)
+  //                 * (1 - rg_commit) + noise
+  // Gaussian noise (RG_COMMIT_NOISE * sqrt(dt), Ito convention) spreads
+  // differentiation timing across the population so cells do not all cross
+  // NPC/RG thresholds simultaneously, enabling spatial heterogeneity and
+  // cluster/rosette nucleation.
   // -------------------------------------------------------------------------
-  const float drive = RG_COMMIT_RATE
+  const float RG_COMMIT_NOISE = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_NOISE");
+  // Basal rate applies only to iPSC (cell_type == 0).  Once a cell is NPC or
+  // RG, further progression requires sp2 signalling.  Without this gate the
+  // positive basal drive accumulates every step and ALL cells reach commit = 1
+  // within ~67 h regardless of sp2, producing all-RG outcomes.
+  const float drive = (agent_cell_type == 0 ? RG_COMMIT_RATE : 0.0f)
                     + RG_COMMIT_AUTOCRINE_RATE * local_sp2
                     + RG_COMMIT_PARACRINE_RATE * local_rg_fraction;
-  rg_commit += drive * (1.0f - rg_commit) * TIME_STEP;
+  const float noise = RG_COMMIT_NOISE * FLAMEGPU->random.normal<float>() * sqrtf(TIME_STEP);
+  rg_commit += drive * (1.0f - rg_commit) * TIME_STEP + noise;
   rg_commit = fminf(fmaxf(rg_commit, 0.0f), 1.0f);
 
   // -------------------------------------------------------------------------
   // Cell-type switch and k_production sync
   // -------------------------------------------------------------------------
-  const int new_type = (rg_commit >= RG_COMMIT_THRESHOLD_RG)  ? 2
-                     : (rg_commit >= RG_COMMIT_THRESHOLD_NPC) ? 1
-                     : 0;
+  int new_type = (rg_commit >= RG_COMMIT_THRESHOLD_RG)  ? 2
+               : (rg_commit >= RG_COMMIT_THRESHOLD_NPC) ? 1
+               : 0;
+  // Ratchet: fate commitment is irreversible.  Noise can transiently push
+  // rg_commit below a threshold; without this guard the cell_type would
+  // oscillate (e.g. NPC -> iPSC -> NPC) which is biologically wrong.
+  if (new_type < agent_cell_type) new_type = agent_cell_type;
 
   if (new_type != agent_cell_type) {
     agent_cell_type = new_type;

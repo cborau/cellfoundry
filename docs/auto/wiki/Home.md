@@ -11,3 +11,4 @@ This wiki content is generated from source code and project metadata.
 - [Post Processing](Post-Processing)
 - [Tutorial: Benchmarking Performance](Tutorial-Benchmarking-Performance)
 - [Tutorial: Parameter Optimization](Tutorial-Parameter-Optimization)
+- [Tutorial: Model Variants](Tutorial-Model-Variants)
