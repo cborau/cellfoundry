@@ -198,6 +198,7 @@ N_SPECIES = 3
 # Use check_hard_coded_values.py to automatically update all c++ files using N_SPECIES
 # Use tools/resize_array_variables.py to automatically resize all per-species arrays.
 DIFFUSION_COEFF_MULTI = [5.0, 5.0, 5.0]  # diffusion coefficient in [um^2/s] per specie
+ECM_DEGRADATION_RATE_MULTI = [0.0, 0.0, 0.0]  # first-order ECM degradation [1/s] per species (0 = no degradation)
 BOUNDARY_CONC_INIT_MULTI = [[2.5, 2.5, 2.5, 2.5, 2.5, 2.5],
                             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
@@ -885,6 +886,7 @@ env.newPropertyUInt("UNSTABLE_DIFFUSION", UNSTABLE_DIFFUSION)
 if INCLUDE_FIBRE_NETWORK:
     env.newPropertyUInt("AVG_NETWORK_VOXEL_DENSITY", AVG_NETWORK_VOXEL_DENSITY)
 env.newPropertyArrayFloat("DIFFUSION_COEFF_MULTI", DIFFUSION_COEFF_MULTI)
+env.newPropertyArrayFloat("ECM_DEGRADATION_RATE_MULTI", ECM_DEGRADATION_RATE_MULTI)
 env.newPropertyFloat("ECM_VOXEL_VOLUME", ECM_VOXEL_VOLUME)
 
 # ------------------------------------------------------
@@ -1678,6 +1680,8 @@ if INCLUDE_CELLS:
         CELL_agent.newVariableFloat("rg_neighbour_density", 0.0)  # normalised local RG-cell count
         CELL_agent.newVariableFloat("morphogen_local",      0.0)  # cached ECM morphogen concentration sample (sp2) at cell location
         CELL_agent.newVariableInt("rg_committed", 0)              # 0/1 irreversible commit flag
+        CELL_agent.newVariableFloat("substrate_anchor_x", 0.0)   # xy substrate anchor position for bond-spring (NPC/RG)
+        CELL_agent.newVariableFloat("substrate_anchor_y", 0.0)
     if INCLUDE_FOCAL_ADHESIONS:  
         CELL_agent.newRTCFunctionFile("cell_bucket_location_data", cell_bucket_location_data_file).setMessageOutput("cell_bucket_location_message")
         cell_focad_update_fn = CELL_agent.newRTCFunctionFile("cell_focad_update", cell_focad_update_file)
@@ -2101,12 +2105,14 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableFloat("apx", float(np.cos(_ap_angle)))
                     instance.setVariableFloat("apy", float(np.sin(_ap_angle)))
                     instance.setVariableFloat("apz", 0.0)
-                    instance.setVariableFloat("rg_commit_level",         float(np.random.uniform(0.0, RG_COMMIT_INIT_SPREAD)))
+                    instance.setVariableFloat("rg_commit_level",         float(np.random.uniform(0.0, 0.15)))  # uniform spread for initial rg_commit_level, first cells become NPC at ~14 h, last at ~24 h (basal rate only), creating spatial nucleation heterogeneity without noise.
                     instance.setVariableFloat("epithelialization_level", 0.0)
                     instance.setVariableFloat("rosette_maturity",        0.0)
                     instance.setVariableFloat("rg_neighbour_density",    0.0)
                     instance.setVariableFloat("morphogen_local",           0.0)
                     instance.setVariableInt("rg_committed", 0)
+                    instance.setVariableFloat("substrate_anchor_x", float(cell_pos[i, 0]))
+                    instance.setVariableFloat("substrate_anchor_y", float(cell_pos[i, 1]))
 
                 anchor_pos = getRandomCoordsAroundPoint(N_ANCHOR_POINTS, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_NUCLEUS_RADIUS[cell_type_i], on_surface=True)
                 instance.setVariableArrayFloat("x_i", anchor_pos[:, 0].tolist())

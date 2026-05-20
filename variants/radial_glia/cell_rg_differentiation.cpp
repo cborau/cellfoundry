@@ -111,12 +111,11 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
     const int nb_type = message.getVariable<int>("cell_type");
     if (nb_type == 2) {
       rg_neighbours++;
-      // Rosette maturity: mean dot-product of own apical vector with RG neighbours
-      const float nb_apx = message.getVariable<float>("apx");
-      const float nb_apy = message.getVariable<float>("apy");
+      // Rosette maturity: accumulate |nb_apz| (upward orientation of neighbour's apical pole).
+      // Using |apz| of neighbours (and the cell itself, after the loop) is the chosen proxy
+      // geometric signature of apicobasal polarisation in a columnar rosette.
       const float nb_apz = message.getVariable<float>("apz");
-      const float dot = apx * nb_apx + apy * nb_apy + apz * nb_apz;
-      rg_align_sum += fabsf(dot);   // |cos(theta)|; 1 = perfectly aligned, 0 = perpendicular
+      rg_align_sum += fabsf(nb_apz);
     }
   }
 
@@ -124,8 +123,9 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
       ? ((float)rg_neighbours / (float)(total_neighbours + 1))
       : 0.0f;
 
+  // Rosette maturity: own |apz| * mean(neighbour |apz|). 
   if (rg_neighbours > 0) {
-    rosette_maturity = rg_align_sum / (float)rg_neighbours;
+    rosette_maturity = fabsf(apz) * rg_align_sum / (float)rg_neighbours;
   }
 
   // -------------------------------------------------------------------------

@@ -123,30 +123,13 @@ toward the centre of a cluster -- exactly the direction that drives rosette pola
 Each cell carries a unit vector `(apx, apy, apz)`.  It is updated every step in
 `cell_rg_polarity_update` as follows:
 
-### 1. Gradient sampling
+### 1. Concentration gate
 
-The 26-neighbour finite-difference gradient of sp2 is computed around the cell's
-voxel position.  If the cell sits on the substrate layer (voxel k = 0), the
-gradient is sampled from k = 1 instead.  Rationale: the boundary voxel k = 0
-accumulates sp2 (zero-flux wall), so the gradient AT k = 0 would point downward
-(-z), which is wrong.  Sampling from k = 1 sees the inter-cluster in-plane signal
-more cleanly.
+The local sp2 concentration at the cell's voxel is sampled from `C_SP_MACRO[2]`.
+If `C0 < RG_POLARITY_SP2_THRESHOLD`, the cell's apical vector is left unchanged.
+This restricts polarity updates to cells inside the morphogen field.
 
-### 2. Exponential blend
-
-The current apical vector is blended toward the gradient direction with a time
-constant `RG_POLARITY_TAU` (default 3600 s = 1h):
-
-```
-alpha = 1 - exp(-dt / tau)
-ap_new = (1 - alpha) * ap_old + alpha * grad_direction
-ap_new = ap_new / |ap_new|
-```
-
-If the gradient is weaker than `RG_POLARITY_GRADIENT_THRESHOLD`, the vector
-keeps its current direction (no update).
-
-### 3. Intrinsic z-bias (NPC and RG only)
+### 2. Intrinsic z-bias (NPC and RG only)
 
 After the gradient blend, a small upward bias is added to `apz`:
 
@@ -235,7 +218,7 @@ flattens against the substrate independently of the cell.
 | `RG_COMMIT_PARACRINE_RATE` | 2e-5 /s | RG-fraction paracrine boost |
 | `RG_COMMIT_NOISE` | 1e-3 | Ito noise coefficient; spreads NPC timing by ~+/-3h |
 | `RG_INTRINSIC_APICAL_Z` | 3e-4 | Per-step upward z-bias (NPC/RG only) |
-| `RG_POLARITY_TAU` | 3600 s | Apical vector relaxation timescale |
+| `RG_POLARITY_SP2_THRESHOLD` | 0.1 uM | sp2 concentration gate for z-bias |
 | `RG_SUBSTRATE_K` | 5e-5 nN/um | Substrate spring stiffness |
 | `RG_ADHESION_MATRIX[RG,RG]` | 1.2 nN/um | Homotypic RG adhesion (max 3.0 with boost) |
 | `RG_EPITHELIAL_ADHESION_BOOST` | 2.5 | Max adhesion multiplier at full epithelialization |

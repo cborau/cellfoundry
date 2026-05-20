@@ -354,7 +354,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
 
   //Apply diffusion equation
   if (INCLUDE_DIFFUSION == 1){
-    float R = 0.0; // reactive term. Unused here, as cell agents consume species in a different function
+
     //Calculate distances to neighbours
     float dx = ((n_left_dist > 0.0) & (n_right_dist > 0.0)) ? (n_left_dist + n_right_dist) / 2.0 : fmaxf(n_left_dist,n_right_dist);
     float dy = ((n_front_dist > 0.0) & (n_back_dist > 0.0)) ? (n_front_dist + n_back_dist) / 2.0 : fmaxf(n_front_dist,n_back_dist);
@@ -376,6 +376,12 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
       float Fy = DIFFUSION_COEFF * TIME_STEP / powf(dy, 2.0);
       float Fz = DIFFUSION_COEFF * TIME_STEP / powf(dz, 2.0);
       agent_C_sp_prev[i] = C_sp[i];
+
+      // First-order degradation: dC/dt += -lambda*C.
+      // A non-zero value limits the diffusion length of a species to L = sqrt(D/lambda), preventing it from
+      // accumulating across the whole domain when all boundaries are zero-flux (-1).
+      const float ECM_DEGRAD = FLAMEGPU->environment.getProperty<float>("ECM_DEGRADATION_RATE_MULTI", i);
+      float R = -ECM_DEGRAD * agent_C_sp_prev[i]; // reactive term [uM/s]
 
       // Zero-flux (Neumann) ghost cells for domain-boundary voxels.
       // When a neighbour is absent in a direction (dist == 0, because the wrap-around

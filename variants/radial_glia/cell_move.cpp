@@ -555,14 +555,34 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   agent_vx += agent_cc_dvx + agent_cf_dvx + agent_cl_dvx;
   agent_vy += agent_cc_dvy + agent_cf_dvy + agent_cl_dvy;
   agent_vz += agent_cc_dvz + agent_cf_dvz + agent_cl_dvz;
-  // RG variant: substrate spring - confine cell toward z-rest plane  [um/s]
+  // RG variant: substrate springs - z-confinement + xy anchor with bond rupture
   {
+    const float agent_d_dumping = FLAMEGPU->getVariable<float>("d_dumping");
+    const float inv_damp = (agent_d_dumping > 1e-12f) ? (1.0f / agent_d_dumping) : 0.0f;
+
+    // z-spring: pull all cells toward substrate rest-height
     const float RG_SUBSTRATE_K  = FLAMEGPU->environment.getProperty<float>("RG_SUBSTRATE_K");
     const float RG_SUBSTRATE_Z0 = FLAMEGPU->environment.getProperty<float>("RG_SUBSTRATE_Z0");
     const float z_rest = COORD_BOUNDARY_Z_NEG + RG_SUBSTRATE_Z0;
-    const float agent_d_dumping = FLAMEGPU->getVariable<float>("d_dumping");
-    const float inv_damp = (agent_d_dumping > 1e-12f) ? (1.0f / agent_d_dumping) : 0.0f;
     agent_vz += RG_SUBSTRATE_K * (z_rest - agent_z) * inv_damp;
+
+    // xy bond-spring: tether NPC/RG to a slipping anchor (limits long-range lateral drift)
+    if (agent_cell_type >= 1) {
+      const float RG_XY_SPRING_K = FLAMEGPU->environment.getProperty<float>("RG_XY_SPRING_K");
+      const float anchor_x = FLAMEGPU->getVariable<float>("substrate_anchor_x");
+      const float anchor_y = FLAMEGPU->getVariable<float>("substrate_anchor_y");
+      // Minimum-image displacement (periodic domain)
+      float ddx = agent_x - anchor_x;
+      float ddy = agent_y - anchor_y;
+      const float Lx = COORD_BOUNDARY_X_POS - COORD_BOUNDARY_X_NEG;
+      const float Ly = COORD_BOUNDARY_Y_POS - COORD_BOUNDARY_Y_NEG;
+      if (ddx >  0.5f * Lx) ddx -= Lx;
+      if (ddx < -0.5f * Lx) ddx += Lx;
+      if (ddy >  0.5f * Ly) ddy -= Ly;
+      if (ddy < -0.5f * Ly) ddy += Ly;
+      agent_vx -= RG_XY_SPRING_K * ddx * inv_damp;
+      agent_vy -= RG_XY_SPRING_K * ddy * inv_damp;
+    }
   }
 
   // RG variant: apical migration bias (NPC and RG types only)  [um/s]
@@ -627,6 +647,28 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
       agent_y_i[i] += dy_cell;
       agent_z_i[i] += dz_cell;
     }
+  }
+
+  // RG xy-anchor: slip anchor to current cell position when bond-break distance is exceeded.
+  // This allows cells to migrate, but only up to RG_XY_BOND_BREAK um per "bond lifetime".
+  if (agent_cell_type >= 1) {
+    const float RG_XY_BOND_BREAK = FLAMEGPU->environment.getProperty<float>("RG_XY_BOND_BREAK");
+    float anchor_x = FLAMEGPU->getVariable<float>("substrate_anchor_x");
+    float anchor_y = FLAMEGPU->getVariable<float>("substrate_anchor_y");
+    float ddx = agent_x - anchor_x;
+    float ddy = agent_y - anchor_y;
+    const float Lx = COORD_BOUNDARY_X_POS - COORD_BOUNDARY_X_NEG;
+    const float Ly = COORD_BOUNDARY_Y_POS - COORD_BOUNDARY_Y_NEG;
+    if (ddx >  0.5f * Lx) ddx -= Lx;
+    if (ddx < -0.5f * Lx) ddx += Lx;
+    if (ddy >  0.5f * Ly) ddy -= Ly;
+    if (ddy < -0.5f * Ly) ddy += Ly;
+    if (ddx * ddx + ddy * ddy > RG_XY_BOND_BREAK * RG_XY_BOND_BREAK) {
+      anchor_x = agent_x;
+      anchor_y = agent_y;
+    }
+    FLAMEGPU->setVariable<float>("substrate_anchor_x", anchor_x);
+    FLAMEGPU->setVariable<float>("substrate_anchor_y", anchor_y);
   }
 
   float dx_track = agent_x - agent_x_prev;

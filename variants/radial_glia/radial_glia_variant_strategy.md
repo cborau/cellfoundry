@@ -333,8 +333,7 @@ Optionally (decide during implementation):
 | `RG_COMMIT_THRESHOLD_NPC` | float | 0.35 | – | rg_commitment value at which iPSC → NPC switch fires |
 | `RG_COMMIT_THRESHOLD_RG` | float | 0.70 | – | rg_commitment value at which NPC → RG switch fires |
 | `RG_EPITHELIAL_RATE` | float | 1e-4 | 1/s | epithelialization growth rate (logistic, gated by rg_commitment) |
-| `RG_POLARITY_TAU` | float | 600.0 | s | time constant for exponential apical-vector blending |
-| `RG_POLARITY_GRADIENT_THRESHOLD` | float | 1e-6 | a.u./µm | minimum species-2 gradient magnitude to update polarity |
+| `RG_POLARITY_SP2_THRESHOLD` | float | 0.1 | uM | sp2 concentration gate; z-bias only fires when local C0 > this value |
 | `RG_SUBSTRATE_K` | float | 0.5 | nN/µm | spring stiffness pulling cell toward substrate plane |
 | `RG_SUBSTRATE_Z0` | float | 0.0 | µm | resting offset above z_neg boundary (0 = on substrate) |
 | `RG_APICAL_BIAS_RG` | float | 0.002 | µm/s | apical-direction velocity bias for RG cells (cell_type == 2) |
@@ -413,35 +412,19 @@ all  [  4.0,   4.0,   4.0 ]
 
 **Message:** none.
 
-**Reads from env:** `ECM_AGENTS_PER_DIR`, `COORDS_BOUNDARIES`, `RG_POLARITY_TAU`, `RG_POLARITY_GRADIENT_THRESHOLD`, `TIME_STEP`.
+**Reads from env:** `ECM_AGENTS_PER_DIR`, `COORDS_BOUNDARIES`, `RG_POLARITY_SP2_THRESHOLD`, `RG_INTRINSIC_APICAL_Z`.
 
-**Algorithm — 26-neighbour gradient (same pattern as chemotaxis in `cell_move.cpp`):**
+**Algorithm:**
 
 ```
-1. Find own ECM voxel (i, j, k).
+1. Find own ECM voxel (i, j, k).  Sample C0 = C_SP_MACRO[2][vox_idx].
 
-2. Loop over di, dj, dk in {-1, 0, 1}³, skip (0,0,0):
-     Clamp neighbour index to grid bounds.
-     Compute displacement vector (ddx, ddy, ddz) in µm.
-     dist = ||(ddx, ddy, ddz)||
-     unit = (ddx, ddy, ddz) / dist
-     dC   = C_SP_MACRO[2][neighbour_idx] - C_SP_MACRO[2][own_idx]   [a.u.]
-     weight = dC / dist²                                             [a.u./µm²]
-     Accumulate: grad += weight * unit
+2. If cell_type < 1 or C0 <= RG_POLARITY_SP2_THRESHOLD: skip (no update).
 
-3. |grad| is the signal gradient magnitude [a.u./µm].
+3. apz += RG_INTRINSIC_APICAL_Z * epithelialization_level
+   normalize(apx, apy, apz)
 
-4. If |grad| > RG_POLARITY_GRADIENT_THRESHOLD:
-     target = normalize(grad)            // apical vector toward rising species-2
-   Else:
-     target = current (apx, apy, apz)   // no update if signal is flat
-
-5. Exponential blend (tau = RG_POLARITY_TAU [s]):
-     alpha   = 1 - expf(-TIME_STEP / RG_POLARITY_TAU)
-     ap_new  = (1-alpha)*(apx, apy, apz) + alpha*target
-     normalize(ap_new)
-
-6. Write: apx, apy, apz.
+4. Write: apx, apy, apz.
 ```
 
 ---
@@ -626,8 +609,7 @@ def configure_globals(g: dict) -> None:
     g["RG_COMMIT_THRESHOLD_RG"]       = 0.70    # [-]
     g["RG_EPITHELIAL_RATE"]           = 1e-4    # [1/s]
     # Polarity
-    g["RG_POLARITY_TAU"]              = 600.0   # [s]
-    g["RG_POLARITY_GRADIENT_THRESHOLD"] = 1e-6  # [a.u./µm]
+    g["RG_POLARITY_SP2_THRESHOLD"]    = 0.1     # [uM]
     # Substrate
     g["RG_SUBSTRATE_K"]               = 0.5     # [nN/µm]
     g["RG_SUBSTRATE_Z0"]              = 0.0     # [µm]
