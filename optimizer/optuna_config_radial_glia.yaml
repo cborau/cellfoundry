@@ -1,0 +1,142 @@
+# ============================================================================
+# CellFoundry — Radial Glia Rosette Optimization (variant-aware)
+# ============================================================================
+#
+# Tunes the commitment kinetics and polarity parameters of the radial_glia
+# variant so that the simulated monolayer forms 1–2 large, well-matured
+# rosette clusters by day 7.
+#
+# Usage:
+#    python -m optimizer.optimize \
+#        --config optimizer/optuna_config_radial_glia.yaml
+#
+# Objectives (minimized simultaneously via NSGA-II Pareto front):
+#   1. rg_rosette_error / n_rg_clusters      — target cluster count (CSV)
+#   2. rg_rosette_error / mean_rosette_maturity — target maturity over time
+#
+# Optional additional objectives (uncomment as needed):
+#   3. rg_rosette_error / rg_fraction        — target RG fraction over time
+#   4. rg_rosette_error / mean_cluster_size  — target mean cluster size
+#
+# Equilibrium constraint (for reference, not enforced by optimizer):
+#   x_eq_basal = k_basal / (k_basal + k_decay)  must be < RG_COMMIT_THRESHOLD_RG (0.70)
+#   x_eq_sp2   = (k_basal + k_auto*sp2) / (k_basal + k_auto*sp2 + k_decay + k_inhibit*delta)
+#   First NPC transition (~28 h) and first RG (~60–65 h) driven by sp2 autocrine amplification.
+# ============================================================================
+
+study:
+  name: "cellfoundry_radial_glia"
+  n_trials: 60
+  sampler: NSGA-II
+  seed: 42
+  directions: [minimize, minimize]
+  storage: "sqlite:///cellfoundry_radial_glia.db"
+
+# ---------------------------------------------------------------------------
+# Model configuration
+# ---------------------------------------------------------------------------
+model:
+  variant: radial_glia
+
+  extra_overrides:
+    VISUALISATION: false
+    SAVE_DATA_TO_FILE: false
+    SAVE_PICKLE: true
+    DEBUG_PRINTING: false
+    # INCLUDE_RG_VARIABLES is set automatically when variant=radial_glia
+
+  timeout: 0      # wall-clock seconds per trial (0 = unlimited)
+  cleanup_trials: false
+
+# ---------------------------------------------------------------------------
+# Objectives
+# ---------------------------------------------------------------------------
+objectives:
+  # 1. Final cluster count — single-row CSV with column "n_rg_clusters"
+  - function: rg_rosette_2d_error
+    reference: "optimizer/reference_data/target_rg_n_clusters.csv"
+    kwargs:
+      metric: n_rg_clusters
+
+  # # 2. Rosette maturity over time — multi-row CSV with "time" + "mean_rosette_maturity"
+  # - function: rg_rosette_2d_error
+  #   reference: "optimizer/reference_data/target_rg_rosette_maturity.csv"
+  #   kwargs:
+  #     metric: mean_rosette_maturity
+  #     smooth_window: 5        # light Savitzky-Golay smoothing before RMSE
+
+  # Optional: uncomment to add rg_fraction as a third objective and update
+  # study.directions to [minimize, minimize, minimize]
+  #
+  # - function: rg_rosette_2d_error
+  #   reference: "optimizer/reference_data/target_rg_fraction.csv"
+  #   kwargs:
+  #     metric: rg_fraction
+
+  # Optional: final mean cluster size
+
+  - function: rg_rosette_2d_error
+    reference: "optimizer/reference_data/target_rg_mean_cluster_size.csv"
+    kwargs:
+      metric: mean_cluster_size
+
+# ---------------------------------------------------------------------------
+# Parameters to search
+# ---------------------------------------------------------------------------
+# Only parameters being *searched* need to appear here.
+# Everything else comes from variants/radial_glia/__init__.py.
+#
+# Equilibrium analysis guide (with current variant defaults):
+#   RG_COMMIT_RATE    = k_basal:  drives x_eq_basal = k_basal / (k_basal + k_decay)
+#   RG_COMMIT_DECAY_RATE = k_decay: raises threshold; must keep x_eq_basal < 0.70
+#   RG_COMMIT_AUTOCRINE_RATE = k_auto: amplification; needs sp2 > 0 to fire
+#   RG_COMMIT_INHIBIT_RATE = k_inhibit: lateral fence; prevents cascade spread
+#   time-constant τ ≈ 1 / (k_basal + k_decay) → τ [s]; first NPC at ~0.35/x_eq × τ
+# ---------------------------------------------------------------------------
+parameters:
+
+  RG_COMMIT_RATE:
+    type: float
+    low:  1.0e-6
+    high: 2.0e-5
+    log: true
+
+  RG_COMMIT_DECAY_RATE:
+    type: float
+    low:  1.0e-6
+    high: 1.0e-5
+    log: true
+
+  RG_COMMIT_AUTOCRINE_RATE:
+    type: float
+    low:  5.0e-6
+    high: 1.0e-4
+    log: true
+
+  RG_COMMIT_INHIBIT_RATE:
+    type: float
+    low:  1.0e-6
+    high: 5.0e-5
+    log: true
+
+  RG_EPITHELIAL_RATE:
+    type: float
+    low:  5.0e-7
+    high: 1.0e-5
+    log: true
+
+  RG_APICAL_BIAS_RG:
+    type: float
+    low:  1.0e-4
+    high: 5.0e-3
+    log: true
+
+  # RG–RG adhesion strength (element [8] of the 3×3 matrix, row-major).
+  # Higher values pull committed cells together into fewer, larger clusters.
+  RG_ADHESION_MATRIX:
+    type: array_float
+    log: true
+    elements:
+      8:                # [RG, RG] entry
+        low:  0.5
+        high: 10.0

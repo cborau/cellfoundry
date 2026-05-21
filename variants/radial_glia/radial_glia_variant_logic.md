@@ -13,7 +13,7 @@ The model captures:
 - Stochastic, asynchronous iPSC -> NPC -> RG fate commitment driven by a secreted
   morphogen (sp2)
 - Gradual apicobasal polarization, where cells develop an apical vector pointing
-  away from the substrate
+  toward a local lumen proxy with an upward component
 - Differential adhesion driving RG cells to cluster and form rosette ring structures
 - Substrate attachment and apically-directed migration giving the rosette its 3D
   relief
@@ -146,41 +146,61 @@ whole-population transitions.
 
 The zero-flux substrate boundary means sp2 builds up where cells actually are.
 This concentrates the gradient in the plane of the monolayer, making it strongest
-toward the centre of a cluster -- exactly the direction that drives rosette polarity.
+toward the centre of a cluster, which helps gate where rosette polarity can activate.
 
 ---
 
 ## Apical Polarity
 
-Each cell carries a unit vector `(apx, apy, apz)`.  It is updated every step in
-`cell_rg_polarity_update` as follows:
+Each cell carries a unit vector `(apx, apy, apz)`. It is updated every step in
+`cell_rg_polarity_update` using a gated two-component rule:
 
-### 1. Concentration gate
+### 1. Concentration + type gate
 
 The local sp2 concentration at the cell's voxel is sampled from `C_SP_MACRO[2]`.
-If `C0 < RG_POLARITY_SP2_THRESHOLD`, the cell's apical vector is left unchanged.
-This restricts polarity updates to cells inside the morphogen field.
+The polarity rule only runs for NPC/RG cells (`cell_type >= 1`) when
+`C0 > RG_POLARITY_SP2_THRESHOLD`. Outside this gate, only small XY noise is added.
 
-### 2. Intrinsic z-bias (NPC and RG only)
+### 2. Local lumen cue in XY (RG neighbours only)
 
-After the gradient blend, a small upward bias is applied each step:
+The function reads `cell_spatial_location_message` and looks for nearby alive RG
+cells (`cell_type == 2`) within `RG_LUMEN_SEARCH_RADIUS`. If at least
+`RG_LUMEN_MIN_NEIGHBOURS` are found, their XY centroid is used as a local lumen
+proxy and the apical XY component is blended toward that centroid direction:
 
 ```
-For RG cells:   alpha = RG_INTRINSIC_APICAL_Z * rg_commit
-For NPC cells:  alpha = RG_INTRINSIC_APICAL_Z * epithelialization_level * rg_commit
+beta_xy = RG_LUMEN_BIAS_STRENGTH * scale
+new_ap_xy = (1 - beta_xy) * ap_xy + beta_xy * dir_to_rg_centroid_xy
+```
 
-new_apz = (1 - alpha) * apz + alpha
+where `scale = rg_commit` for RG cells and
+`scale = epithelialization_level * rg_commit * 0.1` for NPC cells.
+
+If not enough RG neighbours are found, XY falls back to suppression only
+(no lumen cue).
+
+### 3. Intrinsic z-bias (NPC and RG only)
+
+A small upward bias is also applied each step:
+
+```
+alpha_z = RG_INTRINSIC_APICAL_Z * scale
+
+new_apz = (1 - alpha_z) * apz + alpha_z
 ap = ap / |ap|    (re-normalize)
 ```
 
 RG cells use `rg_commit` directly (not `epi`) so alignment starts immediately at
-commitment (~0.7).  With `RG_INTRINSIC_APICAL_Z = 2e-3` and commit=0.7:
+commitment (~0.7). With `RG_INTRINSIC_APICAL_Z = 2e-3` and commit=0.7:
 ```
-alpha = 1.4e-3 per step  ->  half-life ~ 495 steps ~ 8 h
+alpha_z = 1.4e-3 per step  ->  half-life ~ 495 steps ~ 8 h
 ```
 NPC cells scale by `epi * commit` so peripheral NPC cells (low commit from the
 decay term) develop much weaker z-polarity, matching the gradient of
 pseudo-stratified polarity in cortical neuroepithelium.
+
+This gives apical vectors a local inward component in XY (toward the lumen proxy)
+and an upward component in Z.
 
 **RG orientation override**: in `cell_move`, RG cells' persistent migration
 direction is directly set to their apical vector `(apx, apy, apz)` each step,
@@ -254,6 +274,9 @@ flattens against the substrate independently of the cell.
 | `RG_COMMIT_NOISE` | 1e-3 | Ito noise coefficient; spreads NPC timing by ~+/-3h |
 | `RG_INTRINSIC_APICAL_Z` | 2e-3 | Per-step z-bias alpha; RG half-life ~8h at commit=0.7 |
 | `RG_POLARITY_SP2_THRESHOLD` | 0.1 uM | sp2 concentration gate for z-bias |
+| `RG_LUMEN_BIAS_STRENGTH` | 3e-3 | Per-step XY blend strength toward local RG centroid |
+| `RG_LUMEN_SEARCH_RADIUS` | 35 um | Radius to collect RG neighbours for lumen proxy |
+| `RG_LUMEN_MIN_NEIGHBOURS` | 2 | Minimum RG neighbours required to activate lumen cue |
 | `RG_SUBSTRATE_K` | 5e-5 nN/um | Substrate spring stiffness |
 | `RG_ADHESION_MATRIX[RG,RG]` | 1.8 nN/um | Homotypic RG adhesion (max 4.5 with boost) |
 | `RG_EPITHELIAL_ADHESION_BOOST` | 2.5 | Max adhesion multiplier at full epithelialization |
@@ -273,7 +296,7 @@ One time step runs the following layers in order:
 | L4 | `ecm_Csp_update` | Apply sp2 from cells into ECM macro-property |
 | L5 | `ecm_ecm_interaction` | Diffuse all species through ECM (+ ECM mechanical forces) |
 | L6 | `ecm_boundary_concentration_conditions` | Enforce boundaries again after diffusion |
-| L6b | `cell_rg_polarity_update` | Update apical vector from sp2 gradient + intrinsic z-bias |
+| L6b | `cell_rg_polarity_update` | Update apical vector from local RG-centroid lumen cue + intrinsic z-bias |
 | L7 | `cell_cell_interaction` | Compute adhesion/repulsion forces -> cc_dvx/y/z |
 | L8 | `cell_move` (RG override) | Apply all forces, substrate spring, apical bias, advance |
 
@@ -302,7 +325,7 @@ One time step runs the following layers in order:
 | sp2 never builds up | `CELL_PRODUCTION_MULTIPLIER[1 or 2]` = 0, or `INIT_CELL_PRODUCTION_RATES[2]` = 0 | Check production config |
 | Cells pile up at z = +/-150 on step 0 | z-periodic wrap not replaced by z-clamp | Ensure RG cell_move override is loaded |
 | Anchor point sphere flattens against substrate | Anchor z updated with raw_dz instead of dz_actual | Use `dz_actual = z_new - z_old` after floor clamp |
-| Polarity gradient points downward (-z) | Gradient sampled from boundary voxel k=0 where sp2 accumulates | Shift to k=1 when gk==0 (already implemented) |
+| No radial rosette orientation despite high sp2 | Lumen cue inactive due to too few nearby RG cells or too small search radius | Increase `RG_LUMEN_SEARCH_RADIUS` or reduce `RG_LUMEN_MIN_NEIGHBOURS` |
 | All cells become RG regardless of sp2 | Positive paracrine cascade (old k_paracrine) still active | Remove from drive; use RG_COMMIT_INHIBIT_RATE with negative sign |
 | Orientation vector oscillates wildly each step | Rotational diffusion >> soft apical blend for RG cells | Use direct override: orientation = apical for cell_type==2 |
 | RG apical vector still at < 30 deg after 56h | Alpha gated on epi which starts at 0 at commitment | Use rg_commit (not epi) for alpha in RG cells |
@@ -316,7 +339,7 @@ One time step runs the following layers in order:
 |---|---|
 | `variants/radial_glia/__init__.py` | PARAMS, FILES list, configure_globals (env properties), configure_layers |
 | `variants/radial_glia/cell_rg_differentiation.cpp` | Commitment ODE, cell_type switching, epithelialization update |
-| `variants/radial_glia/cell_rg_polarity_update.cpp` | Apical vector update (gradient blend + intrinsic z-bias) |
+| `variants/radial_glia/cell_rg_polarity_update.cpp` | Apical vector update (RG-only local centroid lumen cue + intrinsic z-bias) |
 | `variants/radial_glia/cell_move.cpp` | RG override: substrate spring, apical bias force, anchor point update |
 | `variants/radial_glia/cell_cell_interaction.cpp` | RG override: type-pair adhesion matrix + epithelialization boost |
 | `cell_ecm_interaction_metabolism.cpp` (root) | sp2 secretion into nearest ECM voxel |

@@ -1481,6 +1481,151 @@ def organoid_error(results: dict, reference_path: str = None, **kwargs) -> float
 
 
 # ---------------------------------------------------------------------------
+# RG rosette metrics error functions
+# ---------------------------------------------------------------------------
+
+def _get_rg_rosette_metrics_frame(results: dict) -> pd.DataFrame:
+    """Extract and validate the RG_ROSETTE_METRICS_OVER_TIME DataFrame."""
+    metrics = results.get("RG_ROSETTE_METRICS_OVER_TIME", None)
+    if metrics is None:
+        raise KeyError(
+            "Key 'RG_ROSETTE_METRICS_OVER_TIME' not found in results pickle. "
+            "Ensure INCLUDE_RG_VARIABLES=True and the radial_glia variant is active."
+        )
+    if isinstance(metrics, list):
+        metrics = pd.DataFrame(metrics)
+    if len(metrics) == 0:
+        raise ValueError("RG_ROSETTE_METRICS_OVER_TIME is empty.")
+    required = {"step", "n_rg_clusters", "mean_cluster_size", "mean_rosette_maturity",
+                "rg_fraction", "largest_cluster_size", "n_alive_rg"}
+    missing = required.difference(metrics.columns)
+    if missing:
+        raise ValueError(
+            f"RG_ROSETTE_METRICS_OVER_TIME is missing required columns: {sorted(missing)}"
+        )
+    return metrics
+
+
+def rg_rosette_2d_error(results: dict, reference_path: str = None, **kwargs) -> tuple:
+    """Compare RG rosette metrics over time against a reference CSV.
+
+    Reads from the ``RG_ROSETTE_METRICS_OVER_TIME`` DataFrame stored in the
+    results pickle by ``CollectCellMetrics`` — no VTK files needed.
+
+    Parameters
+    ----------
+    results : dict
+        Pickle results dictionary (must contain ``RG_ROSETTE_METRICS_OVER_TIME``).
+    reference_path : str
+        Path to a reference CSV file.
+
+    Keyword arguments
+    -----------------
+    metric : str, default ``"n_rg_clusters"``
+        Which rosette metric to compare.  Choices:
+        ``"n_rg_clusters"``, ``"mean_cluster_size"``,
+        ``"mean_rosette_maturity"``, ``"rg_fraction"``,
+        ``"largest_cluster_size"``, ``"n_alive_rg"``,
+        ``"rg_assembly_compactness"``, ``"mean_cluster_compactness"``.
+
+        ``rg_assembly_compactness`` — PCA eigenvalue ratio of ALL RG cell
+        positions in XY (0 = linear/branchy, 1 = circular).  Captures global
+        assembly shape independent of DBSCAN cluster count.
+
+        ``mean_cluster_compactness`` — same PCA ratio computed per DBSCAN
+        cluster (size ≥ 3), then averaged weighted by cluster size.
+
+    **Single-value CSV (final state)**
+
+        The CSV contains exactly one row with a column matching the ``metric``
+        name (no ``time`` column required).  The error is the absolute
+        difference between the final simulation value and the reference value.
+
+    **Time-series CSV**
+
+        The CSV contains multiple rows with a ``time`` column plus a column
+        named after the ``metric``.  The simulation metric is linearly
+        interpolated onto the reference time grid and the error is the RMSE.
+
+        smooth_window : int, default 0 (disabled)
+            Savitzky-Golay window for smoothing the simulation curve.
+        smooth_polyorder : int, default 2
+            Polynomial order for smoothing.
+    """
+    rg_df = _get_rg_rosette_metrics_frame(results)
+
+    metric_name = kwargs.get("metric", "n_rg_clusters")
+    valid_metrics = {"n_rg_clusters", "mean_cluster_size", "mean_rosette_maturity",
+                     "rg_fraction", "largest_cluster_size", "n_alive_rg",
+                     "rg_assembly_compactness", "mean_cluster_compactness"}
+    if metric_name not in valid_metrics:
+        raise ValueError(
+            f"Unknown metric '{metric_name}'. Available: {sorted(valid_metrics)}"
+        )
+    if metric_name not in rg_df.columns:
+        raise ValueError(
+            f"Metric '{metric_name}' not found in RG_ROSETTE_METRICS_OVER_TIME columns: "
+            f"{list(rg_df.columns)}"
+        )
+
+    if reference_path is None:
+        raise ValueError("reference_path is required for rg_rosette_2d_error.")
+
+    ref = _load_reference_csv(reference_path)
+
+    # --- Single-value CSV: compare against final simulation value ---
+    if len(ref) == 1 or "time" not in ref.columns:
+        if metric_name not in ref.columns:
+            raise ValueError(
+                f"Reference CSV must contain a column named '{metric_name}'. "
+                f"Found columns: {list(ref.columns)}"
+            )
+        target = float(ref[metric_name].iloc[0])
+        sim_value = float(rg_df[metric_name].iloc[-1])
+        error = abs(sim_value - target)
+        return error, _format_percent_text(error, target)
+
+    # --- Time-series CSV: RMSE on interpolated grid ---
+    if metric_name not in ref.columns:
+        raise ValueError(
+            f"Reference CSV must contain a '{metric_name}' column for time-series comparison. "
+            f"Found columns: {list(ref.columns)}"
+        )
+
+    ref_time = ref["time"].to_numpy(dtype=float)
+    ref_target = ref[metric_name].to_numpy(dtype=float)
+
+    if "time" in rg_df.columns:
+        sim_time = rg_df["time"].to_numpy(dtype=float)
+    else:
+        sim_time = rg_df["step"].to_numpy(dtype=float)
+
+    sim_metric = rg_df[metric_name].to_numpy(dtype=float)
+
+    smooth_window = int(kwargs.get("smooth_window", 0))
+    smooth_polyorder = int(kwargs.get("smooth_polyorder", 2))
+    if smooth_window > 1:
+        sim_metric = _smooth_signal_savgol(
+            sim_metric,
+            smooth_window=smooth_window,
+            smooth_polyorder=smooth_polyorder,
+            label=f"rg_rosette_2d {metric_name}",
+        )
+
+    sim_interp = _interpolate_response_to_reference_x(sim_time, sim_metric, ref_time)
+    overlap_mask = np.isfinite(sim_interp)
+    if not np.any(overlap_mask):
+        raise ValueError(
+            "No overlap between simulation time range and reference time points. "
+            f"Simulation time: [{sim_time[0]:.4g}, {sim_time[-1]:.4g}], "
+            f"Reference time: [{ref_time[0]:.4g}, {ref_time[-1]:.4g}]"
+        )
+
+    error = _rmse(sim_interp[overlap_mask], ref_target[overlap_mask])
+    return error, None
+
+
+# ---------------------------------------------------------------------------
 # Registry — maps string names (used in YAML config) to callables
 # ---------------------------------------------------------------------------
 
@@ -1499,4 +1644,5 @@ OBJECTIVE_REGISTRY = {
     "cell_speed_error": cell_speed_error,
     "organoid_error": organoid_error,
     "organoid_error_vtk": organoid_error_vtk,
+    "rg_rosette_2d_error": rg_rosette_2d_error,
 }

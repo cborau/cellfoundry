@@ -560,6 +560,7 @@ OSOT = make_dataclass("OSOT", [("strain", float)])
 OSCILLATORY_STRAIN_OVER_TIME = pd.DataFrame([OSOT(0)])
 CELL_SPEED_METRICS = pd.DataFrame()
 RG_METRICS = pd.DataFrame()       # per-cell RG snapshot at final step (radial_glia variant only)
+RG_ROSETTE_METRICS_OVER_TIME = pd.DataFrame()  # rosette cluster metrics over time (radial_glia variant only)
 ORGANOID_METRICS_OVER_TIME = pd.DataFrame()
 
 # Checking for incompatible conditions
@@ -2565,7 +2566,7 @@ class CollectCellMetrics(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
         global INCLUDE_CELLS, STEPS, CELL_SPEED_METRICS, ORGANOID_METRICS_OVER_TIME
         global ORGANOID_ASSAY, SAVE_EVERY_N_STEPS, N_CELL_TYPES
-        global INCLUDE_RG_VARIABLES, RG_METRICS
+        global INCLUDE_RG_VARIABLES, RG_METRICS, RG_ROSETTE_METRICS_OVER_TIME, CELL_RADIUS
 
         if not INCLUDE_CELLS:
             return
@@ -2643,6 +2644,103 @@ class CollectCellMetrics(pyflamegpu.HostFunction):
             else:
                 ORGANOID_METRICS_OVER_TIME = pd.concat(
                     [ORGANOID_METRICS_OVER_TIME, row], ignore_index=True
+                )
+
+        # --- RG rosette metrics over time (radial_glia variant only) ---
+        if INCLUDE_RG_VARIABLES and (step == 1 or step % SAVE_EVERY_N_STEPS == 0 or is_final):
+            from sklearn.cluster import DBSCAN as _DBSCAN
+            cell_agent = FLAMEGPU.agent("CELL")
+            rg_positions = []
+            rg_maturities = []
+            rg_apz_vals = []
+            n_alive_total = 0
+            n_alive_rg = 0
+            for ai in cell_agent.getPopulationData():
+                if int(ai.getVariableInt("dead")) != 0:
+                    continue
+                n_alive_total += 1
+                ct = int(ai.getVariableInt("cell_type"))
+                if ct == 2:  # RG
+                    n_alive_rg += 1
+                    rg_positions.append([
+                        float(ai.getVariableFloat("x")),
+                        float(ai.getVariableFloat("y")),
+                        float(ai.getVariableFloat("z")),
+                    ])
+                    rg_maturities.append(float(ai.getVariableFloat("rosette_maturity")))
+                    rg_apz_vals.append(abs(float(ai.getVariableFloat("apz"))))
+
+            rg_fraction = n_alive_rg / n_alive_total if n_alive_total > 0 else 0.0
+            mean_rosette_maturity_val = float(np.mean(rg_maturities)) if rg_maturities else 0.0
+            mean_apz_val = float(np.mean(rg_apz_vals)) if rg_apz_vals else 0.0
+
+            pos_arr = np.array(rg_positions) if rg_positions else np.zeros((0, 3))
+            labels = np.full(n_alive_rg, -1, dtype=int)
+            n_rg_clusters = 0
+            mean_cluster_size_val = 0.0
+            largest_cluster_size = 0
+            if n_alive_rg >= 2:
+                eps_cluster = 3.0 * float(CELL_RADIUS[2])  # 3 × RG cell radius ≈ 15 µm
+                labels = _DBSCAN(eps=eps_cluster, min_samples=2).fit_predict(pos_arr)
+                clustered = labels[labels >= 0]
+                if len(clustered) > 0:
+                    n_rg_clusters = int(np.unique(clustered).shape[0])
+                    cluster_sizes = np.bincount(clustered)
+                    mean_cluster_size_val = float(cluster_sizes.mean())
+                    largest_cluster_size = int(cluster_sizes.max())
+            elif n_alive_rg == 1:
+                n_rg_clusters = 1
+                mean_cluster_size_val = 1.0
+                largest_cluster_size = 1
+
+            # --- Compactness metrics (PCA eigenvalue ratio; 0=linear, 1=circular) ---
+            # rg_assembly_compactness: shape of the entire RG assembly in XY
+            rg_assembly_compactness_val = 0.0
+            if n_alive_rg >= 3:
+                cov_all = np.cov(pos_arr[:, :2].T)
+                ev_all = np.linalg.eigvalsh(cov_all)  # ascending order
+                if ev_all[-1] > 1e-12:
+                    rg_assembly_compactness_val = float(ev_all[0] / ev_all[-1])
+
+            # mean_cluster_compactness: per-cluster PCA compactness, weighted by size
+            mean_cluster_compactness_val = 0.0
+            if n_rg_clusters > 0 and n_alive_rg >= 3:
+                weighted_sum = 0.0
+                total_weight = 0
+                for _lid in range(n_rg_clusters):
+                    _mask = (labels == _lid)
+                    _sz = int(_mask.sum())
+                    if _sz < 3:
+                        continue
+                    _cxy = pos_arr[np.where(_mask)[0], :2]
+                    _cov = np.cov(_cxy.T)
+                    _ev = np.linalg.eigvalsh(_cov)
+                    if _ev[-1] > 1e-12:
+                        weighted_sum += (_ev[0] / _ev[-1]) * _sz
+                        total_weight += _sz
+                if total_weight > 0:
+                    mean_cluster_compactness_val = weighted_sum / total_weight
+
+            time_val = step * FLAMEGPU.environment.getPropertyFloat("TIME_STEP")
+            rg_row = pd.DataFrame([{
+                "step": step,
+                "time": time_val,
+                "n_alive_total": n_alive_total,
+                "n_alive_rg": n_alive_rg,
+                "rg_fraction": rg_fraction,
+                "n_rg_clusters": n_rg_clusters,
+                "mean_cluster_size": mean_cluster_size_val,
+                "largest_cluster_size": largest_cluster_size,
+                "mean_rosette_maturity": mean_rosette_maturity_val,
+                "mean_apz": mean_apz_val,
+                "rg_assembly_compactness": rg_assembly_compactness_val,
+                "mean_cluster_compactness": mean_cluster_compactness_val,
+            }])
+            if len(RG_ROSETTE_METRICS_OVER_TIME) == 0:
+                RG_ROSETTE_METRICS_OVER_TIME = rg_row
+            else:
+                RG_ROSETTE_METRICS_OVER_TIME = pd.concat(
+                    [RG_ROSETTE_METRICS_OVER_TIME, rg_row], ignore_index=True
                 )
 
         # --- Speed metrics (final step only) ---
@@ -3281,7 +3379,7 @@ POISSON_RATIO_OVER_TIME = -1 * incL_dir1 / incL_dir2
 def manageLogs(steps, is_ensemble, idx):
     global SAVE_EVERY_N_STEPS, SAVE_PICKLE, SHOW_PLOTS, RES_PATH, MODEL_CONFIG, EXECUTION_TIME, STEPS
     global BPOS_OVER_TIME, BFORCE_OVER_TIME, BFORCE_SHEAR_OVER_TIME, POISSON_RATIO_OVER_TIME, OSCILLATORY_STRAIN_OVER_TIME
-    global CELL_SPEED_METRICS, ORGANOID_METRICS_OVER_TIME, RG_METRICS, INCLUDE_RG_VARIABLES
+    global CELL_SPEED_METRICS, ORGANOID_METRICS_OVER_TIME, RG_METRICS, RG_ROSETTE_METRICS_OVER_TIME, INCLUDE_RG_VARIABLES
     global INCLUDE_FIBRE_NETWORK, INCLUDE_CELLS, INCLUDE_FOCAL_ADHESIONS, ORGANOID_ASSAY
     ecm_agent_counts = [None] * len(steps)
     counter = 0
@@ -3534,6 +3632,11 @@ def manageLogs(steps, is_ensemble, idx):
             print("RG FINAL CELL METRICS")
             print(RG_METRICS)
             print()
+        if INCLUDE_RG_VARIABLES and len(RG_ROSETTE_METRICS_OVER_TIME) > 0:
+            print("============================")
+            print("RG ROSETTE METRICS OVER TIME")
+            print(RG_ROSETTE_METRICS_OVER_TIME)
+            print()
         if ORGANOID_ASSAY and len(ORGANOID_METRICS_OVER_TIME) > 0:
             print("============================")
             print("ORGANOID METRICS OVER TIME")
@@ -3557,6 +3660,7 @@ def manageLogs(steps, is_ensemble, idx):
                          'CELL_METRICS_OVER_TIME': CELL_METRICS_OVER_TIME,
                          'CELL_SPEED_METRICS': CELL_SPEED_METRICS,
                          'RG_FINAL_METRICS': RG_METRICS,
+                         'RG_ROSETTE_METRICS_OVER_TIME': RG_ROSETTE_METRICS_OVER_TIME,
                          'ORGANOID_METRICS_OVER_TIME': ORGANOID_METRICS_OVER_TIME,
                          'POISSON_RATIO_OVER_TIME': POISSON_RATIO_OVER_TIME,
                          'OSCILLATORY_STRAIN_OVER_TIME': OSCILLATORY_STRAIN_OVER_TIME,

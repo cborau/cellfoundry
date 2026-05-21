@@ -155,7 +155,7 @@ def configure_globals(g: dict) -> None:
                                                           #        RG threshold (x_eq=0.70) requires sp2>0.175µM.
                                                           #        With max sp2~0.21µM: RG zone is narrow, biasing
                                                           #        toward 1-2 central rosettes.
-    g["RG_COMMIT_INHIBIT_RATE"]        = 8e-6    # [1/s]  Notch-Delta lateral inhibition rate.
+    g["RG_COMMIT_INHIBIT_RATE"]        = 1e-6    # [1/s]  Notch-Delta lateral inhibition rate.
                                                           #        Allows each nucleation site to grow to ~10
                                                           #        cells before the inhibitory fence is strong
                                                           #        enough to suppress the next ring.
@@ -165,7 +165,7 @@ def configure_globals(g: dict) -> None:
                                                           #          No sp2: x_eq = 2e-6/4.46e-6 = 0.45 -> NPC
                                                           #          sp2=0.20µM: x_eq = 6e-6/8.46e-6 = 0.71 -> RG
     g["RG_COMMIT_THRESHOLD_NPC"]       = 0.35    # [-]
-    g["RG_COMMIT_THRESHOLD_RG"]        = 0.70    # [-]
+    g["RG_COMMIT_THRESHOLD_RG"]        = 0.67    # [-]
     g["RG_EPITHELIAL_RATE"]            = 2e-6    # [1/s]  τ ≈ 140 h → polarity develops
                                                           #        only for fully committed RG in 7 days;
                                                           #        also gated on cell_type==2 so NPC
@@ -202,7 +202,7 @@ def configure_globals(g: dict) -> None:
                                4.0, 4.0, 4.0,
                                4.0, 4.0, 4.0]  # [nN/µm] RG-RG repulsion = same as others
     g["RG_EPITHELIAL_ADHESION_BOOST"] = 2.5     # [-]  max RG-RG = 1.2×2.5=3.0
-    g["RG_COMMIT_NOISE"]     = 1e-4    # [1/s / sqrt(s)]  Ito noise on commitment ODE
+    g["RG_COMMIT_NOISE"]     = 7e-5    # [1/s / sqrt(s)]  Ito noise on commitment ODE
                                        # sigma_total(24h) = 1e-4 * sqrt(86400) ~ 0.029
                                        # NPC timing spread ~ +/-0.029 / (5e-6 * 0.65) ~ +/-2.5h
     g["RG_INTRINSIC_APICAL_Z"] = 2e-3  # [-/step]  blend alpha toward (0,0,1) per step
@@ -210,12 +210,15 @@ def configure_globals(g: dict) -> None:
                                        # -> half-life ~8h: aligns quickly after RG commitment.
                                        # For NPC cells alpha = 2e-3 * epi * commit (much slower;
                                        # at epi=0.1, commit=0.5: half-life ~115h)
+    g["RG_LUMEN_BIAS_STRENGTH"] = 4e-3  # [-/step]  XY blend toward local RG-centroid lumen cue
+    g["RG_LUMEN_SEARCH_RADIUS"] = 42.0  # [um]       neighbour radius for local lumen centroid
+    g["RG_LUMEN_MIN_NEIGHBOURS"] = 2.0  # [-]        minimum alive RG neighbours to enable lumen cue
     g["RG_APICAL_NOISE_AMP"]   = 1e-3  # [-/step]  xy noise std dev for cells outside the morphogen gate
     g["RG_XY_SPRING_K"]    = 5e-6    # [1/s]  xy substrate spring stiffness for NPC/RG;
                                        #        anchor slips at 20 µm so cells can aggregate
     g["RG_XY_BOND_BREAK"]  = 20.0   # [µm]   bond-rupture distance: anchor slips to current
                                        #        position when cell has moved >20 µm from it
-    g["RG_COMMIT_DECAY_RATE"] = 2.5e-6  # [1/s]  first-order decay of rg_commit_level;
+    g["RG_COMMIT_DECAY_RATE"] = 1.5e-6  # [1/s]  first-order decay of rg_commit_level;
                                        #        x_eq_basal = 5e-6/(5e-6+2.5e-6) = 0.667 < RG_threshold.
                                        #        With k_inhibit=8e-6, 1 mature RG neighbour (delta~0.12):
                                        #          effective_decay = 2.5e-6 + 0.96e-6 = 3.46e-6
@@ -251,7 +254,8 @@ def configure_layers(model, g: dict) -> None:
     rg_diff_fn = CELL_agent.newRTCFunctionFile("cell_rg_differentiation", str(_HERE / "cell_rg_differentiation.cpp"))
     rg_diff_fn.setMessageInput("cell_spatial_location_message")
 
-    CELL_agent.newRTCFunctionFile("cell_rg_polarity_update", str(_HERE / "cell_rg_polarity_update.cpp"))
+    rg_polarity_fn = CELL_agent.newRTCFunctionFile("cell_rg_polarity_update", str(_HERE / "cell_rg_polarity_update.cpp"))
+    rg_polarity_fn.setMessageInput("cell_spatial_location_message")
 
     # --- Convenience flags (read from merged globals) -----------------------------
     INCLUDE_DIFFUSION           = g.get("INCLUDE_DIFFUSION",          True)
@@ -336,11 +340,11 @@ def _register_rg_env_properties(env, g: dict) -> None:
     _safe(lambda: env.newPropertyFloat("RG_COMMIT_AUTOCRINE_RATE",
                                         g.get("RG_COMMIT_AUTOCRINE_RATE", 3e-6)))
     _safe(lambda: env.newPropertyFloat("RG_COMMIT_INHIBIT_RATE",
-                                        g.get("RG_COMMIT_INHIBIT_RATE", 8e-6)))
+                                        g.get("RG_COMMIT_INHIBIT_RATE", 1e-6)))
     _safe(lambda: env.newPropertyFloat("RG_COMMIT_THRESHOLD_NPC",
                                         g.get("RG_COMMIT_THRESHOLD_NPC", 0.35)))
     _safe(lambda: env.newPropertyFloat("RG_COMMIT_THRESHOLD_RG",
-                                        g.get("RG_COMMIT_THRESHOLD_RG", 0.70)))
+                                        g.get("RG_COMMIT_THRESHOLD_RG", 0.67)))
     _safe(lambda: env.newPropertyFloat("RG_EPITHELIAL_RATE",
                                         g.get("RG_EPITHELIAL_RATE", 1e-5)))
     _safe(lambda: env.newPropertyFloat("RG_POLARITY_SP2_THRESHOLD",
@@ -364,9 +368,15 @@ def _register_rg_env_properties(env, g: dict) -> None:
     _safe(lambda: env.newPropertyFloat("RG_EPITHELIAL_ADHESION_BOOST",
                                         g.get("RG_EPITHELIAL_ADHESION_BOOST", 2.5)))
     _safe(lambda: env.newPropertyFloat("RG_COMMIT_NOISE",
-                                        g.get("RG_COMMIT_NOISE", 1e-4)))
+                                        g.get("RG_COMMIT_NOISE", 7e-5)))
     _safe(lambda: env.newPropertyFloat("RG_INTRINSIC_APICAL_Z",
                                         g.get("RG_INTRINSIC_APICAL_Z", 0.5)))
+    _safe(lambda: env.newPropertyFloat("RG_LUMEN_BIAS_STRENGTH",
+                                        g.get("RG_LUMEN_BIAS_STRENGTH", 4e-3)))
+    _safe(lambda: env.newPropertyFloat("RG_LUMEN_SEARCH_RADIUS",
+                                        g.get("RG_LUMEN_SEARCH_RADIUS", 42.0)))
+    _safe(lambda: env.newPropertyFloat("RG_LUMEN_MIN_NEIGHBOURS",
+                                        g.get("RG_LUMEN_MIN_NEIGHBOURS", 2.0)))
     _safe(lambda: env.newPropertyFloat("RG_APICAL_NOISE_AMP",
                                         g.get("RG_APICAL_NOISE_AMP", 0.0)))
     _safe(lambda: env.newPropertyFloat("RG_XY_SPRING_K",
@@ -374,4 +384,4 @@ def _register_rg_env_properties(env, g: dict) -> None:
     _safe(lambda: env.newPropertyFloat("RG_XY_BOND_BREAK",
                                         g.get("RG_XY_BOND_BREAK", 20.0)))
     _safe(lambda: env.newPropertyFloat("RG_COMMIT_DECAY_RATE",
-                                        g.get("RG_COMMIT_DECAY_RATE", 2.5e-6)))
+                                        g.get("RG_COMMIT_DECAY_RATE", 1.5e-6)))
