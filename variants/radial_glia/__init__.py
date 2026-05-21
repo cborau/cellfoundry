@@ -44,7 +44,7 @@ PARAMS = {
     # ±150 µm domain (set in model.py) → dx = 15 µm/voxel (N=21 → 9261 voxels).
     # 240 cells in a 50 µm disc → A_per_cell ~ pi* R_disc²/N_CELLS -> dnn ~ sqrt(A_per_cell) = R_disc * sqrt(pi/N_CELLS) µm mean NN distance; just within 15 µm interaction radius.
     # 50 µm cluster spans ~13 voxels per axis, giving real per-cell sp2 gradient heterogeneity.
-    "MONOLAYER_CLUSTER_RADIUS":   100.0,         # [µm]  for a known/desired dnn -> R_disc = dnn * sqrt(N_CELLS/pi) = 12 * sqrt(240/pi) ≈ 100 µm
+    "MONOLAYER_CLUSTER_RADIUS":   120.0,         # [µm]  for a known/desired dnn -> R_disc = dnn * sqrt(N_CELLS/pi) = 12 * sqrt(240/pi) ≈ 100 µm
     "MONOLAYER_Z":                -150.0,          # [µm]  0 = domain centre
     # Wrap cells in x and y to avoid border pile-up in the finite domain.
     # The override cell_move.cpp already implements wrapf() for all axes.
@@ -61,7 +61,7 @@ PARAMS = {
     "INCLUDE_LUMEN":              False,
 
     # --- Cell geometry ---
-    "N_CELLS":                    240,
+    "N_CELLS":                    500,
     "CELL_RADIUS":                [5.0, 5.0, 5.0],          # [µm]
 
     # --- Cell motility ---
@@ -100,8 +100,8 @@ PARAMS = {
     "INIT_ECM_CONCENTRATION_VALS":  [2.5, 2.5, 0.0],        # species 2 starts at 0
     # C_sp_sat is the equilibrium ECM sp2 that NPC/RG cells drive their local voxel toward.
     # Without this override C_sp_sat[2]=0, so c1=dt*alpha*k_prod*0=0 and NO sp2 is ever secreted.
-    # Reduced from 2.5 to 0.5 µM: caps the local sp2 peak so the autocrine drive near the
-    # cluster centre is at most 8e-6 * 0.5 = 4e-6/s (NPC->RG in ~54h from NPC formation).
+    # Caps the local sp2 peak so the autocrine drive near the
+    # cluster centre is at most k_auto * C_sat (NPC->RG in ~54h from NPC formation).
     "INIT_ECM_SAT_CONCENTRATION_VALS": [0.0, 0.0, 0.5],     # sp2 secretion target [µM]
 
     # --- Metabolism / secretion ---
@@ -117,9 +117,9 @@ PARAMS = {
     # --- Simulation timing ---
     # TIME_STEP=60 s. With dx=7.5 µm, D=0.1 µm²/s: Fi=0.32 < 0.5, explicit stable.
     # 7 days (168h) covers iPSC reseeding (day 3) through established rosettes (day 7+).
-    "TIME_STEP":                  60.0,                      # [s]  ← was 10 s
+    "TIME_STEP":                  60.0,                      # [s]
     "STEPS":                      10080,                     # 7 days: 168 h × 3600 s/h ÷ 60 s/step
-    "SAVE_EVERY_N_STEPS":         60,                        # save every 1h (was 120=2h; finer to capture type transitions)
+    "SAVE_EVERY_N_STEPS":         60,                        # save every 1h; fine enough to capture type transitions
     "DEBUG_PRINT_INTERVAL":       60,                        # print live stats every 1h of sim time
 }
 
@@ -144,22 +144,32 @@ def configure_globals(g: dict) -> None:
     These values are read back in configure_layers to register env properties.
     They are set as globals so downstream code (e.g. logging) can reference them.
     """
-    g["RG_COMMIT_RATE"]                = 5e-6    # [1/s]  basal commit rate
-                                                          #        τ = 1/k ≈ 55.6 h; first NPC cells
-                                                          #        appear ~24 h after reseeding
-                                                          #        (1−exp(−5e−6×86400) ≈ 0.35 = NPC threshold)
-    g["RG_COMMIT_AUTOCRINE_RATE"]      = 8e-6    # [1/(s·µM)]  morphogen-driven amplification.
-                                                          #        With sp2~0.5 µM at cluster centre,
-                                                          #        drive = 8e-6*0.5 = 4e-6/s ->
-                                                          #        NPC->RG in ~54h (day 2.3 from NPC).
-                                                          #        At L=50µm from centre sp2~0.18µM:
-                                                          #        drive = 1.4e-6/s -> ~154h >> 7 days.
-                                                          #        Only cells within ~45µm become RG.
-    g["RG_COMMIT_PARACRINE_RATE"]      = 2e-5    # [1/s]  RG neighbour-driven rate (was 1e-4)
+    g["RG_COMMIT_RATE"]                = 5e-6    # [1/s]  basal commit rate.
+                                                          #        tau = 1/(5e-6+2.5e-6) = 37h; first NPC at ~28h.
+                                                          #        x_eq_basal = 5e-6/7.5e-6 = 0.667 < RG threshold;
+                                                          #        sp2 autocrine required to cross into RG territory.
+    g["RG_COMMIT_AUTOCRINE_RATE"]      = 2e-5    # [1/(s·µM)]  morphogen-driven amplification.
+                                                          #        Slows commitment so the sp2 gradient can
+                                                          #        concentrate around the first nucleation site
+                                                          #        before neighbours commit.
+                                                          #        RG threshold (x_eq=0.70) requires sp2>0.175µM.
+                                                          #        With max sp2~0.21µM: RG zone is narrow, biasing
+                                                          #        toward 1-2 central rosettes.
+    g["RG_COMMIT_INHIBIT_RATE"]        = 8e-6    # [1/s]  Notch-Delta lateral inhibition rate.
+                                                          #        Allows each nucleation site to grow to ~10
+                                                          #        cells before the inhibitory fence is strong
+                                                          #        enough to suppress the next ring.
+                                                          #        With k_basal=2e-6, the fence actually holds:
+                                                          #        Equilibrium (1 mature RG neighbor, delta~0.12):
+                                                          #          effective_decay = 1.5e-6 + 8e-6*0.12 = 2.46e-6
+                                                          #          No sp2: x_eq = 2e-6/4.46e-6 = 0.45 -> NPC
+                                                          #          sp2=0.20µM: x_eq = 6e-6/8.46e-6 = 0.71 -> RG
     g["RG_COMMIT_THRESHOLD_NPC"]       = 0.35    # [-]
     g["RG_COMMIT_THRESHOLD_RG"]        = 0.70    # [-]
-    g["RG_EPITHELIAL_RATE"]            = 1e-5    # [1/s]  τ ≈ 28 h → polarity
-                                                          #        develops gradually over days
+    g["RG_EPITHELIAL_RATE"]            = 2e-6    # [1/s]  τ ≈ 140 h → polarity develops
+                                                          #        only for fully committed RG in 7 days;
+                                                          #        also gated on cell_type==2 so NPC
+                                                          #        cells never accumulate epi>0
     g["RG_POLARITY_SP2_THRESHOLD"]     = 0.1     # [uM]  sp2 gate for z-bias; at L=50 um: C(75 um)~0.09 < threshold
     g["RG_SUBSTRATE_K"]                = 5e-5    # [nN/µm / (nN·s/µm)] → effective 1/s
                                                           #        stability: λ = K/D·dt = 5e-5/0.4×60 ≈ 0.0075 (< 1, stable)
@@ -171,7 +181,7 @@ def configure_globals(g: dict) -> None:
                                                           #        z_rest = COORD_BOUNDARY_Z_NEG + RG_SUBSTRATE_Z0
                                                           #        = -75 + 75 = 0 µm (domain centre),
                                                           #        consistent with MONOLAYER_Z = 0.0
-    g["RG_APICAL_BIAS_RG"]             = 2e-3    # [µm/s] for RG type
+    g["RG_APICAL_BIAS_RG"]             = 8e-4    # [µm/s] for RG type; prevents rapid z-detachment
     g["RG_APICAL_BIAS_NPC"]            = 5e-4    # [µm/s] for NPC type
     # Adhesion matrix: 3×3 flattened row-major, indexed as [self_type * 3 + nb_type]  [nN/µm]
     # Rows = self cell type; columns = neighbour cell type.
@@ -183,28 +193,36 @@ def configure_globals(g: dict) -> None:
     #              nb:  iPSC  NPC   RG
     #   self: iPSC  [  0.4,  0.4,  0.2 ]
     #         NPC   [  0.4,  0.8,  0.6 ]
-    #         RG    [  0.2,  0.6,  1.2 ]   ← max with boost = 1.2 × 2.5 = 3.0 < repulsion 4.0
-    #                                         cells maintain a ring gap rather than solid blob
+    #         RG    [  0.2,  0.6,  2.2 ]   <- max with boost = 2.2 x 2.5 = 5.5 > repulsion 4.0
+    #                                         at epi=0.5: K_adh = 2.2*1.75 = 3.85 < 4.0 (gap maintained)
     g["RG_ADHESION_MATRIX"]  = [0.4, 0.4, 0.2,
                                  0.4, 0.8, 0.6,
-                                 0.2, 0.6, 1.2]
+                                 0.2, 0.6, 2.2]
     g["RG_REPULSION_MATRIX"] = [4.0, 4.0, 4.0,
                                4.0, 4.0, 4.0,
-                               4.0, 4.0, 5.0]  # [nN/µm] RG-RG (index 8) slightly stronger
-    g["RG_EPITHELIAL_ADHESION_BOOST"] = 2.5     # [-]  reduced 3.0→2.5; max RG-RG = 1.2×2.5=3.0
+                               4.0, 4.0, 4.0]  # [nN/µm] RG-RG repulsion = same as others
+    g["RG_EPITHELIAL_ADHESION_BOOST"] = 2.5     # [-]  max RG-RG = 1.2×2.5=3.0
     g["RG_COMMIT_NOISE"]     = 1e-4    # [1/s / sqrt(s)]  Ito noise on commitment ODE
                                        # sigma_total(24h) = 1e-4 * sqrt(86400) ~ 0.029
                                        # NPC timing spread ~ +/-0.029 / (5e-6 * 0.65) ~ +/-2.5h
-                                       # Was 1e-3: sigma(1h) = 0.06 >> drift 0.018 -> upward
-                                       # bias from reflecting clamp at 0 dominated the mean
-    g["RG_INTRINSIC_APICAL_Z"] = 3e-4  # [-/step]  blend alpha toward (0,0,1) per step (NPC/RG in field)
-                                       # half-life of angle with z = ln(2)/alpha ~ 2310 steps ~ 38 h
+    g["RG_INTRINSIC_APICAL_Z"] = 2e-3  # [-/step]  blend alpha toward (0,0,1) per step
+                                       # For RG cells alpha = 2e-3 * commit (~1.4e-3 at commit=0.7)
+                                       # -> half-life ~8h: aligns quickly after RG commitment.
+                                       # For NPC cells alpha = 2e-3 * epi * commit (much slower;
+                                       # at epi=0.1, commit=0.5: half-life ~115h)
     g["RG_APICAL_NOISE_AMP"]   = 1e-3  # [-/step]  xy noise std dev for cells outside the morphogen gate
-    g["RG_XY_SPRING_K"]    = 1e-5    # [1/s]  xy substrate spring stiffness for NPC/RG
-                                       #        equilibrium drift ≈ CELL_DV_MAX / K = 3e-3/1e-5 = 300 µm
-                                       #        (soft tether; limits long-range lateral migration)
+    g["RG_XY_SPRING_K"]    = 5e-6    # [1/s]  xy substrate spring stiffness for NPC/RG;
+                                       #        anchor slips at 20 µm so cells can aggregate
     g["RG_XY_BOND_BREAK"]  = 20.0   # [µm]   bond-rupture distance: anchor slips to current
                                        #        position when cell has moved >20 µm from it
+    g["RG_COMMIT_DECAY_RATE"] = 2.5e-6  # [1/s]  first-order decay of rg_commit_level;
+                                       #        x_eq_basal = 5e-6/(5e-6+2.5e-6) = 0.667 < RG_threshold.
+                                       #        With k_inhibit=8e-6, 1 mature RG neighbour (delta~0.12):
+                                       #          effective_decay = 2.5e-6 + 0.96e-6 = 3.46e-6
+                                       #          No sp2:        x_eq = 5e-6/8.46e-6 = 0.591 -> fence holds
+                                       #          sp2=0.14uM:    x_eq = 7.8e-6/11.26e-6 = 0.693 -> NPC
+                                       #          sp2=0.17uM:    x_eq = 8.4e-6/11.86e-6 = 0.708 -> RG
+                                       #        Fence holds at mean sp2; rosette grows where sp2 peaks.
 
 
 
@@ -230,12 +248,10 @@ def configure_layers(model, g: dict) -> None:
     # --- Register new RTC agent functions on the CELL agent -----------------------
     CELL_agent = model.Agent("CELL")
 
-    rg_diff_code = (_HERE / "cell_rg_differentiation.cpp").read_text()
-    rg_diff_fn = CELL_agent.newRTCFunction("cell_rg_differentiation", rg_diff_code)
+    rg_diff_fn = CELL_agent.newRTCFunctionFile("cell_rg_differentiation", str(_HERE / "cell_rg_differentiation.cpp"))
     rg_diff_fn.setMessageInput("cell_spatial_location_message")
 
-    rg_pol_code = (_HERE / "cell_rg_polarity_update.cpp").read_text()
-    CELL_agent.newRTCFunction("cell_rg_polarity_update", rg_pol_code)
+    CELL_agent.newRTCFunctionFile("cell_rg_polarity_update", str(_HERE / "cell_rg_polarity_update.cpp"))
 
     # --- Convenience flags (read from merged globals) -----------------------------
     INCLUDE_DIFFUSION           = g.get("INCLUDE_DIFFUSION",          True)
@@ -319,8 +335,8 @@ def _register_rg_env_properties(env, g: dict) -> None:
                                         g.get("RG_COMMIT_RATE", 5e-6)))
     _safe(lambda: env.newPropertyFloat("RG_COMMIT_AUTOCRINE_RATE",
                                         g.get("RG_COMMIT_AUTOCRINE_RATE", 3e-6)))
-    _safe(lambda: env.newPropertyFloat("RG_COMMIT_PARACRINE_RATE",
-                                        g.get("RG_COMMIT_PARACRINE_RATE", 1e-4)))
+    _safe(lambda: env.newPropertyFloat("RG_COMMIT_INHIBIT_RATE",
+                                        g.get("RG_COMMIT_INHIBIT_RATE", 8e-6)))
     _safe(lambda: env.newPropertyFloat("RG_COMMIT_THRESHOLD_NPC",
                                         g.get("RG_COMMIT_THRESHOLD_NPC", 0.35)))
     _safe(lambda: env.newPropertyFloat("RG_COMMIT_THRESHOLD_RG",
@@ -357,3 +373,5 @@ def _register_rg_env_properties(env, g: dict) -> None:
                                         g.get("RG_XY_SPRING_K", 1e-5)))
     _safe(lambda: env.newPropertyFloat("RG_XY_BOND_BREAK",
                                         g.get("RG_XY_BOND_BREAK", 20.0)))
+    _safe(lambda: env.newPropertyFloat("RG_COMMIT_DECAY_RATE",
+                                        g.get("RG_COMMIT_DECAY_RATE", 2.5e-6)))

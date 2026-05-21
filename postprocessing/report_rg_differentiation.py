@@ -219,13 +219,15 @@ def _aggregate(snap: dict, step: int, dt_s: float) -> dict:
 
     # --- Epithelialization ---
     el = snap.get("epithelialization_level")
-    row["epithelial_mean"]    = _safe_mean(el)
-    row["epithelial_rg_mean"] = _safe_mean(el, rg_mask)
+    row["epithelial_mean"]     = _safe_mean(el)
+    row["epithelial_npc_mean"] = _safe_mean(el, npc_mask)
+    row["epithelial_rg_mean"]  = _safe_mean(el, rg_mask)
 
     # --- Rosette maturity ---
     rm = snap.get("rosette_maturity")
-    row["rosette_maturity_mean"]    = _safe_mean(rm)
-    row["rosette_maturity_rg_mean"] = _safe_mean(rm, rg_mask)
+    row["rosette_maturity_mean"]     = _safe_mean(rm)
+    row["rosette_maturity_npc_mean"] = _safe_mean(rm, npc_mask)
+    row["rosette_maturity_rg_mean"]  = _safe_mean(rm, rg_mask)
 
     # --- RG neighbour density (meaningful only for RG cells) ---
     nd = snap.get("rg_neighbour_density")
@@ -236,15 +238,22 @@ def _aggregate(snap: dict, step: int, dt_s: float) -> dict:
     row["morphogen_mean"]    = _safe_mean(ml)
     row["morphogen_rg_mean"] = _safe_mean(ml, rg_mask)
 
-    # --- Apical z-alignment: mean |apz| for RG cells ---
+    # --- Apical z-alignment: mean |apz| for NPC and RG cells ---
     # |apz| = 1 → apical vector points along z (perfect epithelial polarity)
     # |apz| = 0 → apical vector lies in the xy-plane (no z-polarity)
     av = snap.get("apical_vector")
-    if av is not None and rg_mask.any():
-        apz_rg = av[rg_mask, 2]
-        row["apical_z_abs_rg_mean"] = float(np.abs(apz_rg).mean())
+    if av is not None:
+        if rg_mask.any():
+            row["apical_z_abs_rg_mean"] = float(np.abs(av[rg_mask, 2]).mean())
+        else:
+            row["apical_z_abs_rg_mean"] = float("nan")
+        if npc_mask.any():
+            row["apical_z_abs_npc_mean"] = float(np.abs(av[npc_mask, 2]).mean())
+        else:
+            row["apical_z_abs_npc_mean"] = float("nan")
     else:
-        row["apical_z_abs_rg_mean"] = float("nan")
+        row["apical_z_abs_rg_mean"]  = float("nan")
+        row["apical_z_abs_npc_mean"] = float("nan")
 
     return row
 
@@ -296,28 +305,40 @@ def _plot(df: pd.DataFrame, out_path: Path, show: bool) -> None:
 
     # ── Panel 3: Epithelialization & rosette maturity ─────────────────────────
     ax = axes[2]
-    _ep = df.get("epithelial_rg_mean")
-    _rm = df.get("rosette_maturity_rg_mean")
-    if _ep is not None and not _ep.isna().all():
-        ax.plot(x, _ep, label="Epithelialization (RG)", color="#C44E52", linewidth=1.8)
-    if _rm is not None and not _rm.isna().all():
-        ax.plot(x, _rm, label="Rosette maturity (RG)", color="#8172B2",
+    _ep_npc = df.get("epithelial_npc_mean")
+    _ep_rg  = df.get("epithelial_rg_mean")
+    _rm_npc = df.get("rosette_maturity_npc_mean")
+    _rm_rg  = df.get("rosette_maturity_rg_mean")
+    if _ep_npc is not None and not _ep_npc.isna().all():
+        ax.plot(x, _ep_npc, label="Epithelialization (NPC)",
+                color=_CELL_TYPE_COLORS[1], linestyle="-", linewidth=1.5)
+    if _ep_rg is not None and not _ep_rg.isna().all():
+        ax.plot(x, _ep_rg, label="Epithelialization (RG)", color="#C44E52", linewidth=1.8)
+    if _rm_npc is not None and not _rm_npc.isna().all():
+        ax.plot(x, _rm_npc, label="Rosette maturity (NPC)",
+                color=_CELL_TYPE_COLORS[1], linestyle=":", linewidth=1.2)
+    if _rm_rg is not None and not _rm_rg.isna().all():
+        ax.plot(x, _rm_rg, label="Rosette maturity (RG)", color="#8172B2",
                 linestyle="--", linewidth=1.5)
     ax.set_ylabel("Level [0–1]")
     ax.set_ylim(0, 1.05)
-    ax.set_title("Epithelialization & rosette maturity (RG cells only)")
+    ax.set_title("Epithelialization & rosette maturity (NPC and RG)")
     ax.legend(frameon=False, fontsize=9)
     ax.grid(axis="y", linestyle=":", alpha=0.5)
 
     # ── Panel 4: Apical polarity & morphogen ──────────────────────────────────
     ax  = axes[3]
     ax2 = ax.twinx()
-    _ap = df.get("apical_z_abs_rg_mean")
-    if _ap is not None and not _ap.isna().all():
-        ax.plot(x, _ap, label="|apz| RG", color=_CELL_TYPE_COLORS[2], linewidth=1.8)
-    ax.set_ylabel("Mean |apical z| (RG cells)")
+    _ap_npc = df.get("apical_z_abs_npc_mean")
+    _ap_rg  = df.get("apical_z_abs_rg_mean")
+    if _ap_npc is not None and not _ap_npc.isna().all():
+        ax.plot(x, _ap_npc, label="|apz| NPC",
+                color=_CELL_TYPE_COLORS[1], linestyle="-", linewidth=1.5)
+    if _ap_rg is not None and not _ap_rg.isna().all():
+        ax.plot(x, _ap_rg, label="|apz| RG", color=_CELL_TYPE_COLORS[2], linewidth=1.8)
+    ax.set_ylabel("Mean |apical z|")
     ax.set_ylim(0, 1.05)
-    ax.set_title("Apical z-polarity & morphogen_local (RG cells)")
+    ax.set_title("Apical z-polarity & morphogen_local (NPC and RG)")
     _mg = df.get("morphogen_rg_mean")
     if _mg is not None and not _mg.isna().all():
         ax2.plot(x, _mg, color="#CCB974", linestyle=":", linewidth=1.5,

@@ -19,7 +19,7 @@
  * New env properties (registered in variants/radial_glia/__init__.py):
  *   RG_COMMIT_RATE             [1/s]       - morphogen-independent basal rate
  *   RG_COMMIT_AUTOCRINE_RATE   [1/(s.a.u.)]- per-unit morphogen drive
- *   RG_COMMIT_PARACRINE_RATE   [1/s]       - RG neighbour density drive
+ *   RG_COMMIT_INHIBIT_RATE     [1/s]       - Notch-Delta lateral inhibition rate
  *   RG_COMMIT_THRESHOLD_NPC    [-]         - rg_commitment threshold: iPSC->NPC
  *   RG_COMMIT_THRESHOLD_RG     [-]         - rg_commitment threshold: NPC->RG
  *   RG_EPITHELIAL_RATE         [1/s]       - epithelialization kinetics
@@ -71,7 +71,6 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
 
   const float RG_COMMIT_RATE           = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_RATE");
   const float RG_COMMIT_AUTOCRINE_RATE = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_AUTOCRINE_RATE");
-  const float RG_COMMIT_PARACRINE_RATE = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_PARACRINE_RATE");
   const float RG_COMMIT_THRESHOLD_NPC  = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_THRESHOLD_NPC");
   const float RG_COMMIT_THRESHOLD_RG   = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_THRESHOLD_RG");
   const float RG_EPITHELIAL_RATE       = FLAMEGPU->environment.getProperty<float>("RG_EPITHELIAL_RATE");
@@ -100,7 +99,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
   // -------------------------------------------------------------------------
   int total_neighbours = 0;
   int rg_neighbours = 0;
-  float rg_align_sum = 0.0f;
+  float rg_align_sum   = 0.0f;
+  float inhibitory_sum = 0.0f;  // Notch-Delta: sum of commit_nb * |apz_nb| for RG neighbours
 
   for (const auto &message : FLAMEGPU->message_in(agent_x, agent_y, agent_z)) {
     const int msg_id = message.getVariable<int>("id");
@@ -114,8 +114,14 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
       // Rosette maturity: accumulate |nb_apz| (upward orientation of neighbour's apical pole).
       // Using |apz| of neighbours (and the cell itself, after the loop) is the chosen proxy
       // geometric signature of apicobasal polarisation in a columnar rosette.
-      const float nb_apz = message.getVariable<float>("apz");
-      rg_align_sum += fabsf(nb_apz);
+      const float nb_apz    = message.getVariable<float>("apz");
+      const float nb_commit = message.getVariable<float>("rg_commit_level");
+      rg_align_sum   += fabsf(nb_apz);
+      // Notch-Delta inhibitory signal: Delta ligand expression proportional to rg_commit * |apz|.
+      // Using |apz| as junction-maturity proxy - only cells that have established
+      // apicobasal polarity send strong inhibitory signal (~8h delay after RG commitment
+      // before the inhibitory fence goes up, allowing the initial rosette to nucleate).
+      inhibitory_sum += nb_commit * fabsf(nb_apz);
     }
   }
 
@@ -123,7 +129,11 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
       ? ((float)rg_neighbours / (float)(total_neighbours + 1))
       : 0.0f;
 
-  // Rosette maturity: own |apz| * mean(neighbour |apz|). 
+  // Notch-Delta inhibitory signal normalised by neighbourhood size (same denominator
+  // as local_rg_fraction so it scales consistently with cell density).
+  const float local_delta_signal = inhibitory_sum / (float)(total_neighbours + 1);
+
+  // Rosette maturity: own |apz| * mean(neighbour |apz|).
   if (rg_neighbours > 0) {
     rosette_maturity = fabsf(apz) * rg_align_sum / (float)rg_neighbours;
   }
@@ -137,16 +147,28 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
   // NPC/RG thresholds simultaneously, enabling spatial heterogeneity and
   // cluster/rosette nucleation.
   // -------------------------------------------------------------------------
-  const float RG_COMMIT_NOISE = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_NOISE");
+  const float RG_COMMIT_NOISE       = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_NOISE");
+  const float RG_COMMIT_DECAY_RATE  = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_DECAY_RATE");
+  const float RG_COMMIT_INHIBIT_RATE = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_INHIBIT_RATE");
   // Basal rate applies only to iPSC (cell_type == 0).  Once a cell is NPC or
   // RG, further progression requires sp2 signalling.  Without this gate the
   // positive basal drive accumulates every step and ALL cells reach commit = 1
   // within ~67 h regardless of sp2, producing all-RG outcomes.
+  // Positive paracrine term removed: replaced by Notch-Delta lateral inhibition below.
   const float drive = (agent_cell_type == 0 ? RG_COMMIT_RATE : 0.0f)
-                    + RG_COMMIT_AUTOCRINE_RATE * local_sp2
-                    + RG_COMMIT_PARACRINE_RATE * local_rg_fraction;
+                    + RG_COMMIT_AUTOCRINE_RATE * local_sp2;
   const float noise = RG_COMMIT_NOISE * FLAMEGPU->random.normal<float>() * sqrtf(TIME_STEP);
   rg_commit += drive * (1.0f - rg_commit) * TIME_STEP + noise;
+  // First-order decay: cells not receiving morphogen signal lose commitment.
+  rg_commit -= RG_COMMIT_DECAY_RATE * rg_commit * TIME_STEP;
+  // Notch-Delta lateral inhibition: committed RG cells send Delta signal proportional
+  // to their (rg_commit * |apz|) (Delta expression * junction maturity).  This adds an
+  // effective decay term that suppresses neighbours' commitment, producing spatial
+  // pattern (isolated RG islands surrounded by NPC).  The |apz| factor delays the
+  // inhibitory fence by ~8h after RG commitment, allowing the rosette ring to nucleate.
+  // Equilibrium: x_eq = drive / (drive + k_decay + k_inhibit * delta_signal)
+  // With 1 mature RG neighbor (delta~0.09): effective_decay doubles -> x_eq < 0.70 -> NPC.
+  rg_commit -= RG_COMMIT_INHIBIT_RATE * local_delta_signal * rg_commit * TIME_STEP;
   rg_commit = fminf(fmaxf(rg_commit, 0.0f), 1.0f);
 
   // -------------------------------------------------------------------------
@@ -175,9 +197,16 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
   // -------------------------------------------------------------------------
   // Epithelialization ODE (logistic, forward Euler)
   //   d_epi/dt = RG_EPITHELIAL_RATE * rg_commit * (1 - epi)
+  // Applies to both NPC and RG cells: NPC cells in the pseudo-stratified
+  // neuroepithelium do acquire partial apico-basal polarity proportional to
+  // their commitment level.  The z-alignment itself (in cell_rg_polarity_update)
+  // is additionally scaled by rg_commit for NPC cells, so peripheral NPC cells
+  // with low commitment develop much weaker z-polarity than RG cells.
   // -------------------------------------------------------------------------
-  epi += RG_EPITHELIAL_RATE * rg_commit * (1.0f - epi) * TIME_STEP;
-  epi = fminf(fmaxf(epi, 0.0f), 1.0f);
+  if (agent_cell_type >= 1) {
+    epi += RG_EPITHELIAL_RATE * rg_commit * (1.0f - epi) * TIME_STEP;
+    epi = fminf(fmaxf(epi, 0.0f), 1.0f);
+  }
 
   // -------------------------------------------------------------------------
   // Write back

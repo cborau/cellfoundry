@@ -78,10 +78,19 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_polarity_update, flamegpu::MessageNone, flamegpu
 
   if (RG_INTRINSIC_APICAL_Z > 1e-9f) {
     if (agent_cell_type >= 1 && C0 > RG_POLARITY_SP2_THRESHOLD) {
-      // Exponential blend toward (0,0,1), alpha per step = RG_INTRINSIC_APICAL_Z * epi.
-      // With default 3e-4 and epi=1: half-life = ln(2)/3e-4 ~ 2310 steps ~ 38 h.
-      const float epi   = FLAMEGPU->getVariable<float>("epithelialization_level");
-      const float alpha = RG_INTRINSIC_APICAL_Z * epi;
+      // Exponential blend toward (0,0,1) per step.
+      // For RG cells: alpha = RG_INTRINSIC_APICAL_Z * rg_commit_level
+      //   Using commit (not epi) gives immediate alignment at RG commitment (~0.7).
+      //   With RG_INTRINSIC_APICAL_Z=2e-3: alpha=1.4e-3 at commit=0.7, half-life~8h.
+      //   Waiting for epi to build up (as before) caused <30 deg alignment in 56h.
+      // For NPC cells: alpha = RG_INTRINSIC_APICAL_Z * epi * rg_commit_level
+      //   Peripheral NPC cells (low commit from decay term) develop very weak polarity.
+      //   Near-threshold NPC (commit~0.6, epi~0.1) get alpha~1.2e-4, half-life~58h.
+      const float epi    = FLAMEGPU->getVariable<float>("epithelialization_level");
+      const float commit = FLAMEGPU->getVariable<float>("rg_commit_level");
+      const float alpha  = (agent_cell_type == 2)
+          ? RG_INTRINSIC_APICAL_Z * commit
+          : RG_INTRINSIC_APICAL_Z * epi * commit * 0.1;
       new_apx *= (1.0f - alpha);
       new_apy *= (1.0f - alpha);
       new_apz  = (1.0f - alpha) * new_apz + alpha;

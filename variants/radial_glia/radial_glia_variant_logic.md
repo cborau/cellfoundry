@@ -49,23 +49,52 @@ Each step, `rg_commit_level` evolves according to:
 
 ```
 d(commit)/dt = [ k_basal
-               + k_autocrine * local_sp2
-               + k_paracrine * f_RG_neighbours ]
+               + k_autocrine * local_sp2 ]
              * (1 - commit)
+             - k_decay  * commit
+             - k_inhibit * delta_signal * commit
              + noise
 ```
 
 where:
-- `k_basal` = `RG_COMMIT_RATE` (5e-6 /s) -- slow baseline drift
-- `k_autocrine` = `RG_COMMIT_AUTOCRINE_RATE` (3e-5 /s per a.u.) -- morphogen the
-  cell senses from the ECM; amplifies commitment in cells already sitting in a
-  morphogen-rich region
-- `k_paracrine` = `RG_COMMIT_PARACRINE_RATE` (2e-5 /s per fraction) -- fraction
-  of spatially neighbouring cells that are already RG; local community effect
-- `(1 - commit)` -- logistic saturation: a nearly-committed cell cannot go above 1
-- `noise` = `RG_COMMIT_NOISE * N(0,1) * sqrt(dt)` -- Ito noise, spreads the
-  population timing so cells do not all cross each threshold at exactly the same
-  step
+- `k_basal` = `RG_COMMIT_RATE` (5e-6 /s) -- slow baseline drift, iPSC only
+- `k_autocrine` = `RG_COMMIT_AUTOCRINE_RATE` (3e-5 /s per µM) -- morphogen the
+  cell senses from the ECM; the sp2 gradient is the primary driver of the
+  RG zone.  RG threshold (x_eq=0.70) requires sp2 > 0.117 µM.
+- `k_decay` = `RG_COMMIT_DECAY_RATE` (1.5e-6 /s) -- first-order decay; ensures
+  cells outside the morphogen field cannot reach the RG threshold.
+  Equilibrium without inhibition: x_eq = drive / (drive + k_decay).
+- `k_inhibit` = `RG_COMMIT_INHIBIT_RATE` (8e-6 /s) -- Notch-Delta lateral
+  inhibition.  Committed RG cells suppress their neighbours' commitment
+  proportional to `delta_signal` (see below).
+- `delta_signal` = sum over RG neighbours of (commit_nb × |apz_nb|) / (n+1) --
+  Delta ligand expression proxy.  `|apz|` serves as junction-maturity gate:
+  a newly-committed RG cell (|apz| ~ 0.1) sends weak signal, giving the
+  initial rosette ~8h to nucleate before the inhibitory fence goes up.
+- `(1 - commit)` -- logistic saturation on the forward term only
+- `noise` = `RG_COMMIT_NOISE * N(0,1) * sqrt(dt)` -- Ito noise
+
+### Equilibrium analysis
+
+Equilibrium commit level with no inhibition:
+```
+x_eq = (k_basal + k_autocrine * sp2) / (k_basal + k_autocrine * sp2 + k_decay)
+```
+With k_autocrine=3e-5, k_decay=1.5e-6:
+```
+RG threshold (x_eq = 0.70)  ->  sp2 > 0.117 µM   (cells in morphogen-rich zone)
+NPC threshold (x_eq = 0.35) ->  sp2 > 0.027 µM   (cells within diffusion length)
+Periphery (sp2 = 0)         ->  x_eq = 0.0        (stays iPSC)
+```
+With Notch-Delta inhibition active (1 mature RG neighbour, delta_signal ~ 0.09):
+```
+effective_decay = 1.5e-6 + 8e-6 * 0.09 = 2.22e-6
+x_eq at sp2=0.15 µM = 4.5e-6 / 6.72e-6 = 0.67  -> NPC  (ring edge suppressed)
+x_eq at sp2=0.20 µM = 6.0e-6 / 8.22e-6 = 0.73  -> RG   (ring core commits)
+```
+This sp2-threshold-based pattern formation with lateral inhibition produces
+isolated RG islands (radius ~ sp2 > 0.117 µM) surrounded by NPC, with the
+rosette ring size limited by how quickly the Delta/apical signal builds up.
 
 ### Thresholds
 
@@ -79,6 +108,9 @@ When the type changes, `k_production[2]` (sp2 secretion rate) is updated:
 - iPSC  : 0.0 x base
 - NPC   : 0.5 x base
 - RG    : 1.0 x base
+
+Fate commitment is **irreversible** (ratchet): noise cannot push cell_type back
+below a threshold once crossed.
 
 ### Why the noise magnitude matters
 
@@ -131,28 +163,30 @@ This restricts polarity updates to cells inside the morphogen field.
 
 ### 2. Intrinsic z-bias (NPC and RG only)
 
-After the gradient blend, a small upward bias is added to `apz`:
+After the gradient blend, a small upward bias is applied each step:
 
 ```
-apz += RG_INTRINSIC_APICAL_Z * epithelialization_level
+For RG cells:   alpha = RG_INTRINSIC_APICAL_Z * rg_commit
+For NPC cells:  alpha = RG_INTRINSIC_APICAL_Z * epithelialization_level * rg_commit
+
+new_apz = (1 - alpha) * apz + alpha
 ap = ap / |ap|    (re-normalize)
 ```
 
-This represents apicobasal self-organisation: well-epithelialized committed cells
-orient their apical surface away from the substrate.  The bias is gated on
-`cell_type >= 1` -- iPSC cells have no established polarity axis, and giving them
-upward apz would cause the apical-bias force in `cell_move` to drag them off the
-substrate before they have differentiated.
-
-**Logistic accumulation warning**: the bias equation is logistic in nature:
-
+RG cells use `rg_commit` directly (not `epi`) so alignment starts immediately at
+commitment (~0.7).  With `RG_INTRINSIC_APICAL_Z = 2e-3` and commit=0.7:
 ```
-d(apz)/dn ~ bias * epi * (1 - apz^2)
+alpha = 1.4e-3 per step  ->  half-life ~ 495 steps ~ 8 h
 ```
+NPC cells scale by `epi * commit` so peripheral NPC cells (low commit from the
+decay term) develop much weaker z-polarity, matching the gradient of
+pseudo-stratified polarity in cortical neuroepithelium.
 
-Even small values accumulate: with `RG_INTRINSIC_APICAL_Z = 0.5`, vectors reach
-apz ~ 1 within a few hundred steps even at low epi.  The value is set to 3e-4 to
-give a half-life of roughly 2 days at full epithelialization.
+**RG orientation override**: in `cell_move`, RG cells' persistent migration
+direction is directly set to their apical vector `(apx, apy, apz)` each step,
+overwriting rotational diffusion.  This is biologically correct (polarised
+epithelial progenitors do not migrate randomly) and avoids the instability where
+rotational diffusion noise (~0.1 rad/step) overwhelms the soft blend (~2×10⁻⁴).
 
 ---
 
@@ -213,14 +247,15 @@ flattens against the substrate independently of the cell.
 | `N_CELLS` | 240 | Initial cell count |
 | `MONOLAYER_Z` | -150 um | Substrate z position (= COORD_BOUNDARY_Z_NEG) |
 | `PERIODIC_BOUNDARIES_FOR_CELLS` | True | Cells wrap in x/y; z is clamped |
-| `RG_COMMIT_RATE` | 5e-6 /s | Basal commitment rate |
-| `RG_COMMIT_AUTOCRINE_RATE` | 3e-5 /s | sp2-driven autocrine boost |
-| `RG_COMMIT_PARACRINE_RATE` | 2e-5 /s | RG-fraction paracrine boost |
+| `RG_COMMIT_RATE` | 5e-6 /s | Basal commitment rate (iPSC only) |
+| `RG_COMMIT_AUTOCRINE_RATE` | 3e-5 /s/µM | sp2-driven drive; RG threshold at sp2 > 0.117 µM |
+| `RG_COMMIT_DECAY_RATE` | 1.5e-6 /s | First-order decay; limits RG zone to morphogen field |
+| `RG_COMMIT_INHIBIT_RATE` | 8e-6 /s | Notch-Delta lateral inhibition; limits rosette size |
 | `RG_COMMIT_NOISE` | 1e-3 | Ito noise coefficient; spreads NPC timing by ~+/-3h |
-| `RG_INTRINSIC_APICAL_Z` | 3e-4 | Per-step upward z-bias (NPC/RG only) |
+| `RG_INTRINSIC_APICAL_Z` | 2e-3 | Per-step z-bias alpha; RG half-life ~8h at commit=0.7 |
 | `RG_POLARITY_SP2_THRESHOLD` | 0.1 uM | sp2 concentration gate for z-bias |
 | `RG_SUBSTRATE_K` | 5e-5 nN/um | Substrate spring stiffness |
-| `RG_ADHESION_MATRIX[RG,RG]` | 1.2 nN/um | Homotypic RG adhesion (max 3.0 with boost) |
+| `RG_ADHESION_MATRIX[RG,RG]` | 1.8 nN/um | Homotypic RG adhesion (max 4.5 with boost) |
 | `RG_EPITHELIAL_ADHESION_BOOST` | 2.5 | Max adhesion multiplier at full epithelialization |
 
 ---
@@ -250,9 +285,10 @@ One time step runs the following layers in order:
 |---|---|
 | 0-12h | All cells iPSC; monolayer forms disc on substrate; rg_commit rises slowly |
 | 12-30h | Stochastic NPC transitions begin (spread ~+/-3h by noise); first sp2 appears |
-| 30-48h | NPC clusters form; sp2 gradient nucleates polarity alignment; RG rosettes begin |
-| 48-96h | Rosettes mature; RG cells rise slightly off substrate; ring structures stabilise |
-| 96-168h | Full rosette morphology; epithelialization_level approaches 1 in RG cells |
+| 30-48h | NPC clusters form; sp2 gradient builds; first RG cells commit at sp2 > 0.117 µM |
+| 48-72h | Notch-Delta inhibition activates as |apz| rises (~8h after first RG); rosette ring forms |
+| 72-96h | Ring stabilises at ~8-12 cells; surrounding NPCs inhibited even if in sp2 field |
+| 96-168h | Rosettes mature; RG cells migrate apically; epithelialization_level approaches 1 |
 
 ---
 
@@ -261,13 +297,16 @@ One time step runs the following layers in order:
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | All cells become NPC at exactly the same step | `RG_COMMIT_NOISE` too small | Increase to ~1e-3 |
-| Apical vectors -> (0,0,1) within a few hours | `RG_INTRINSIC_APICAL_Z` too large (logistic blow-up) OR bias applied to iPSC | Reduce to <= 5e-4; check cell_type gate |
+| Apical vectors -> (0,0,1) within a few hours | `RG_INTRINSIC_APICAL_Z` too large OR bias applied to iPSC | Reduce to <= 5e-3; check cell_type gate |
 | Cells merge into a solid blob | `RG_ADHESION_MATRIX[RG,RG]` or boost too high vs repulsion | Ensure max adhesion < repulsion |
 | sp2 never builds up | `CELL_PRODUCTION_MULTIPLIER[1 or 2]` = 0, or `INIT_CELL_PRODUCTION_RATES[2]` = 0 | Check production config |
 | Cells pile up at z = +/-150 on step 0 | z-periodic wrap not replaced by z-clamp | Ensure RG cell_move override is loaded |
 | Anchor point sphere flattens against substrate | Anchor z updated with raw_dz instead of dz_actual | Use `dz_actual = z_new - z_old` after floor clamp |
 | Polarity gradient points downward (-z) | Gradient sampled from boundary voxel k=0 where sp2 accumulates | Shift to k=1 when gk==0 (already implemented) |
-| All cells RG within 1h of first NPC appearing | Synchronous NPC onset -> uniform sp2 -> simultaneous autocrine cascade | Fix noise magnitude first; optionally reduce autocrine rate |
+| All cells become RG regardless of sp2 | Positive paracrine cascade (old k_paracrine) still active | Remove from drive; use RG_COMMIT_INHIBIT_RATE with negative sign |
+| Orientation vector oscillates wildly each step | Rotational diffusion >> soft apical blend for RG cells | Use direct override: orientation = apical for cell_type==2 |
+| RG apical vector still at < 30 deg after 56h | Alpha gated on epi which starts at 0 at commitment | Use rg_commit (not epi) for alpha in RG cells |
+| No rosette spatial pattern; entire sp2 zone is RG | k_inhibit too small or |apz| never rises (apical not aligning) | Increase RG_COMMIT_INHIBIT_RATE; check RG_INTRINSIC_APICAL_Z |
 
 ---
 

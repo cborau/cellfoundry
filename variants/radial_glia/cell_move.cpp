@@ -368,6 +368,20 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
     normalize3(agent_orx, agent_ory, agent_orz);
   }
 
+  // RG variant: RG cells are polarised epithelial progenitors — their persistent
+  // migration direction IS the apical axis.  A soft exponential blend toward the
+  // apical vector is insufficient because rotational diffusion noise (~0.1 rad/step)
+  // overwhelms the per-step alignment increment (~2e-4), causing the orientation to
+  // switch wildly on every saved frame.  Directly overriding with the apical vector
+  // is both simpler and biologically correct: unlike iPSC/NPC, RG cells do not
+  // undergo random reorientation; their migration axis is fixed by apico-basal polarity.
+  if (agent_cell_type == 2) {
+    agent_orx = FLAMEGPU->getVariable<float>("apx");
+    agent_ory = FLAMEGPU->getVariable<float>("apy");
+    agent_orz = FLAMEGPU->getVariable<float>("apz");
+    normalize3(agent_orx, agent_ory, agent_orz);
+  }
+
   // Persistent self-propulsion along current orientation, modulated by chemokinesis
   const float persistent_speed = agent_speed_ref * chemokinesis_factor;
   v_base_x += persistent_speed * agent_orx;

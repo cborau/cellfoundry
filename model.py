@@ -2105,7 +2105,7 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableFloat("apx", float(np.cos(_ap_angle)))
                     instance.setVariableFloat("apy", float(np.sin(_ap_angle)))
                     instance.setVariableFloat("apz", 0.0)
-                    instance.setVariableFloat("rg_commit_level",         float(np.random.uniform(0.0, 0.15)))  # uniform spread for initial rg_commit_level, first cells become NPC at ~14 h, last at ~24 h (basal rate only), creating spatial nucleation heterogeneity without noise.
+                    instance.setVariableFloat("rg_commit_level",         0.0)  # start at zero; sp2 gradient determines spatial nucleation site
                     instance.setVariableFloat("epithelialization_level", 0.0)
                     instance.setVariableFloat("rosette_maturity",        0.0)
                     instance.setVariableFloat("rg_neighbour_density",    0.0)
@@ -2528,7 +2528,7 @@ class SaveDataToFile(pyflamegpu.HostFunction):
         global SAVE_DATA_TO_FILE, SAVE_EVERY_N_STEPS, N_SPECIES
         global RES_PATH
         global INCLUDE_FIBRE_NETWORK, HETEROGENEOUS_DIFFUSION, INITIAL_NETWORK_CONNECTIVITY, N_NODES, INCLUDE_CELLS, ECM_POPULATION_SIZE
-        global INCLUDE_FOCAL_ADHESIONS
+        global INCLUDE_FOCAL_ADHESIONS, INCLUDE_CELL_CELL_INTERACTION, INCLUDE_CELL_FNODE_REPULSION
         global INCLUDE_VASCULARIZATION, N_VASC_NODES
         save_data_to_file_step(
             FLAMEGPU=FLAMEGPU,
@@ -2545,6 +2545,8 @@ class SaveDataToFile(pyflamegpu.HostFunction):
                 "INCLUDE_CELLS": INCLUDE_CELLS,
                 "ECM_POPULATION_SIZE": ECM_POPULATION_SIZE,
                 "INCLUDE_FOCAL_ADHESIONS": INCLUDE_FOCAL_ADHESIONS,
+                "INCLUDE_CELL_CELL_INTERACTION": INCLUDE_CELL_CELL_INTERACTION,
+                "INCLUDE_CELL_FNODE_REPULSION": INCLUDE_CELL_FNODE_REPULSION,
                 "INCLUDE_NETWORK_REMODELING": INCLUDE_NETWORK_REMODELING,
                 "INCLUDE_LUMEN": INCLUDE_LUMEN,
                 "INCLUDE_VASCULARIZATION": INCLUDE_VASCULARIZATION,
