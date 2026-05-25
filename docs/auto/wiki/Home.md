@@ -12,7 +12,6 @@ This wiki content is generated from source code and project metadata.
 - [Tutorial: First Steps](Tutorial-First-Steps)
 - [Tutorial: Useful Tools](Tutorial-Useful-Tools)
 - [Tutorial: Benchmarking Performance](Tutorial-Benchmarking-Performance)
-- [Tutorial: Parameter Optimization](Tutorial-Param-Optimization)
+- [Tutorial: Parameter Optimization](Tutorial-Parameter-Optimization)
 - [Tutorial: Parameter Overriding](Tutorial-Parameter-Overriding)
 - [Tutorial: Model Variants](Tutorial-Model-Variants)
-

@@ -97,6 +97,68 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - Per-cell interaction velocity contribution (cc_dv*) [um/s]
 - - -
 
+## 📄 cell_contact_stress_update.cpp
+
+### 🔹 [ccs_clampf](https://github.com/cborau/cellfoundry/blob/master/cell_contact_stress_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_contact_stress_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_contact_stress_update.cpp)
+
+- 🔸 **Purpose:** Clamps a scalar to the closed interval [lo, hi].
+- - -
+
+### 🔹 [ccs_safeInv](https://github.com/cborau/cellfoundry/blob/master/cell_contact_stress_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_contact_stress_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_contact_stress_update.cpp)
+
+- 🔸 **Purpose:** Returns 1/x when |x| > eps, otherwise returns 0.
+- - -
+
+### 🔹 [ccs_normalize3](https://github.com/cborau/cellfoundry/blob/master/cell_contact_stress_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_contact_stress_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_contact_stress_update.cpp)
+
+- 🔸 **Purpose:** Normalizes a 3D vector in-place; if near-zero, sets a default unit vector.
+- - -
+
+### 🔹 [ccs_swapf](https://github.com/cborau/cellfoundry/blob/master/cell_contact_stress_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_contact_stress_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_contact_stress_update.cpp)
+
+- 🔸 **Purpose:** Swaps two floats by reference.
+- - -
+
+### 🔹 [ccs_swap_col3](https://github.com/cborau/cellfoundry/blob/master/cell_contact_stress_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_contact_stress_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_contact_stress_update.cpp)
+
+- 🔸 **Purpose:** Swaps two columns of a 3x3 matrix (used for eigenvector column reordering).
+- - -
+
+### 🔹 [ccs_eig_sym_3x3](https://github.com/cborau/cellfoundry/blob/master/cell_contact_stress_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_contact_stress_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_contact_stress_update.cpp)
+
+- 🔸 **Purpose:** Jacobi eigendecomposition for a real symmetric 3x3 matrix.
+- - -
+
+### 🔹 [cell_contact_stress_update](https://github.com/cborau/cellfoundry/blob/master/cell_contact_stress_update.cpp)
+**Type:** `agent`  
+**Source:** [Open cell_contact_stress_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_contact_stress_update.cpp)
+
+- 🔸 **Purpose:** Computes nucleus stress from contact-derived stresslet accumulators
+- ⬇️ **Inputs:**
+  - cc_S_*, cf_S_*, cl_S_*  (agent variables, written each step)
+  - eps_*                   (persistent viscoelastic strain state)
+  - nucleus_radius, cell_type, orx/y/z
+  - Environment: NUCLEUS_E, NUCLEUS_NU, NUCLEUS_TAU, NUCLEUS_EPS_CLAMP,
+- ⬆️ **Outputs:**
+  - sig_*        (stress tensor, fresh each step)
+  - eps_*        (viscoelastic strain, evolved each step)
+  - sig_eig_*    (principal stresses + eigenvectors)
+  - eps_eig_*    (principal strains + eigenvectors)
+  - orx/y/z      (cell orientation, updated when INCLUDE_ORIENTATION_ALIGN)
+- - -
+
 ## 📄 cell_cycle.cpp
 
 ### 🔹 [vec3Div](https://github.com/cborau/cellfoundry/blob/master/cell_cycle.cpp)
@@ -184,56 +246,11 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
 
 ## 📄 cell_focad_update.cpp
 
-### 🔹 [clampf](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
-**Type:** `helper`  
-**Source:** [Open cell_focad_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
-
-- 🔸 **Purpose:** Clamps a scalar to the closed interval [lo, hi].
-- - -
-
-### 🔹 [safeInv](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
-**Type:** `helper`  
-**Source:** [Open cell_focad_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
-
-- 🔸 **Purpose:** Returns 1/x when |x| > eps, otherwise returns 0.
-- - -
-
-### 🔹 [normalize3](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
-**Type:** `helper`  
-**Source:** [Open cell_focad_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
-
-- 🔸 **Purpose:** Normalizes a 3D vector in-place; if near-zero, sets a default unit vector.
-- - -
-
-### 🔹 [swapf](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
-**Type:** `helper`  
-**Source:** [Open cell_focad_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
-
-- 🔸 **Purpose:** Swaps two floats by reference.
-- - -
-
-### 🔹 [swap_col3](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
-**Type:** `helper`  
-**Source:** [Open cell_focad_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
-
-- 🔸 **Purpose:** Swaps two columns of a 3x3 matrix (used for eigenvector column reordering).
-- - -
-
-### 🔹 [eig_sym_3x3](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
-**Type:** `helper`  
-**Source:** [Open cell_focad_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
-
-- 🔸 **Purpose:** Jacobi eigendecomposition for a real symmetric 3x3 matrix:
-- ⬆️ **Outputs:**
-  - Eigenvalues l1, l2, l3
-  - Corresponding eigenvectors (v1, v2, v3)
-- - -
-
 ### 🔹 [cell_focad_update](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
 **Type:** `agent`  
 **Source:** [Open cell_focad_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_focad_update.cpp)
 
-- 🔸 **Purpose:** Reads all focal adhesion (FOCAD) messages in a bucket keyed by this cell id.
+- 🔸 **Purpose:** Accumulates the FOCAD stresslet tensor from focal adhesion anchor forces
 - - -
 
 ## 📄 cell_lumen_interaction.cpp
@@ -305,6 +322,70 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - Species arrays: k_consumption, k_production, k_reaction, C_sp, M_sp
 - ⬆️ **Outputs:**
   - MessageSpatial3D record for nearby agent queries
+- - -
+
+## 📄 cell_stress_state_update.cpp
+
+### 🔹 [ccs_clampf](https://github.com/cborau/cellfoundry/blob/master/cell_stress_state_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_stress_state_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_stress_state_update.cpp)
+
+- 🔸 **Purpose:** Clamps a scalar to the closed interval [lo, hi].
+- - -
+
+### 🔹 [ccs_safeInv](https://github.com/cborau/cellfoundry/blob/master/cell_stress_state_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_stress_state_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_stress_state_update.cpp)
+
+- 🔸 **Purpose:** Returns 1/x when |x| > eps, otherwise returns 0.
+- - -
+
+### 🔹 [ccs_normalize3](https://github.com/cborau/cellfoundry/blob/master/cell_stress_state_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_stress_state_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_stress_state_update.cpp)
+
+- 🔸 **Purpose:** Normalizes a 3D vector in-place; if near-zero, sets a default unit vector.
+- - -
+
+### 🔹 [ccs_swapf](https://github.com/cborau/cellfoundry/blob/master/cell_stress_state_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_stress_state_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_stress_state_update.cpp)
+
+- 🔸 **Purpose:** Swaps two floats by reference.
+- - -
+
+### 🔹 [ccs_swap_col3](https://github.com/cborau/cellfoundry/blob/master/cell_stress_state_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_stress_state_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_stress_state_update.cpp)
+
+- 🔸 **Purpose:** Swaps two columns of a 3x3 matrix (used for eigenvector column reordering).
+- - -
+
+### 🔹 [ccs_eig_sym_3x3](https://github.com/cborau/cellfoundry/blob/master/cell_stress_state_update.cpp)
+**Type:** `helper`  
+**Source:** [Open cell_stress_state_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_stress_state_update.cpp)
+
+- 🔸 **Purpose:** Jacobi eigendecomposition for a real symmetric 3x3 matrix.
+- - -
+
+### 🔹 [cell_stress_state_update](https://github.com/cborau/cellfoundry/blob/master/cell_stress_state_update.cpp)
+**Type:** `agent`  
+**Source:** [Open cell_stress_state_update.cpp](https://github.com/cborau/cellfoundry/blob/master/cell_stress_state_update.cpp)
+
+- 🔸 **Purpose:** Unified constitutive pipeline for ALL nucleus stress sources.
+- ⬇️ **Inputs:**
+  - focad_S_*, cc_S_*, cf_S_*, cl_S_*   (agent stresslet accumulators)
+  - eps_*                                (persistent viscoelastic strain)
+  - nucleus_radius, x, y, z, cell_type, orx/y/z
+  - u_ref_x_i/y_i/z_i                   (reference anchor directions, if FA)
+  - Environment: NUCLEUS_E, NUCLEUS_NU, NUCLEUS_TAU, NUCLEUS_EPS_CLAMP,
+- ⬆️ **Outputs:**
+  - sig_*         (stress tensor)
+  - eps_*         (updated viscoelastic strain)
+  - sig_eig_*     (principal stresses + eigenvectors)
+  - eps_eig_*     (principal strains + eigenvectors)
+  - orx/y/z       (updated orientation when INCLUDE_ORIENTATION_ALIGN)
+  - x_i/y_i/z_i  (anchor positions, when INCLUDE_FOCAL_ADHESIONS)
 - - -
 
 ## 📄 ecm_Csp_update.cpp
@@ -527,6 +608,25 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - ECM force, velocity, clamp state, and boundary/environment parameters
 - ⬆️ **Outputs:**
   - Updated position, velocity, clamp flags, and boundary force channels
+- - -
+
+## 📄 ecm_vasc_Csp_update.cpp
+
+### 🔹 [ecm_vasc_Csp_update](https://github.com/cborau/cellfoundry/blob/master/ecm_vasc_Csp_update.cpp)
+**Type:** `agent`  
+**Source:** [Open ecm_vasc_Csp_update.cpp](https://github.com/cborau/cellfoundry/blob/master/ecm_vasc_Csp_update.cpp)
+
+- 🔸 **Purpose:** For each ECM voxel, find nearby alive VASC nodes (via MessageSpatial3D) and impose a concentration floor: if any VASC neighbour carries a higher per-species concentration than the current ECM value, that value is adopted. This ensures the vascular network acts as a sustained source that diffusion cannot erode below the vessel-supplied level.
+- ⬇️ **Inputs:**
+  - Agent variables: x, y, z, grid_lin_id, C_sp[N_SPECIES]
+  - MessageSpatial3D: vasc_spatial_location_message (dead flag + C_sp per VASC node)
+  - Environment macro property: C_SP_MACRO (shared concentration buffer)
+- ⬆️ **Outputs:**
+  - Updated agent C_sp[N_SPECIES] (so the L1 ECM broadcast reflects VASC influence)
+  - Updated C_SP_MACRO[species][grid_lin_id] (so L4 ecm_Csp_update preserves the floor)
+- 📝 **Notes:**
+  - Must run after vasc_spatial_location_data and before the L1 ECM broadcast.
+  - Each ECM agent writes only to its own grid_lin_id slot, so no write conflicts.
 - - -
 
 ## 📄 fnode_apply_remodel_updates.cpp
@@ -881,4 +981,91 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - LUMEN variables: id, x, y, z, radius
 - ⬆️ **Outputs:**
   - MessageSpatial3D record for nearby agent queries
+- - -
+
+## 📄 vasc_Csp_update.cpp
+
+### 🔹 [vasc_Csp_update](https://github.com/cborau/cellfoundry/blob/master/vasc_Csp_update.cpp)
+**Type:** `agent`  
+**Source:** [Open vasc_Csp_update.cpp](https://github.com/cborau/cellfoundry/blob/master/vasc_Csp_update.cpp)
+
+- 🔸 **Purpose:** Propagate species concentrations along the vascular tree. Each non-source VASC node looks up all its parents (parent_ids array). As long as at least one parent is alive it inherits the maximum concentration across the live parents per species.  If ALL parents are dead or absent the node is marked dead (dead=1) and its concentration falls to zero, simulating vessel regression when fully disconnected from the source. Source nodes (all parent_ids entries < 0) act as Dirichlet boundaries and keep their initial INIT_VASCULARIZATION_CONCENTRATION_VALS unchanged.
+- ⬇️ **Inputs:**
+  - Agent variables: dead, parent_ids[MAX_VASC_CONNECTIVITY], C_sp[N_SPECIES]
+  - MessageBucket: vasc_bucket_location_message (keyed by global VASC id)
+- ⬆️ **Outputs:**
+  - Updated agent C_sp[N_SPECIES]
+  - Updated agent dead (set to 1 if all parents are dead/absent)
+- 📝 **Notes:**
+  - Must run after vasc_bucket_location_data so all parent messages are committed.
+  - Always returns flamegpu::ALIVE; death is signalled via the dead variable.
+- - -
+
+## 📄 vasc_bucket_location_data.cpp
+
+### 🔹 [vasc_bucket_location_data](https://github.com/cborau/cellfoundry/blob/master/vasc_bucket_location_data.cpp)
+**Type:** `agent`  
+**Source:** [Open vasc_bucket_location_data.cpp](https://github.com/cborau/cellfoundry/blob/master/vasc_bucket_location_data.cpp)
+
+- 🔸 **Purpose:** Broadcast full VASC node state into a MessageBucket keyed by the node's own id.
+- ⬇️ **Inputs:**
+  - Agent variables: id, x, y, z, parent_ids[MAX_VASC_CONNECTIVITY], dead, C_sp[N_SPECIES], children_ids[MAX_VASC_CONNECTIVITY]
+- ⬆️ **Outputs:**
+  - MessageBucket entry keyed by id carrying all agent state for peer lookup
+- 📝 **Notes:**
+  - Must run before vasc_Csp_update so parent messages are available for reading.
+- - -
+
+## 📄 vasc_ecm_cell_spawn.cpp
+
+### 🔹 [vasc_ecm_cell_spawn](https://github.com/cborau/cellfoundry/blob/master/vasc_ecm_cell_spawn.cpp)
+**Type:** `agent`  
+**Source:** [Open vasc_ecm_cell_spawn.cpp](https://github.com/cborau/cellfoundry/blob/master/vasc_ecm_cell_spawn.cpp)
+
+- 🔸 **Purpose:** Template function for VASC-driven cell spawning. Each alive VASC node reads the local ECM species concentration from the shared macro buffer (C_SP_MACRO) and, when a user-defined condition is met, spawns a single new CELL agent at the VASC node position. Spawning rules are currently unknown and are left as clearly marked TODO sections. The template demonstrates how to:
+- ⬇️ **Inputs:**
+  - Agent variables: dead, x, y, z, id
+  - Environment macro property: C_SP_MACRO (shared ECM concentration buffer)
+  - Environment properties: ECM_AGENTS_PER_DIR, COORDS_BOUNDARIES, CELL_RADIUS,
+- ⬆️ **Outputs:**
+  - Optional new CELL agent via agent_out (at most one per VASC node per step)
+- 📝 **Notes:**
+  - FLAMEGPU2 permits at most one agent_out output per function execution.
+  - Use early-exit after the first successful spawn to guarantee this.
+  - All TODO markers must be replaced with real rules before production use.
+  - To add more cell types, duplicate the corresponding TODO block and adjust
+  - the condition and cell_type value.
+- - -
+
+## 📄 vasc_move.cpp
+
+### 🔹 [vasc_move](https://github.com/cborau/cellfoundry/blob/master/vasc_move.cpp)
+**Type:** `agent`  
+**Source:** [Open vasc_move.cpp](https://github.com/cborau/cellfoundry/blob/master/vasc_move.cpp)
+
+- 🔸 **Purpose:** Advect each alive VASC node with the local ECM grid velocity so the vascular network deforms coherently when the simulation boundaries move.
+- ⬇️ **Inputs:**
+  - Agent variables: dead, x, y, z
+  - MessageArray3D: ecm_grid_location_message (vx, vy, vz per grid voxel)
+  - Environment properties: TIME_STEP, ECM_AGENTS_PER_DIR[3], COORDS_BOUNDARIES[6]
+- ⬆️ **Outputs:**
+  - Updated agent x, y, z (new position after advection)
+  - Updated agent vx, vy, vz (local ECM velocity, cached for output)
+- 📝 **Notes:**
+  - Only registered in the model when MOVING_BOUNDARIES is True.
+- - -
+
+## 📄 vasc_spatial_location_data.cpp
+
+### 🔹 [vasc_spatial_location_data](https://github.com/cborau/cellfoundry/blob/master/vasc_spatial_location_data.cpp)
+**Type:** `agent`  
+**Source:** [Open vasc_spatial_location_data.cpp](https://github.com/cborau/cellfoundry/blob/master/vasc_spatial_location_data.cpp)
+
+- 🔸 **Purpose:** Broadcast VASC node position, liveness, and current species concentrations into a MessageSpatial3D, allowing nearby ECM agents to find and read VASC state within a configurable search radius.
+- ⬇️ **Inputs:**
+  - Agent variables: x, y, z, id, dead, C_sp[N_SPECIES]
+- ⬆️ **Outputs:**
+  - MessageSpatial3D entry (vasc_spatial_location_message) carrying x, y, z, id, dead, C_sp
+- 📝 **Notes:**
+  - Must run before ecm_vasc_Csp_update so ECM agents see updated VASC concentrations.
 - - -

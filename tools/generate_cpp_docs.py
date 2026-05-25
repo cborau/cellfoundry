@@ -197,8 +197,12 @@ def render_wiki_home() -> str:
         "- [Model Editor](Model-Editor)\n"
         "- [Model Configurator](Model-Configurator)\n"
         "- [Post Processing](Post-Processing)\n"
+        "- [Tutorial: First Steps](Tutorial-First-Steps)\n"
+        "- [Tutorial: Useful Tools](Tutorial-Useful-Tools)\n"
         "- [Tutorial: Benchmarking Performance](Tutorial-Benchmarking-Performance)\n"
         "- [Tutorial: Parameter Optimization](Tutorial-Parameter-Optimization)\n"
+        "- [Tutorial: Parameter Overriding](Tutorial-Parameter-Overriding)\n"
+        "- [Tutorial: Model Variants](Tutorial-Model-Variants)\n"
     )
 
 
