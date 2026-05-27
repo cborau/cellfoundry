@@ -27,7 +27,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_vasc_Csp_update, flamegpu::MessageSpatial3D, flamegp
     float agent_z = FLAMEGPU->getVariable<float>("z");
 
     const uint8_t N_SPECIES = 3;           // WARNING: hard-coded, must match model.py
-    const uint32_t ECM_POPULATION_SIZE = 9261; // WARNING: hard-coded, must match model.py
+    const uint32_t ECM_POPULATION_SIZE = 68921; // WARNING: hard-coded, must match model.py
 
     int grid_lin_id = FLAMEGPU->getVariable<int>("grid_lin_id");
     auto C_SP_MACRO = FLAMEGPU->environment.getMacroProperty<float, N_SPECIES, ECM_POPULATION_SIZE>("C_SP_MACRO");

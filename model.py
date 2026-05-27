@@ -56,7 +56,7 @@ print("Executing in ", CURR_PATH)
 # If domain is not cubical, N is asigned to the shorter dimension and more agents are added to the longer ones
 # NOTE: ECM agents are always present (mandatory) eventhough they are only used when INCLUDE_DIFFUSION is True. If there is no diffusion, set N to a small value to reduce computational cost.
 # ----------------------------------------------------------------------
-N = 21
+N = 41
 
 # Time simulation parameters
 # ----------------------------------------------------------------------
