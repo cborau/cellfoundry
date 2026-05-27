@@ -7,7 +7,7 @@
  *   Extensions vs the base function:
  *     1. RG-specific agent variables (rg_commit_level, epithelialization_level,
  *        apx/apy/apz, rosette_maturity, rg_neighbour_density, morphogen_local,
- *        lumen_id, substrate_anchor_x/y) are explicitly propagated to daughter
+ *        substrate_anchor_x/y) are explicitly propagated to daughter
  *        cells on division — the base function leaves them at default (0 / -1).
  *     2. Asymmetric division for RG cells (cell_type == 2):
  *          Parent  — retains primary cilium, high Notch → stays RG;
@@ -503,9 +503,6 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
       FLAMEGPU->agent_out.setVariable<float>("rosette_maturity",     0.0f);
       FLAMEGPU->agent_out.setVariable<float>("rg_neighbour_density", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("morphogen_local",      0.0f);
-      FLAMEGPU->agent_out.setVariable<int>("lumen_id",              -1);
-      // Substrate anchor starts at daughter's initial position so the xy
-      // bond-spring in cell_move.cpp does not immediately exert a large force.
       FLAMEGPU->agent_out.setVariable<float>("substrate_anchor_x",  daughter_x);
       FLAMEGPU->agent_out.setVariable<float>("substrate_anchor_y",  daughter_y);
 
