@@ -4,17 +4,17 @@
  * Purpose:
  *   Update each cell's apical unit vector (apx, apy, apz).
  *
- *   Two-component update for NPC/RG cells inside the morphogen field:
+ *   Two-component update for NEP/RG cells inside the morphogen field:
  *
  *   1. Vertical (Z) component: exponential blend toward (0,0,1).
  *      alpha_z = RG_INTRINSIC_APICAL_Z * commit_level
- *      (NPC: multiplied by epi_level * 0.1)
+ *      (NEP: multiplied by epi_level * 0.1)
  *
  *   2. Lateral (XY) lumen cue: if >= RG_LUMEN_MIN_NEIGHBOURS alive RG (type-2)
  *      cells are found within RG_LUMEN_SEARCH_RADIUS, the apical XY component
  *      is steered toward the centroid of those neighbours (rosette centre proxy).
  *      beta_xy = RG_LUMEN_BIAS_STRENGTH * commit_level
- *      (NPC: multiplied by epi_level * 0.1)
+ *      (NEP: multiplied by epi_level * 0.1)
  *      Falls back to XY suppression (existing behaviour) when no RG neighbours.
  *
  *   iPSC / cells outside morphogen gate: random XY noise (unchanged).
@@ -52,7 +52,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_polarity_update, flamegpu::MessageSpatial3D, fla
   // Environment
   // -------------------------------------------------------------------------
   const uint8_t  N_SPECIES           = 3;     // WARNING: must match main python
-  const uint32_t ECM_POPULATION_SIZE = 68921;  // WARNING: must match Nx*Ny*Nz
+  const uint32_t ECM_POPULATION_SIZE = 61206;  // WARNING: must match Nx*Ny*Nz
 
   auto C_SP_MACRO = FLAMEGPU->environment.getMacroProperty<float, N_SPECIES, ECM_POPULATION_SIZE>("C_SP_MACRO");
 
@@ -120,7 +120,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_polarity_update, flamegpu::MessageSpatial3D, fla
       }
 
       // -------------------------------------------------------------------
-      // Blend factors (commit-scaled; NPC gets 10x weaker signal)
+      // Blend factors (commit-scaled; NEP gets 10x weaker signal)
       // -------------------------------------------------------------------
       const float epi    = FLAMEGPU->getVariable<float>("epithelialization_level");
       const float commit = FLAMEGPU->getVariable<float>("rg_commit_level");

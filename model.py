@@ -56,7 +56,7 @@ print("Executing in ", CURR_PATH)
 # If domain is not cubical, N is asigned to the shorter dimension and more agents are added to the longer ones
 # NOTE: ECM agents are always present (mandatory) eventhough they are only used when INCLUDE_DIFFUSION is True. If there is no diffusion, set N to a small value to reduce computational cost.
 # ----------------------------------------------------------------------
-N = 41
+N = 6
 
 # Time simulation parameters
 # ----------------------------------------------------------------------
@@ -74,7 +74,7 @@ ECM_D_DUMPING = 0.04  # [nN·s/um]
 ECM_ETA = 0.15  # [nN·s/µm] Effective drag for overdamped FNODE motion (calibration parameter)
 
 #BOUNDARY_COORDS = [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]  # +X,-X,+Y,-Y,+Z,-Z
-BOUNDARY_COORDS = [150.0, -150.0, 150.0, -150.0, 150.0, -150.0]  # microdevice dimensions in um
+BOUNDARY_COORDS = [500.0, -500.0, 500.0, -500.0, 25.0, -25.0]  # microdevice dimensions in um
 #BOUNDARY_COORDS = [coord / 1000.0 for coord in BOUNDARY_COORDS] # in mm
 BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
 BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[um/s]
@@ -1681,7 +1681,7 @@ if INCLUDE_CELLS:
         CELL_agent.newVariableFloat("rg_neighbour_density", 0.0)  # normalised local RG-cell count
         CELL_agent.newVariableFloat("morphogen_local",      0.0)  # cached ECM morphogen concentration sample (sp2) at cell location
         CELL_agent.newVariableInt("rg_committed", 0)              # 0/1 irreversible commit flag
-        CELL_agent.newVariableFloat("substrate_anchor_x", 0.0)   # xy substrate anchor position for bond-spring (NPC/RG)
+        CELL_agent.newVariableFloat("substrate_anchor_x", 0.0)   # xy substrate anchor position for bond-spring (NEP/RG)
         CELL_agent.newVariableFloat("substrate_anchor_y", 0.0)
     if INCLUDE_FOCAL_ADHESIONS:  
         CELL_agent.newRTCFunctionFile("cell_bucket_location_data", cell_bucket_location_data_file).setMessageOutput("cell_bucket_location_message")
@@ -2930,7 +2930,7 @@ class PrintDebugStats(pyflamegpu.HostFunction):
 
         mean_commit = commit_sum / n_alive if n_alive > 0 else 0.0
         mean_morph  = morph_sum  / n_alive if n_alive > 0 else 0.0
-        _names = ["iPSC", "NPC", "RG"]
+        _names = ["iPSC", "NEP", "RG"]
         type_str = "  ".join(
             f"{(_names[i] if i < len(_names) else f'type{i}')}={type_counts[i]}"
             for i in range(N_CELL_TYPES)

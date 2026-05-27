@@ -18,7 +18,7 @@ Model iPSC differentiation into radial glia (RG) and the spontaneous formation o
 | `cell_type` index | Identity | Key behaviour |
 |---|---|---|
 | 0 | iPSC | random motility, low adhesion, undifferentiated |
-| 1 | Neural Progenitor Cell (NPC) | slower motility, intermediate N-cad adhesion, weak apical bias |
+| 1 | Neuroepithelial Progenitor (NEP) | slower motility, intermediate N-cad adhesion, weak apical bias |
 | 2 | Radial Glia (RG) | low motility, high N-cad adhesion with other RG, substrate-anchored, established apicobasal polarity |
 
 Cell types switch discretely at commitment thresholds (`rg_commitment` crosses 0→1 boundary at 0.35; 1→2 boundary at 0.70).  All cells start as iPSC (cell_type = 0); differentiation is driven entirely by the `cell_rg_differentiation` function.
@@ -34,7 +34,7 @@ This reflects zero z-polarity at the start.  Polarity develops during simulation
 
 The apical vector is used **only** to:
 1. Read it in `cell_rg_differentiation` for computing `rosette_maturity` (mean alignment with neighbours — a readout, not a force).
-2. Apply a weak active velocity bias along `(apx, apy, apz)` in the overridden `cell_move.cpp` for NPC and RG cells.  This is a *migration bias*, not a deformation force; cell shape deformation comes exclusively from cell-cell contact and substrate spring forces.
+2. Apply a weak active velocity bias along `(apx, apy, apz)` in the overridden `cell_move.cpp` for NEP and RG cells.  This is a *migration bias*, not a deformation force; cell shape deformation comes exclusively from cell-cell contact and substrate spring forces.
 
 ### Substrate
 
@@ -330,23 +330,23 @@ Optionally (decide during implementation):
 | `RG_COMMIT_RATE` | float | 2e-5 | 1/s | baseline commitment accumulation rate (autocatalytic floor) |
 | `RG_COMMIT_AUTOCRINE_RATE` | float | 5e-4 | 1/(s·a.u.) | rate scaling with local species-2 concentration |
 | `RG_COMMIT_PARACRINE_RATE` | float | 1e-4 | 1/s | rate scaling with local RG neighbour fraction |
-| `RG_COMMIT_THRESHOLD_NPC` | float | 0.35 | – | rg_commitment value at which iPSC → NPC switch fires |
-| `RG_COMMIT_THRESHOLD_RG` | float | 0.70 | – | rg_commitment value at which NPC → RG switch fires |
+| `RG_COMMIT_THRESHOLD_NEP` | float | 0.35 | – | rg_commitment value at which iPSC → NEP switch fires |
+| `RG_COMMIT_THRESHOLD_RG` | float | 0.70 | – | rg_commitment value at which NEP → RG switch fires |
 | `RG_EPITHELIAL_RATE` | float | 1e-4 | 1/s | epithelialization growth rate (logistic, gated by rg_commitment) |
 | `RG_POLARITY_SP2_THRESHOLD` | float | 0.1 | uM | sp2 concentration gate; z-bias only fires when local C0 > this value |
 | `RG_SUBSTRATE_K` | float | 0.5 | nN/µm | spring stiffness pulling cell toward substrate plane |
 | `RG_SUBSTRATE_Z0` | float | 0.0 | µm | resting offset above z_neg boundary (0 = on substrate) |
 | `RG_APICAL_BIAS_RG` | float | 0.002 | µm/s | apical-direction velocity bias for RG cells (cell_type == 2) |
-| `RG_APICAL_BIAS_NPC` | float | 0.0005 | µm/s | apical-direction velocity bias for NPC cells (cell_type == 1) |
+| `RG_APICAL_BIAS_NEP` | float | 0.0005 | µm/s | apical-direction velocity bias for NEP cells (cell_type == 1) |
 | `RG_ADHESION_MATRIX` | float[9] | see below | nN/µm | per-pair adhesion stiffness (3×3, row=self type, col=neighbour type) |
 | `RG_REPULSION_MATRIX` | float[9] | see below | nN/µm | per-pair repulsion stiffness (uniform volume-exclusion) |
 | `RG_EPITHELIAL_ADHESION_BOOST` | float | 3.0 | – | RG-RG adhesion multiplier at full epithelialization_level |
 
 Default adhesion matrix (nN/µm), indexed `[self_type * N_CELL_TYPES + neighbour_type]`:
 ```
-         iPSC   NPC    RG
+         iPSC   NEP    RG
 iPSC  [  0.4,   0.4,   0.2 ]
-NPC   [  0.4,   0.8,   0.6 ]
+NEP   [  0.4,   0.8,   0.6 ]
 RG    [  0.2,   0.6,   2.0 ]   ← strong N-cadherin between RG cells
 ```
 
@@ -363,7 +363,7 @@ all  [  4.0,   4.0,   4.0 ]
 
 **Message input:** `cell_spatial_location_message` (same spatial message broadcast in L1; read-only).
 
-**Reads from env:** `RG_COMMIT_RATE`, `RG_COMMIT_AUTOCRINE_RATE`, `RG_COMMIT_PARACRINE_RATE`, `RG_COMMIT_THRESHOLD_NPC`, `RG_COMMIT_THRESHOLD_RG`, `RG_EPITHELIAL_RATE`, `CELL_PRODUCTION_MULTIPLIER`, `INIT_CELL_PRODUCTION_RATES_ENV`, `ECM_AGENTS_PER_DIR`, `COORDS_BOUNDARIES`, `TIME_STEP`.
+**Reads from env:** `RG_COMMIT_RATE`, `RG_COMMIT_AUTOCRINE_RATE`, `RG_COMMIT_PARACRINE_RATE`, `RG_COMMIT_THRESHOLD_NEP`, `RG_COMMIT_THRESHOLD_RG`, `RG_EPITHELIAL_RATE`, `CELL_PRODUCTION_MULTIPLIER`, `INIT_CELL_PRODUCTION_RATES_ENV`, `ECM_AGENTS_PER_DIR`, `COORDS_BOUNDARIES`, `TIME_STEP`.
 
 **Algorithm:**
 
@@ -385,7 +385,7 @@ all  [  4.0,   4.0,   4.0 ]
 
 5. Cell-type switch:
      new_type = (rg_commitment >= RG_COMMIT_THRESHOLD_RG)  ? 2
-              : (rg_commitment >= RG_COMMIT_THRESHOLD_NPC) ? 1
+              : (rg_commitment >= RG_COMMIT_THRESHOLD_NEP) ? 1
               : 0
    If new_type != old cell_type:
      cell_type = new_type
@@ -488,13 +488,13 @@ agent_vz += v_sub;   // positive pushes cell down; z-floor clamping below preven
 
 `d_dumping` is already read by the base function (`agent_d_dumping = FLAMEGPU->getVariable<float>("d_dumping")`).
 
-### Apical migration bias (NPC and RG only)
+### Apical migration bias (NEP and RG only)
 
 ```cpp
 if (agent_cell_type >= 1) {
     const float bias_strength = (agent_cell_type == 2)
         ? FLAMEGPU->environment.getProperty<float>("RG_APICAL_BIAS_RG")    // [µm/s]
-        : FLAMEGPU->environment.getProperty<float>("RG_APICAL_BIAS_NPC");  // [µm/s]
+        : FLAMEGPU->environment.getProperty<float>("RG_APICAL_BIAS_NEP");  // [µm/s]
     const float epith = FLAMEGPU->getVariable<float>("epithelialization_level");  // [-]
     const float effective_bias = bias_strength * epith;  // ramps up with polarity
     const float ap_x = FLAMEGPU->getVariable<float>("apx");  // [–]
@@ -605,7 +605,7 @@ def configure_globals(g: dict) -> None:
     g["RG_COMMIT_RATE"]               = 2e-5    # [1/s]
     g["RG_COMMIT_AUTOCRINE_RATE"]     = 5e-4    # [1/(s·a.u.)]
     g["RG_COMMIT_PARACRINE_RATE"]     = 1e-4    # [1/s]
-    g["RG_COMMIT_THRESHOLD_NPC"]      = 0.35    # [-]
+    g["RG_COMMIT_THRESHOLD_NEP"]      = 0.35    # [-]
     g["RG_COMMIT_THRESHOLD_RG"]       = 0.70    # [-]
     g["RG_EPITHELIAL_RATE"]           = 1e-4    # [1/s]
     # Polarity
@@ -615,7 +615,7 @@ def configure_globals(g: dict) -> None:
     g["RG_SUBSTRATE_Z0"]              = 0.0     # [µm]
     # Migration bias
     g["RG_APICAL_BIAS_RG"]            = 2e-3    # [µm/s]
-    g["RG_APICAL_BIAS_NPC"]           = 5e-4    # [µm/s]
+    g["RG_APICAL_BIAS_NEP"]           = 5e-4    # [µm/s]
     # Cell-cell adhesion matrix (3×3 flattened, row=self, col=neighbour)
     g["RG_ADHESION_MATRIX"]  = [0.4, 0.4, 0.2,
                                  0.4, 0.8, 0.6,

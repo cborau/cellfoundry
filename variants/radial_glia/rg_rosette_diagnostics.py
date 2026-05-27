@@ -55,7 +55,7 @@ DEFAULT_TARGETS: Dict[str, float] = {
     "mean_cluster_compactness_max": 0.90,
     "rg_assembly_compactness_min": 0.40,
     "n_rg_type2_min": 5.0,
-    "npc_near_rg_threshold_fraction_max": 0.30,
+    "nep_near_rg_threshold_fraction_max": 0.30,
     "mean_rg_commit_level_min": 0.62,
     "rg_committed_fraction_min": 0.12,
     "mean_apz_cells_max": 0.60,
@@ -304,14 +304,14 @@ def read_results_pickle(path: Path) -> Dict[str, Any]:
         return sum(1 for r in use if pred(r))
 
     n_rg_type2 = count_where(lambda r: int(_safe_float(r.get("cell_type")) or -1) == 2)
-    n_npc_type1 = count_where(lambda r: int(_safe_float(r.get("cell_type")) or -1) == 1)
+    n_nep_type1 = count_where(lambda r: int(_safe_float(r.get("cell_type")) or -1) == 1)
     n_ipsc_type0 = count_where(lambda r: int(_safe_float(r.get("cell_type")) or -1) == 0)
     n_rg_committed = count_where(lambda r: int(_safe_float(r.get("rg_committed")) or 0) == 1)
 
     cell_summary = {
         "n_alive_rows": float(n),
         "n_rg_type2": float(n_rg_type2),
-        "n_npc_type1": float(n_npc_type1),
+        "n_nep_type1": float(n_nep_type1),
         "n_ipsc_type0": float(n_ipsc_type0),
         "rg_committed_fraction": (n_rg_committed / n) if n > 0 else 0.0,
         "mean_rg_commit_level": mean_of("rg_commit_level"),
@@ -322,10 +322,10 @@ def read_results_pickle(path: Path) -> Dict[str, Any]:
         "max_morphogen_local": max_of("morphogen_local"),
         "mean_apz_cells": mean_of("apz"),
         "mean_apz_rg": mean_of("apz", filt=lambda r: int(_safe_float(r.get("cell_type")) or -1) == 2),
-        "mean_apz_npc": mean_of("apz", filt=lambda r: int(_safe_float(r.get("cell_type")) or -1) == 1),
-        "npc_near_rg_threshold_fraction": (
+        "mean_apz_nep": mean_of("apz", filt=lambda r: int(_safe_float(r.get("cell_type")) or -1) == 1),
+        "nep_near_rg_threshold_fraction": (
             count_where(lambda r: (int(_safe_float(r.get("cell_type")) or -1) == 1) and ((_safe_float(r.get("rg_commit_level")) or 0.0) >= 0.60))
-            / max(n_npc_type1, 1)
+            / max(n_nep_type1, 1)
         ),
     }
 
@@ -473,7 +473,7 @@ def print_diagnostics(args: argparse.Namespace) -> None:
     k_auto = float(p.get("RG_COMMIT_AUTOCRINE_RATE", 3e-5))
     k_decay = float(p.get("RG_COMMIT_DECAY_RATE", 1.5e-6))
     k_inhibit = float(p.get("RG_COMMIT_INHIBIT_RATE", 0.0))
-    thr_npc = float(p.get("RG_COMMIT_THRESHOLD_NPC", 0.35))
+    thr_nep = float(p.get("RG_COMMIT_THRESHOLD_NEP", 0.35))
     thr_rg = float(p.get("RG_COMMIT_THRESHOLD_RG", 0.70))
     noise = float(p.get("RG_COMMIT_NOISE", 0.0))
     dt = float(p.get("TIME_STEP", 60.0))
@@ -481,7 +481,7 @@ def print_diagnostics(args: argparse.Namespace) -> None:
     c_sat = arr_get(p.get("INIT_ECM_SAT_CONCENTRATION_VALS", [0, 0, 0]), 2)
     c_init_ecm = arr_get(p.get("INIT_ECM_CONCENTRATION_VALS", [0, 0, 0]), 2)
     prod_base = arr_get(p.get("INIT_CELL_PRODUCTION_RATES", [0, 0, 0]), 2)
-    prod_mult_npc = arr_get(p.get("CELL_PRODUCTION_MULTIPLIER", [0, 0, 0]), 1)
+    prod_mult_nep = arr_get(p.get("CELL_PRODUCTION_MULTIPLIER", [0, 0, 0]), 1)
     prod_mult_rg = arr_get(p.get("CELL_PRODUCTION_MULTIPLIER", [0, 0, 0]), 2)
     d_sp2 = arr_get(p.get("DIFFUSION_COEFF_MULTI", [0, 0, 0]), 2)
     lambda_sp2 = arr_get(p.get("ECM_DEGRADATION_RATE_MULTI", [0, 0, 0]), 2)
@@ -559,7 +559,7 @@ def print_diagnostics(args: argparse.Namespace) -> None:
         ("RG_COMMIT_AUTOCRINE_RATE", fmt(k_auto, "1/(s*uM)")),
         ("RG_COMMIT_DECAY_RATE", fmt(k_decay, "1/s")),
         ("RG_COMMIT_INHIBIT_RATE", fmt(k_inhibit, "1/s")),
-        ("RG_COMMIT_THRESHOLD_NPC", fmt(thr_npc)),
+        ("RG_COMMIT_THRESHOLD_NEP", fmt(thr_nep)),
         ("RG_COMMIT_THRESHOLD_RG", fmt(thr_rg)),
         ("RG_COMMIT_NOISE", fmt(noise)),
         ("TIME_STEP", fmt(dt, "s")),
@@ -567,7 +567,7 @@ def print_diagnostics(args: argparse.Namespace) -> None:
         ("INIT_ECM_SAT_CONCENTRATION_VALS[2]", fmt(c_sat, "uM")),
         ("INIT_ECM_CONCENTRATION_VALS[2]", fmt(c_init_ecm, "uM")),
         ("INIT_CELL_PRODUCTION_RATES[2]", fmt(prod_base, "1/s")),
-        ("CELL_PRODUCTION_MULTIPLIER[NPC, RG]", f"{prod_mult_npc:g}, {prod_mult_rg:g}"),
+        ("CELL_PRODUCTION_MULTIPLIER[NEP, RG]", f"{prod_mult_nep:g}, {prod_mult_rg:g}"),
         ("D_sp2", fmt(d_sp2, "um^2/s")),
         ("lambda_sp2", fmt(lambda_sp2, "1/s")),
         ("RG_POLARITY_SP2_THRESHOLD", fmt(pol_thr, "uM")),
@@ -587,7 +587,7 @@ def print_diagnostics(args: argparse.Namespace) -> None:
         ("mean_cluster_compactness in", f"[{fmt(targets['mean_cluster_compactness_min'])}, {fmt(targets['mean_cluster_compactness_max'])}]"),
         ("rg_assembly_compactness >=", fmt(targets["rg_assembly_compactness_min"])),
         ("n_rg_type2 >=", fmt(targets["n_rg_type2_min"])),
-        ("npc_near_rg_threshold_fraction <=", fmt(targets["npc_near_rg_threshold_fraction_max"])),
+        ("nep_near_rg_threshold_fraction <=", fmt(targets["nep_near_rg_threshold_fraction_max"])),
         ("mean_rg_commit_level >=", fmt(targets["mean_rg_commit_level_min"])),
         ("rg_committed_fraction >=", fmt(targets["rg_committed_fraction_min"])),
         ("mean_apz_cells <=", fmt(targets["mean_apz_cells_max"])),
@@ -625,7 +625,7 @@ def print_diagnostics(args: argparse.Namespace) -> None:
         for k in [
             "n_alive_rows",
             "n_ipsc_type0",
-            "n_npc_type1",
+            "n_nep_type1",
             "n_rg_type2",
             "rg_committed_fraction",
             "mean_rg_commit_level",
@@ -635,9 +635,9 @@ def print_diagnostics(args: argparse.Namespace) -> None:
             "mean_morphogen_local",
             "max_morphogen_local",
             "mean_apz_cells",
-            "mean_apz_npc",
+            "mean_apz_nep",
             "mean_apz_rg",
-            "npc_near_rg_threshold_fraction",
+            "nep_near_rg_threshold_fraction",
         ]:
             if k in observed_cell_metrics and observed_cell_metrics[k] is not None:
                 rows.append((k, fmt(observed_cell_metrics[k])))
@@ -657,19 +657,19 @@ def print_diagnostics(args: argparse.Namespace) -> None:
     print()
 
     basal_xeq_no_sp2 = x_eq_from_drive(k_basal, k_decay)
-    t_to_npc_basal = time_to_threshold_hours(0.0, thr_npc, k_basal, k_decay)
-    print(f"iPSC with no sp2: x_eq = {fmt(basal_xeq_no_sp2)}; time to NPC threshold = {fmt(t_to_npc_basal, 'h')}")
+    t_to_nep_basal = time_to_threshold_hours(0.0, thr_nep, k_basal, k_decay)
+    print(f"iPSC with no sp2: x_eq = {fmt(basal_xeq_no_sp2)}; time to NEP threshold = {fmt(t_to_nep_basal, 'h')}")
     if cpp["basal_only_iPSC"]:
-        print("After NPC transition, basal is switched off, so further progression requires sp2.")
+        print("After NEP transition, basal is switched off, so further progression requires sp2.")
     print()
 
     rows = []
     for delta in [0.0, 0.05, 0.09, 0.12, 0.20, 0.30]:
-        sp2_npc_from_npc = required_sp2_for_threshold(thr_npc, k_auto, k_decay, k_inhibit, delta, basal=0.0)
-        sp2_rg_from_npc = required_sp2_for_threshold(thr_rg, k_auto, k_decay, k_inhibit, delta, basal=0.0)
+        sp2_nep_from_nep = required_sp2_for_threshold(thr_nep, k_auto, k_decay, k_inhibit, delta, basal=0.0)
+        sp2_rg_from_nep = required_sp2_for_threshold(thr_rg, k_auto, k_decay, k_inhibit, delta, basal=0.0)
         sp2_rg_from_ipsc = required_sp2_for_threshold(thr_rg, k_auto, k_decay, k_inhibit, delta, basal=k_basal)
-        rows.append((fmt(delta), fmt(sp2_npc_from_npc, "uM"), fmt(sp2_rg_from_npc, "uM"), fmt(sp2_rg_from_ipsc, "uM")))
-    print(table(rows, headers=("delta_signal", "NPC maintenance from NPC", "RG from NPC", "RG while basal active")))
+        rows.append((fmt(delta), fmt(sp2_nep_from_nep, "uM"), fmt(sp2_rg_from_nep, "uM"), fmt(sp2_rg_from_ipsc, "uM")))
+    print(table(rows, headers=("delta_signal", "NEP maintenance from NEP", "RG from NEP", "RG while basal active")))
     print()
 
     candidate_sp2 = [0.0, pol_thr, 0.15, 0.20, 0.21, 0.25, 0.30, 0.35, 0.40, c_sat]
@@ -687,9 +687,9 @@ def print_diagnostics(args: argparse.Namespace) -> None:
 
     rows = []
     for c in unique_sp2:
-        drive_npc = k_auto * c
-        xeq_npc = x_eq_from_drive(drive_npc, k_decay)
-        t_rg = time_to_threshold_hours(thr_npc, thr_rg, drive_npc, k_decay)
+        drive_nep = k_auto * c
+        xeq_nep = x_eq_from_drive(drive_nep, k_decay)
+        t_rg = time_to_threshold_hours(thr_nep, thr_rg, drive_nep, k_decay)
         label = ""
         if observed_max is not None and abs(c - observed_max) < 1e-9:
             label = "observed max"
@@ -699,9 +699,9 @@ def print_diagnostics(args: argparse.Namespace) -> None:
             label = "C_sat"
         elif abs(c - pol_thr) < 1e-9:
             label = "polarity gate"
-        rows.append((fmt(c, "uM"), label, fmt(xeq_npc), fmt(t_rg, "h")))
-    print("NPC-to-RG behaviour if local sp2 were held constant")
-    print(table(rows, headers=("local_sp2", "note", "x_eq for NPC/RG", "time 0.35 -> 0.70")))
+        rows.append((fmt(c, "uM"), label, fmt(xeq_nep), fmt(t_rg, "h")))
+    print("NEP-to-RG behaviour if local sp2 were held constant")
+    print(table(rows, headers=("local_sp2", "note", "x_eq for NEP/RG", "time 0.35 -> 0.70")))
     print()
 
     if d_sp2 > 0.0 and lambda_sp2 > 0.0:
@@ -716,7 +716,7 @@ def print_diagnostics(args: argparse.Namespace) -> None:
     print("Primary diagnosis")
     if cpp["basal_only_iPSC"]:
         print(
-            f"  The first iPSC-to-NPC step can occur by basal drift, but NPC-to-RG requires "
+            f"  The first iPSC-to-NEP step can occur by basal drift, but NEP-to-RG requires "
             f"local_sp2 >= {fmt(threshold_no_inhib, 'uM')} even with no lateral inhibition."
         )
     else:
@@ -789,14 +789,14 @@ def print_diagnostics(args: argparse.Namespace) -> None:
     # Scenario suggestions.
     print("Scenario-specific suggestions")
     print("- no_rg:")
-    print(f"  1) Lower the NPC-to-RG sp2 threshold. Current no-inhibition threshold is {fmt(threshold_no_inhib, 'uM')}; this is high relative to expected peaks around 0.20-0.25 uM.")
+    print(f"  1) Lower the NEP-to-RG sp2 threshold. Current no-inhibition threshold is {fmt(threshold_no_inhib, 'uM')}; this is high relative to expected peaks around 0.20-0.25 uM.")
     print("  2) Prefer one clean fate-side change first: set RG_COMMIT_AUTOCRINE_RATE to about 3e-5 if max_sp2 is near 0.21 uM, or reduce RG_COMMIT_DECAY_RATE to about 1.5e-6.")
-    print("  3) If max_sp2 is genuinely below 0.20 uM, increase sp2 availability instead: raise INIT_CELL_PRODUCTION_RATES[2], raise INIT_ECM_SAT_CONCENTRATION_VALS[2], reduce ECM_DEGRADATION_RATE_MULTI[2], or seed a tiny NPC fraction for debugging.")
+    print("  3) If max_sp2 is genuinely below 0.20 uM, increase sp2 availability instead: raise INIT_CELL_PRODUCTION_RATES[2], raise INIT_ECM_SAT_CONCENTRATION_VALS[2], reduce ECM_DEGRADATION_RATE_MULTI[2], or seed a tiny NEP fraction for debugging.")
     print("  4) Temporarily set RG_COMMIT_INHIBIT_RATE=0 only as a diagnostic. It should not block the first RG when there are no RG neighbours, but it can block expansion after the first RG appears.")
     print("- too_many_rosettes_or_all_RG:")
     print("  Reduce nucleation and spreading: lower RG_COMMIT_NOISE, lower RG_COMMIT_RATE, lower k_auto or sp2 production, increase RG_COMMIT_DECAY_RATE, increase RG_COMMIT_THRESHOLD_RG, or increase RG_COMMIT_INHIBIT_RATE after confirming apz rises.")
     print("- too_few_rosettes:")
-    print("  Increase nucleation heterogeneity: increase RG_COMMIT_NOISE slightly, increase k_auto, increase NPC sp2 production, reduce decay, or lower RG_COMMIT_THRESHOLD_RG modestly. If only one central rosette forms, check whether sp2 diffusion/degradation is too local.")
+    print("  Increase nucleation heterogeneity: increase RG_COMMIT_NOISE slightly, increase k_auto, increase NEP sp2 production, reduce decay, or lower RG_COMMIT_THRESHOLD_RG modestly. If only one central rosette forms, check whether sp2 diffusion/degradation is too local.")
     print("- rosettes_flat_after_RG_exists:")
     print("  Fate is no longer the bottleneck. Increase RG_EPITHELIAL_RATE or RG_APICAL_BIAS_RG, reduce RG_SUBSTRATE_K if z motion is over-constrained, and check that C0 exceeds RG_POLARITY_SP2_THRESHOLD so apz can align.")
     print("- cells_RGs_but_no_pattern:")
@@ -888,7 +888,7 @@ def print_diagnostics(args: argparse.Namespace) -> None:
         print("Cell-level suggestions from RG final cell metrics")
         n_rg_type2 = observed_cell_metrics.get("n_rg_type2")
         mean_commit = observed_cell_metrics.get("mean_rg_commit_level")
-        near_thr = observed_cell_metrics.get("npc_near_rg_threshold_fraction")
+        near_thr = observed_cell_metrics.get("nep_near_rg_threshold_fraction")
         mean_apz_cells = observed_cell_metrics.get("mean_apz_cells")
         mean_rosette_cells = observed_cell_metrics.get("mean_rosette_maturity_cells")
         rg_comm_frac = observed_cell_metrics.get("rg_committed_fraction")
@@ -899,9 +899,9 @@ def print_diagnostics(args: argparse.Namespace) -> None:
                 "(raise RG_COMMIT_AUTOCRINE_RATE by ~15-30% and/or reduce RG_COMMIT_DECAY_RATE by ~10-25%)."
             )
 
-        if near_thr is not None and near_thr > targets["npc_near_rg_threshold_fraction_max"]:
+        if near_thr is not None and near_thr > targets["nep_near_rg_threshold_fraction_max"]:
             print(
-                f"  - Many NPCs are near RG threshold (npc_near_rg_threshold_fraction={fmt(near_thr)} > target {fmt(targets['npc_near_rg_threshold_fraction_max'])}): system is threshold-limited. "
+                f"  - Many NEPs are near RG threshold (nep_near_rg_threshold_fraction={fmt(near_thr)} > target {fmt(targets['nep_near_rg_threshold_fraction_max'])}): system is threshold-limited. "
                 "Try lowering RG_COMMIT_THRESHOLD_RG slightly (e.g. 0.70 -> 0.66-0.68) or modestly increasing k_auto."
             )
 
@@ -966,7 +966,7 @@ def main() -> None:
     parser.add_argument("--target-mean-cluster-compactness-max", type=float, default=None, help="Target maximum mean_cluster_compactness")
     parser.add_argument("--target-rg-assembly-compactness-min", type=float, default=None, help="Target minimum rg_assembly_compactness")
     parser.add_argument("--target-n-rg-type2-min", type=float, default=None, help="Target minimum n_rg_type2")
-    parser.add_argument("--target-npc-near-rg-threshold-fraction-max", type=float, default=None, help="Target maximum npc_near_rg_threshold_fraction")
+    parser.add_argument("--target-nep-near-rg-threshold-fraction-max", type=float, default=None, help="Target maximum nep_near_rg_threshold_fraction")
     parser.add_argument("--target-mean-rg-commit-level-min", type=float, default=None, help="Target minimum mean_rg_commit_level")
     parser.add_argument("--target-rg-committed-fraction-min", type=float, default=None, help="Target minimum rg_committed_fraction")
     parser.add_argument("--target-mean-apz-cells-max", type=float, default=None, help="Target maximum mean_apz_cells")

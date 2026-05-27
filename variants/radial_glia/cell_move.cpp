@@ -169,7 +169,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
 
   const uint8_t N_SPECIES = 3; // WARNING: must match main python
-  const uint32_t ECM_POPULATION_SIZE = 68921; // WARNING: must match Nx*Ny*Nz
+  const uint32_t ECM_POPULATION_SIZE = 61206; // WARNING: must match Nx*Ny*Nz
   auto C_SP_MACRO = FLAMEGPU->environment.getMacroProperty<float, N_SPECIES, ECM_POPULATION_SIZE>("C_SP_MACRO");
 
   // Get number of agents per direction
@@ -599,11 +599,11 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
     }
   }
 
-  // RG variant: apical migration bias (NPC and RG types only)  [um/s]
+  // RG variant: apical migration bias (NEP and RG types only)  [um/s]
   if (agent_cell_type >= 1) {
     const float bias_strength = (agent_cell_type == 2)
         ? FLAMEGPU->environment.getProperty<float>("RG_APICAL_BIAS_RG")
-        : FLAMEGPU->environment.getProperty<float>("RG_APICAL_BIAS_NPC");
+        : FLAMEGPU->environment.getProperty<float>("RG_APICAL_BIAS_NEP");
     const float epith = FLAMEGPU->getVariable<float>("epithelialization_level");
     const float effective_bias = bias_strength * epith;
     agent_vx += effective_bias * FLAMEGPU->getVariable<float>("apx");

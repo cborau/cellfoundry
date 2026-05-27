@@ -5,12 +5,12 @@
 This variant simulates the spontaneous self-organisation of a pluripotent stem cell
 monolayer into a **radial glia (RG) rosette** -- a hallmark structure of early human
 cortical development.  In vivo, iPSCs transition through a neural progenitor
-intermediate (NPC) and eventually adopt a radial glia identity.  RG cells form
+intermediate (NEP) and eventually adopt a radial glia identity.  RG cells form
 distinctive wheel-spoke arrangements called rosettes, with apical surfaces facing a
 central lumen and basal processes extending toward the substrate.
 
 The model captures:
-- Stochastic, asynchronous iPSC -> NPC -> RG fate commitment driven by a secreted
+- Stochastic, asynchronous iPSC -> NEP -> RG fate commitment driven by a secreted
   morphogen (sp2)
 - Gradual apicobasal polarization, where cells develop an apical vector pointing
   toward a local lumen proxy with an upward component
@@ -25,7 +25,7 @@ The model captures:
 | Integer code | Name | Biological identity |
 |---|---|---|
 | 0 | iPSC | Induced pluripotent stem cell; not yet committed |
-| 1 | NPC | Neural progenitor cell; N-cadherin expression starts, weak sp2 secretion |
+| 1 | NEP | Neuroepithelial progenitor; N-cadherin expression starts, weak sp2 secretion |
 | 2 | RG | Radial glia; strong N-cadherin junctions, full sp2 secretion, active apical bias |
 
 ---
@@ -83,24 +83,24 @@ x_eq = (k_basal + k_autocrine * sp2) / (k_basal + k_autocrine * sp2 + k_decay)
 With k_autocrine=3e-5, k_decay=1.5e-6:
 ```
 RG threshold (x_eq = 0.70)  ->  sp2 > 0.117 µM   (cells in morphogen-rich zone)
-NPC threshold (x_eq = 0.35) ->  sp2 > 0.027 µM   (cells within diffusion length)
+NEP threshold (x_eq = 0.35) ->  sp2 > 0.027 µM   (cells within diffusion length)
 Periphery (sp2 = 0)         ->  x_eq = 0.0        (stays iPSC)
 ```
 With Notch-Delta inhibition active (1 mature RG neighbour, delta_signal ~ 0.09):
 ```
 effective_decay = 1.5e-6 + 8e-6 * 0.09 = 2.22e-6
-x_eq at sp2=0.15 µM = 4.5e-6 / 6.72e-6 = 0.67  -> NPC  (ring edge suppressed)
+x_eq at sp2=0.15 µM = 4.5e-6 / 6.72e-6 = 0.67  -> NEP  (ring edge suppressed)
 x_eq at sp2=0.20 µM = 6.0e-6 / 8.22e-6 = 0.73  -> RG   (ring core commits)
 ```
 This sp2-threshold-based pattern formation with lateral inhibition produces
-isolated RG islands (radius ~ sp2 > 0.117 µM) surrounded by NPC, with the
+isolated RG islands (radius ~ sp2 > 0.117 µM) surrounded by NEP, with the
 rosette ring size limited by how quickly the Delta/apical signal builds up.
 
 ### Thresholds
 
 ```
 commit >= 0.70  ->  cell_type = 2  (RG)
-commit >= 0.35  ->  cell_type = 1  (NPC)
+commit >= 0.35  ->  cell_type = 1  (NEP)
 commit <  0.35  ->  cell_type = 0  (iPSC)
 ```
 

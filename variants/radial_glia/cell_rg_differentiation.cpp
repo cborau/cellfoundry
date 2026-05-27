@@ -2,7 +2,7 @@
  * cell_rg_differentiation  [RG variant - new function]
  *
  * Purpose:
- *   Drive iPSC -> NPC -> RG differentiation via a logistic ODE gated by
+ *   Drive iPSC -> NEP -> RG differentiation via a logistic ODE gated by
  *   local morphogen concentration (ECM species 2) and autocrine/paracrine
  *   signalling from already-committed RG neighbours.  When rg_commitment
  *   crosses a threshold, the agent's cell_type is updated and its k_production
@@ -20,8 +20,8 @@
  *   RG_COMMIT_RATE             [1/s]       - morphogen-independent basal rate
  *   RG_COMMIT_AUTOCRINE_RATE   [1/(s.a.u.)]- per-unit morphogen drive
  *   RG_COMMIT_INHIBIT_RATE     [1/s]       - Notch-Delta lateral inhibition rate
- *   RG_COMMIT_THRESHOLD_NPC    [-]         - rg_commitment threshold: iPSC->NPC
- *   RG_COMMIT_THRESHOLD_RG     [-]         - rg_commitment threshold: NPC->RG
+ *   RG_COMMIT_THRESHOLD_NEP    [-]         - rg_commitment threshold: iPSC->NEP
+ *   RG_COMMIT_THRESHOLD_RG     [-]         - rg_commitment threshold: NEP->RG
  *   RG_EPITHELIAL_RATE         [1/s]       - epithelialization kinetics
  *   CELL_PRODUCTION_MULTIPLIER [N_CELL_TYPES] - inherited from base model
  *   INIT_CELL_PRODUCTION_RATES [N_SPECIES] - base k_production per species
@@ -54,7 +54,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
 
   const uint8_t N_SPECIES = 3;   // WARNING: must match main python
   const uint8_t N_CELL_TYPES = 3;
-  const uint32_t ECM_POPULATION_SIZE = 68921; // WARNING: must match Nx*Ny*Nz
+  const uint32_t ECM_POPULATION_SIZE = 61206; // WARNING: must match Nx*Ny*Nz
 
   auto C_SP_MACRO = FLAMEGPU->environment.getMacroProperty<float, N_SPECIES, ECM_POPULATION_SIZE>("C_SP_MACRO");
 
@@ -71,7 +71,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
 
   const float RG_COMMIT_RATE           = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_RATE");
   const float RG_COMMIT_AUTOCRINE_RATE = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_AUTOCRINE_RATE");
-  const float RG_COMMIT_THRESHOLD_NPC  = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_THRESHOLD_NPC");
+  const float RG_COMMIT_THRESHOLD_NEP  = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_THRESHOLD_NEP");
   const float RG_COMMIT_THRESHOLD_RG   = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_THRESHOLD_RG");
   const float RG_EPITHELIAL_RATE       = FLAMEGPU->environment.getProperty<float>("RG_EPITHELIAL_RATE");
 
@@ -144,18 +144,31 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
   //                 * (1 - rg_commit) + noise
   // Gaussian noise (RG_COMMIT_NOISE * sqrt(dt), Ito convention) spreads
   // differentiation timing across the population so cells do not all cross
-  // NPC/RG thresholds simultaneously, enabling spatial heterogeneity and
+  // NEP/RG thresholds simultaneously, enabling spatial heterogeneity and
   // cluster/rosette nucleation.
   // -------------------------------------------------------------------------
   const float RG_COMMIT_NOISE       = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_NOISE");
   const float RG_COMMIT_DECAY_RATE  = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_DECAY_RATE");
   const float RG_COMMIT_INHIBIT_RATE = FLAMEGPU->environment.getProperty<float>("RG_COMMIT_INHIBIT_RATE");
-  // Basal rate applies only to iPSC (cell_type == 0).  Once a cell is NPC or
-  // RG, further progression requires sp2 signalling.  Without this gate the
-  // positive basal drive accumulates every step and ALL cells reach commit = 1
-  // within ~67 h regardless of sp2, producing all-RG outcomes.
+  // -------------------------------------------------------------------------
+  // Community effect gate: a minimum local cell density is required before
+  // isolated cells can initiate basal differentiation.
+  // community_gate = min(1, total_neighbours / RG_COMMUNITY_MIN_DENSITY)
+  // Isolated cells have proportionally reduced basal drive, matching
+  // experimental observations that Pax6+ cells require a supporting community
+  // to progress toward radial glia without neighbouring cells.
+  // -------------------------------------------------------------------------
+  const float RG_COMMUNITY_MIN_DENSITY = FLAMEGPU->environment.getProperty<float>("RG_COMMUNITY_MIN_DENSITY");
+  const float community_gate = fminf(1.0f,
+      (float)total_neighbours / fmaxf(1.0f, RG_COMMUNITY_MIN_DENSITY));
+
+  // Basal rate applies only to iPSC (cell_type == 0) and is gated by the
+  // community effect.  Once a cell is NEP or RG, further progression requires
+  // sp2 signalling.  Without this gate the positive basal drive accumulates
+  // every step and ALL cells reach commit = 1 within ~67 h regardless of sp2,
+  // producing all-RG outcomes.
   // Positive paracrine term removed: replaced by Notch-Delta lateral inhibition below.
-  const float drive = (agent_cell_type == 0 ? RG_COMMIT_RATE : 0.0f)
+  const float drive = (agent_cell_type == 0 ? RG_COMMIT_RATE * community_gate : 0.0f)
                     + RG_COMMIT_AUTOCRINE_RATE * local_sp2;
   const float noise = RG_COMMIT_NOISE * FLAMEGPU->random.normal<float>() * sqrtf(TIME_STEP);
   rg_commit += drive * (1.0f - rg_commit) * TIME_STEP + noise;
@@ -164,10 +177,10 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
   // Notch-Delta lateral inhibition: committed RG cells send Delta signal proportional
   // to their (rg_commit * |apz|) (Delta expression * junction maturity).  This adds an
   // effective decay term that suppresses neighbours' commitment, producing spatial
-  // pattern (isolated RG islands surrounded by NPC).  The |apz| factor delays the
+  // pattern (isolated RG islands surrounded by NEP).  The |apz| factor delays the
   // inhibitory fence by ~8h after RG commitment, allowing the rosette ring to nucleate.
   // Equilibrium: x_eq = drive / (drive + k_decay + k_inhibit * delta_signal)
-  // With 1 mature RG neighbor (delta~0.09): effective_decay doubles -> x_eq < 0.70 -> NPC.
+  // With 1 mature RG neighbor (delta~0.09): effective_decay doubles -> x_eq < 0.70 -> NEP.
   rg_commit -= RG_COMMIT_INHIBIT_RATE * local_delta_signal * rg_commit * TIME_STEP;
   rg_commit = fminf(fmaxf(rg_commit, 0.0f), 1.0f);
 
@@ -175,11 +188,11 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
   // Cell-type switch and k_production sync
   // -------------------------------------------------------------------------
   int new_type = (rg_commit >= RG_COMMIT_THRESHOLD_RG)  ? 2
-               : (rg_commit >= RG_COMMIT_THRESHOLD_NPC) ? 1
+               : (rg_commit >= RG_COMMIT_THRESHOLD_NEP) ? 1
                : 0;
   // Ratchet: fate commitment is irreversible.  Noise can transiently push
   // rg_commit below a threshold; without this guard the cell_type would
-  // oscillate (e.g. NPC -> iPSC -> NPC) which is biologically wrong.
+  // oscillate (e.g. NEP -> iPSC -> NEP) which is biologically wrong.
   if (new_type < agent_cell_type) new_type = agent_cell_type;
 
   if (new_type != agent_cell_type) {
@@ -197,10 +210,10 @@ FLAMEGPU_AGENT_FUNCTION(cell_rg_differentiation, flamegpu::MessageSpatial3D, fla
   // -------------------------------------------------------------------------
   // Epithelialization ODE (logistic, forward Euler)
   //   d_epi/dt = RG_EPITHELIAL_RATE * rg_commit * (1 - epi)
-  // Applies to both NPC and RG cells: NPC cells in the pseudo-stratified
+  // Applies to both NEP and RG cells: NEP cells in the pseudo-stratified
   // neuroepithelium do acquire partial apico-basal polarity proportional to
   // their commitment level.  The z-alignment itself (in cell_rg_polarity_update)
-  // is additionally scaled by rg_commit for NPC cells, so peripheral NPC cells
+  // is additionally scaled by rg_commit for NEP cells, so peripheral NEP cells
   // with low commitment develop much weaker z-polarity than RG cells.
   // -------------------------------------------------------------------------
   if (agent_cell_type >= 1) {
