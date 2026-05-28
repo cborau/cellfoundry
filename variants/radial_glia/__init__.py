@@ -64,15 +64,18 @@ PARAMS = {
     "INCLUDE_CELLS":              True,
     "INCLUDE_CELL_CELL_INTERACTION": True,
     "INCLUDE_CELL_CYCLE":         True,
-    # Cell-cycle timing — biological: ~42h for iPSC and NEP; RG ~52h (asymmetric division mode).
+    # Cell-cycle timing — biological: ~42h for iPSC and NEP; RG ~52h.
     # Phases scale from the base-model 24h reference (G1:S:G2:M = 10:8:4:2 h → same proportions).
     "CYCLE_PHASE_G1_DURATION":    [75600.0, 75600.0, 93600.0],   # [s]  iPSC/NEP 21h, RG 26h
     "CYCLE_PHASE_S_DURATION":     [36000.0, 36000.0, 43200.0],   # [s]  iPSC/NEP 10h, RG 12h
     "CYCLE_PHASE_G2_DURATION":    [18000.0, 18000.0, 21600.0],   # [s]  iPSC/NEP  5h, RG  6h
     "CYCLE_PHASE_M_DURATION":     [21600.0, 21600.0, 28800.0],   # [s]  iPSC/NEP  6h, RG  8h  → totals 42h/42h/52h
     # RG division-rate multiplier slightly suppressed (0.7) to reflect the specialised
-    # asymmetric mode; the longer cycle duration already handles most of the delay.
+    # Notch-mediated cell cycle; the longer cycle duration already handles most of the delay.
     "DIVISION_RATE_MULTIPLIER":   [1.0, 1.0, 0.7],               # [-]  per cell type
+    # Fraction of RG divisions that are symmetric (both daughters stay RG).
+    # The remaining fraction are asymmetric (one RG + one NEP progenitor).
+    "RG_SYMMETRIC_DIVISION_PROB": 0.25,                          # [-]  probability of symmetric RG division
     "INCLUDE_DIFFUSION":          True,
     "INCLUDE_VASCULARIZATION":    False,
     "INCLUDE_FIBRE_NETWORK":      False,
@@ -80,7 +83,8 @@ PARAMS = {
     "INCLUDE_LUMEN":              False,
 
     # --- Cell geometry ---
-    "N_CELLS":                    100,
+    "MIN_ROSETTE_SIZE":           5,                         # minimum RG cells per cluster to count as a genuine rosette
+    "N_CELLS":                    300,
     "CELL_RADIUS":                [10.0, 10.0, 10.0],       # [µm]
 
     # --- Cell motility ---
@@ -96,18 +100,21 @@ PARAMS = {
     "CELL_CELL_DV_MAX":           [5e-3, 3e-3, 1e-3],       # [µm/s]  10× CELL_SPEED_REF
 
     # --- Diffusion ---
-    # sp0/sp1 unchanged at D=0.1 µm²/s.  sp2 also stays at 0.1 µm²/s but now has
-    # first-order degradation (ECM_DEGRADATION_RATE_MULTI[2]=4e-5 /s, half-life 4.8h).
-    # Diffusion length: L = sqrt(D/lambda) = sqrt(0.1/4e-5) = 50 µm.  Only cells
-    # within ~50 µm of a secreting cluster see significant sp2 -> prevents the
-    # domain-wide cascade that drove all 240 cells to RG.
-    # Stability: Fi = 3*0.1*60/225 = 0.08 < 0.5;  lambda*dt = 4e-5*60 = 0.0024 < 1.
-    "DIFFUSION_COEFF_MULTI":      [0.1, 0.1, 0.1],          # [µm²/s]
+    # sp0/sp1 unchanged at D=0.1 µm²/s.  sp2 reduced to D=0.03 µm²/s to sharpen
+    # the local RG signal relative to the background from distributed NEP cells.
+    # Signal-to-noise analysis (2-D Green's function, steady state):
+    #   Background from ~600 NEP cells: C_bg ≈ N*m_NEP*q / (A*λ) = 1.5 q_RG  (with m_NEP=0.1)
+    #   Single-RG local signal at r=10 µm: C_local ≈ q/(2πD)*K0(R/L) ≈ 6.5 q_RG
+    #   Ratio C_local / C_bg ≈ 4.3:1  (vs 0.37:1 with old D=0.1, m_NEP=0.5)
+    # Diffusion length: L = sqrt(D/λ) = sqrt(0.03/4e-5) = 27.4 µm (~2.7 cell diameters).
+    # Only cells within ~27 µm of a committed RG cluster see a significant sp2 boost.
+    # Stability: Fi = 3*0.03*60/100 = 0.054 < 0.5;  λ*dt = 4e-5*60 = 0.0024 < 1.
+    "DIFFUSION_COEFF_MULTI":      [0.1, 0.1, 0.03],         # [µm²/s]  sp2 tightened to L=27 µm
     "ECM_DEGRADATION_RATE_MULTI": [0.0, 0.0, 4e-5],         # [1/s]  sp2 half-life 4.8h
     # sp2: ALL six faces zero-flux (-1.0).  With first-order degradation the steady-state
     # sp2 profile is set by the local balance of secretion and degradation; no boundary
-    # sink is needed.  The gradient points away from secreting cells (toward periphery)
-    # and is heterogeneous — driven by the spatial distribution of the committed cluster.
+    # sink is needed.  With D=0.03 µm²/s and L=27 µm the gradient is steeper than before,
+    # giving the polarity update a stronger directional cue near the cluster.
     # Index convention: [0]=+X, [1]=-X, [2]=+Y, [3]=-Y, [4]=+Z, [5]=-Z (substrate).
     "BOUNDARY_CONC_INIT_MULTI":   [[2.5]*6, [2.5]*6, [-1.0]*6],
     "BOUNDARY_CONC_FIXED_MULTI":  [[2.5]*6, [2.5]*6, [-1.0]*6],
@@ -121,7 +128,9 @@ PARAMS = {
     # Without this override C_sp_sat[2]=0, so c1=dt*alpha*k_prod*0=0 and NO sp2 is ever secreted.
     # Caps the local sp2 peak so the autocrine drive near the
     # cluster centre is at most k_auto * C_sat (NPC->RG in ~54h from NPC formation).
-    "INIT_ECM_SAT_CONCENTRATION_VALS": [0.0, 0.0, 0.5],     # sp2 secretion target [µM]
+    "INIT_ECM_SAT_CONCENTRATION_VALS": [0.0, 0.0, 0.5],     # sp2 secretion target [µM]  — raised from 0.5: lets ECM accumulate more sp2
+                                                              # so the drive at high-density zones builds faster.
+                                                              # SNR unchanged: q_RG cancels in C_local/C_bg ratio.
 
     # --- Metabolism / secretion ---
     # sp0 and sp1 consumed by all types; sp2 secreted only by committed cells.
@@ -130,12 +139,17 @@ PARAMS = {
     # term).  sp0 and sp1 are nutrients transported from ECM → cell, so they stay at 0
     # (mass-conserved uptake; no de-novo production by cells).
     "INIT_CELL_PRODUCTION_RATES": [0.0, 0.0, 5e-4],         # [1/s] base for fully committed RG
-    "CELL_PRODUCTION_MULTIPLIER": [0.0, 0.5, 1.0],          # type 0: silent, 1: half, 2: full
+    "CELL_PRODUCTION_MULTIPLIER": [0.0, 0.1, 1.0],          # type 0: silent, 1: low background (0.1×), 2: full
+                                                              # NEP reduced from 0.5→0.1: background C_bg drops 5×
+                                                              # while local RG signal (C_local, set by D and λ) is
+                                                              # unchanged → C_local/C_bg ≈ 4.3:1 vs old 0.37:1.
+                                                              # NEP still contributes enough background to allow
+                                                              # first-RG nucleation within the 120h window.
     "DE_NOVO_PRODUCTION":         [0, 0, 1],                 # 1 = de-novo (sp2), 0 = mass-conserved (sp0, sp1)
 
     # --- Simulation timing ---
-    # TIME_STEP=60 s. With dx=10 µm (N=6, 1000×1000×50 domain), D=0.1 µm²/s:
-    # Fi = 3×0.1×60/100 = 0.18 << 0.5 (stable).
+    # TIME_STEP=60 s. With dx=10 µm (N=6, 1000×1000×50 domain), D=0.03 µm²/s for sp2:
+    # Fi = 3×0.03×60/100 = 0.054 << 0.5 (stable).
     # Simulate day 3 (post-replating) → day 8 (rosette analysis): 5 days = 7200 steps.
     "TIME_STEP":                  60.0,                      # [s]
     "STEPS":                      7200,                      # 5 days: 120 h × 3600 s/h ÷ 60 s/step
@@ -172,22 +186,18 @@ def configure_globals(g: dict) -> None:
                                                           #        tau = 1/(5e-6+2.5e-6) = 37h; first NEP at ~28h.
                                                           #        x_eq_basal = 5e-6/7.5e-6 = 0.667 < RG threshold;
                                                           #        sp2 autocrine required to cross into RG territory.
-    g["RG_COMMIT_AUTOCRINE_RATE"]      = 2e-5    # [1/(s·µM)]  morphogen-driven amplification.
-                                                          #        Slows commitment so the sp2 gradient can
-                                                          #        concentrate around the first nucleation site
-                                                          #        before neighbours commit.
-                                                          #        RG threshold (x_eq=0.70) requires sp2>0.175µM.
-                                                          #        With max sp2~0.21µM: RG zone is narrow, biasing
-                                                          #        toward 1-2 central rosettes.
-    g["RG_COMMIT_INHIBIT_RATE"]        = 1e-6    # [1/s]  Notch-Delta lateral inhibition rate.
-                                                          #        Allows each nucleation site to grow to ~10
-                                                          #        cells before the inhibitory fence is strong
-                                                          #        enough to suppress the next ring.
-                                                          #        With k_basal=2e-6, the fence actually holds:
-                                                          #        Equilibrium (1 mature RG neighbor, delta~0.12):
-                                                          #          effective_decay = 1.5e-6 + 8e-6*0.12 = 2.46e-6
-                                                          #          No sp2: x_eq = 2e-6/4.46e-6 = 0.45 -> NEP
-                                                          #          sp2=0.20µM: x_eq = 6e-6/8.46e-6 = 0.71 -> RG
+    g["RG_COMMIT_AUTOCRINE_RATE"]      = 3.95e-5    # [1/(s·µM)]  morphogen-driven amplification.
+                                                          #        x_eq = drive/(drive+k_decay); drive=k_auto*sp2
+                                                          #        τ = 1/(k_auto*sp2 + k_decay);
+                                                          #          at sp2=0.14µM: τ = 1/(8.4e-6+1e-6) = 29h  (was 62h at 2.5e-5)
+                                                          #          at sp2=0.30µM: τ = 1/(18e-6+1e-6) = 14.6h
+                                                          #        x_eq at sp2=0.14: 8.4e-6/9.4e-6 = 0.89 >> 0.67
+                                                          #        First RG expected ~65h (NEP at ~22h + 43h drive at rising sp2).
+    g["RG_COMMIT_INHIBIT_RATE"]        = 2e-5    # [1/s]  Notch-Delta lateral inhibition rate.
+                                                          #        x_eq = drive/(drive+k_decay+k_inhibit*delta)
+                                                          #        1 RG neighbor (delta~0.08), sp2=0.22: x_eq=0.679 -> borderline
+                                                          #        2 RG neighbors (delta~0.16), sp2=0.22: x_eq=0.567 -> inhibited ✓
+                                                          #        Boundary at ~2 RG neighbors -> small 7-cell rosettes.
     g["RG_COMMIT_THRESHOLD_NEP"]       = 0.35    # [-]
     g["RG_COMMIT_THRESHOLD_RG"]        = 0.67    # [-]
     g["RG_EPITHELIAL_RATE"]            = 2e-6    # [1/s]  τ ≈ 140 h → polarity develops
@@ -242,9 +252,7 @@ def configure_globals(g: dict) -> None:
                                        #        anchor slips at 20 µm so cells can aggregate
     g["RG_XY_BOND_BREAK"]  = 40.0   # [µm]   bond-rupture distance: anchor slips to current
                                        #        position when cell has moved >40 µm from it
-    g["RG_COMMIT_DECAY_RATE"] = 1.5e-6  # [1/s]  first-order decay of rg_commit_level;
-                                       #        x_eq_basal = 5e-6/(5e-6+2.5e-6) = 0.667 < RG_threshold.
-                                       #        With k_inhibit=8e-6, 1 mature RG neighbour (delta~0.12):
+    g["RG_COMMIT_DECAY_RATE"] = 1.0e-6  # [1/s]  first-order decay of rg_commit_level.
                                        #          effective_decay = 2.5e-6 + 0.96e-6 = 3.46e-6
                                        #          No sp2:        x_eq = 5e-6/8.46e-6 = 0.591 -> fence holds
                                        #          sp2=0.14uM:    x_eq = 7.8e-6/11.26e-6 = 0.693 -> NPC
@@ -373,9 +381,9 @@ def _register_rg_env_properties(env, g: dict) -> None:
     _safe(lambda: env.newPropertyFloat("RG_COMMIT_RATE",
                                         g.get("RG_COMMIT_RATE", 5e-6)))
     _safe(lambda: env.newPropertyFloat("RG_COMMIT_AUTOCRINE_RATE",
-                                        g.get("RG_COMMIT_AUTOCRINE_RATE", 3e-6)))
+                                        g.get("RG_COMMIT_AUTOCRINE_RATE", 2.5e-5)))
     _safe(lambda: env.newPropertyFloat("RG_COMMIT_INHIBIT_RATE",
-                                        g.get("RG_COMMIT_INHIBIT_RATE", 1e-6)))
+                                        g.get("RG_COMMIT_INHIBIT_RATE", 2e-5)))
     _safe(lambda: env.newPropertyFloat("RG_COMMIT_THRESHOLD_NEP",
                                         g.get("RG_COMMIT_THRESHOLD_NEP", 0.35)))
     _safe(lambda: env.newPropertyFloat("RG_COMMIT_THRESHOLD_RG",
@@ -419,6 +427,8 @@ def _register_rg_env_properties(env, g: dict) -> None:
     _safe(lambda: env.newPropertyFloat("RG_XY_BOND_BREAK",
                                         g.get("RG_XY_BOND_BREAK", 40.0)))
     _safe(lambda: env.newPropertyFloat("RG_COMMIT_DECAY_RATE",
-                                        g.get("RG_COMMIT_DECAY_RATE", 1.5e-6)))
+                                        g.get("RG_COMMIT_DECAY_RATE", 1.0e-6)))
+    _safe(lambda: env.newPropertyFloat("RG_SYMMETRIC_DIVISION_PROB",
+                                        g.get("RG_SYMMETRIC_DIVISION_PROB", 0.25)))
     _safe(lambda: env.newPropertyFloat("RG_COMMUNITY_MIN_DENSITY",
                                         g.get("RG_COMMUNITY_MIN_DENSITY", 4.0)))

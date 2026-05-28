@@ -9,13 +9,14 @@
  *        apx/apy/apz, rosette_maturity, rg_neighbour_density, morphogen_local,
  *        substrate_anchor_x/y) are explicitly propagated to daughter
  *        cells on division — the base function leaves them at default (0 / -1).
- *     2. Asymmetric division for RG cells (cell_type == 2):
- *          Parent  — retains primary cilium, high Notch → stays RG;
- *                    commitment and epithelialization are slightly diluted by
- *                    the division event.
- *          Daughter — inherits Delta excess → re-enters as NEP (cell_type=1);
- *                    commitment is reset to just above the iPSC→NEP threshold;
- *                    polarity is scrambled (random apical angle in xy, apz=0).
+ *     2. Division for RG cells (cell_type == 2) is stochastic:
+ *        - Symmetric (prob = RG_SYMMETRIC_DIVISION_PROB): both parent and daughter
+ *          stay RG, inheriting commitment and epithelialization unchanged; apical
+ *          vector is preserved.
+ *        - Asymmetric (prob = 1 − RG_SYMMETRIC_DIVISION_PROB): parent stays RG
+ *          with slight commitment dilution; daughter re-enters as NEP (cell_type=1)
+ *          with commitment reset to just above the iPSC→NEP threshold and
+ *          scrambled polarity.
  *     3. Symmetric division for iPSC and NEP (cell_type == 0/1):
  *          Both cells inherit the parent's rg_commit_level and epithelialization_level
  *          unchanged; apical vector is preserved.
@@ -307,12 +308,20 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
       // -----------------------------------------------------------------
       // RG variant: parent RG-state updates after division
       // -----------------------------------------------------------------
+      bool rg_div_symmetric = false;
       if (agent_cell_type == 2) {
-        // RG asymmetric division (Notch-Delta mechanism):
-        // Parent retains primary cilium → high Notch → stays RG.
-        // Commitment and epithelialization are slightly diluted by the division event.
-        FLAMEGPU->setVariable<float>("rg_commit_level",         rg_commit * 0.95f);
-        FLAMEGPU->setVariable<float>("epithelialization_level", epi * 0.85f);
+        // Stochastic choice: symmetric (both stay RG) or asymmetric (one RG + one NEP).
+        const float rg_sym_prob = FLAMEGPU->environment.getProperty<float>("RG_SYMMETRIC_DIVISION_PROB");
+        rg_div_symmetric = FLAMEGPU->random.uniform<float>(0.0f, 1.0f) < rg_sym_prob;
+        if (rg_div_symmetric) {
+          // Symmetric: parent retains full commitment and epithelialization.
+          FLAMEGPU->setVariable<float>("rg_commit_level",         rg_commit);
+          FLAMEGPU->setVariable<float>("epithelialization_level", epi);
+        } else {
+          // Asymmetric: parent stays RG with slight commitment dilution.
+          FLAMEGPU->setVariable<float>("rg_commit_level",         rg_commit * 0.95f);
+          FLAMEGPU->setVariable<float>("epithelialization_level", epi * 0.85f);
+        }
         FLAMEGPU->setVariable<float>("apx", apx);
         FLAMEGPU->setVariable<float>("apy", apy);
         FLAMEGPU->setVariable<float>("apz", apz);
@@ -475,21 +484,32 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
       // -----------------------------------------------------------------
       // RG variant: daughter RG-state and type assignment
       // -----------------------------------------------------------------
+      const float base_prod = FLAMEGPU->environment.getProperty<float, N_SPECIES>("INIT_CELL_PRODUCTION_RATES", 2);
       if (agent_cell_type == 2) {
-        // RG asymmetric division: daughter inherits Delta excess → re-enters
-        // as NEP (type 1) with commitment just above the iPSC→NEP threshold.
-        const float daughter_commit = RG_COMMIT_THRESHOLD_NEP + 0.05f;
-        const float theta = FLAMEGPU->random.uniform<float>(0.0f, 6.28318530718f);
-        FLAMEGPU->agent_out.setVariable<int>("cell_type", 1);           // NEP
-        FLAMEGPU->agent_out.setVariable<float>("rg_commit_level",         daughter_commit);
-        FLAMEGPU->agent_out.setVariable<float>("epithelialization_level", 0.0f);
-        FLAMEGPU->agent_out.setVariable<float>("apx", cosf(theta));
-        FLAMEGPU->agent_out.setVariable<float>("apy", sinf(theta));
-        FLAMEGPU->agent_out.setVariable<float>("apz", 0.0f);
-        // Sync k_production[2] for NEP: base rate × NEP multiplier
-        const float base_prod = FLAMEGPU->environment.getProperty<float, N_SPECIES>("INIT_CELL_PRODUCTION_RATES", 2);
-        const float mult_nep  = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_PRODUCTION_MULTIPLIER", 1);
-        FLAMEGPU->agent_out.setVariable<float, N_SPECIES>("k_production", 2, base_prod * mult_nep);
+        if (rg_div_symmetric) {
+          // Symmetric RG division: daughter stays RG, inherits full parent state.
+          FLAMEGPU->agent_out.setVariable<int>("cell_type", 2);
+          FLAMEGPU->agent_out.setVariable<float>("rg_commit_level",         rg_commit);
+          FLAMEGPU->agent_out.setVariable<float>("epithelialization_level", epi);
+          FLAMEGPU->agent_out.setVariable<float>("apx", apx);
+          FLAMEGPU->agent_out.setVariable<float>("apy", apy);
+          FLAMEGPU->agent_out.setVariable<float>("apz", apz);
+          const float mult_rg = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_PRODUCTION_MULTIPLIER", 2);
+          FLAMEGPU->agent_out.setVariable<float, N_SPECIES>("k_production", 2, base_prod * mult_rg);
+        } else {
+          // Asymmetric RG division: daughter re-enters as NEP with commitment
+          // reset to just above the iPSC→NEP threshold and scrambled polarity.
+          const float daughter_commit = RG_COMMIT_THRESHOLD_NEP + 0.05f;
+          const float theta = FLAMEGPU->random.uniform<float>(0.0f, 6.28318530718f);
+          FLAMEGPU->agent_out.setVariable<int>("cell_type", 1);
+          FLAMEGPU->agent_out.setVariable<float>("rg_commit_level",         daughter_commit);
+          FLAMEGPU->agent_out.setVariable<float>("epithelialization_level", 0.0f);
+          FLAMEGPU->agent_out.setVariable<float>("apx", cosf(theta));
+          FLAMEGPU->agent_out.setVariable<float>("apy", sinf(theta));
+          FLAMEGPU->agent_out.setVariable<float>("apz", 0.0f);
+          const float mult_nep = FLAMEGPU->environment.getProperty<float, N_CELL_TYPES>("CELL_PRODUCTION_MULTIPLIER", 1);
+          FLAMEGPU->agent_out.setVariable<float, N_SPECIES>("k_production", 2, base_prod * mult_nep);
+        }
       } else {
         // iPSC / NEP symmetric division: daughter inherits parent state.
         FLAMEGPU->agent_out.setVariable<int>("cell_type", agent_cell_type);

@@ -11,22 +11,29 @@
 #        --config optimizer/optuna_config_radial_glia.yaml
 #
 # Objectives (minimized simultaneously via NSGA-II Pareto front):
-#   1. rg_rosette_error / n_rg_clusters      — target cluster count (CSV)
+#   1. rg_rosette_error / n_large_rg_clusters  — target large cluster count (>=5 cells; CSV)
 #   2. rg_rosette_error / mean_rosette_maturity — target maturity over time
 #
 # Optional additional objectives (uncomment as needed):
-#   3. rg_rosette_error / rg_fraction        — target RG fraction over time
-#   4. rg_rosette_error / mean_cluster_size  — target mean cluster size
+#   3. rg_rosette_error / large_cluster_fraction — fraction of RG cells in large clusters
+#   4. rg_rosette_error / rg_fraction            — target RG fraction over time
+#   5. rg_rosette_error / mean_cluster_size      — target mean cluster size
 #
 # Equilibrium constraint (for reference, not enforced by optimizer):
-#   x_eq_basal = k_basal / (k_basal + k_decay)  must be < RG_COMMIT_THRESHOLD_RG (0.70)
-#   x_eq_sp2   = (k_basal + k_auto*sp2) / (k_basal + k_auto*sp2 + k_decay + k_inhibit*delta)
-#   First NPC transition (~28 h) and first RG (~60–65 h) driven by sp2 autocrine amplification.
+#   x_eq_basal = k_basal / (k_basal + k_decay)  must be < RG_COMMIT_THRESHOLD_RG (0.67)
+#   x_eq_sp2   = (k_auto*sp2) / (k_auto*sp2 + k_decay + k_inhibit*delta)  [NEP/RG cells; basal drive off]
+#   tau = 1 / (k_auto * sp2 + k_decay)   [convergence time; must be << 120h window]
+#
+# Key timing sensitivities (empirically observed):
+#   RG_COMMIT_AUTOCRINE_RATE  — primary timing knob: 2.5e-5 → 0 RG; 4e-5 → rosettes; 5e-5 → fast
+#   INIT_ECM_SAT_CONCENTRATION_VALS[2] — sp2 ceiling sets max sp2; lower ceiling = slower/no commit
+#   These two are jointly responsible for whether first RG appears within the 120h window.
+#   Island boundary: 2 mature RG neighbors at typical sp2 suppresses x_eq below 0.67.
 # ============================================================================
 
 study:
   name: "cellfoundry_radial_glia"
-  n_trials: 60
+  n_trials: 500
   sampler: NSGA-II
   seed: 42
   directions: [minimize, minimize]
@@ -43,6 +50,7 @@ model:
     SAVE_DATA_TO_FILE: false
     SAVE_PICKLE: true
     DEBUG_PRINTING: false
+    SAVE_NO_ANCHOR_CELL_FILES: false
     # INCLUDE_RG_VARIABLES is set automatically when variant=radial_glia
 
   timeout: 0      # wall-clock seconds per trial (0 = unlimited)
@@ -52,33 +60,42 @@ model:
 # Objectives
 # ---------------------------------------------------------------------------
 objectives:
-  # 1. Final cluster count — single-row CSV with column "n_rg_clusters"
+  # 1. Final large-cluster count (clusters with >= 5 RG cells = minimum viable rosette).
+  #    Replaces raw n_rg_clusters, which counted isolated pairs and tiny fragments.
   - function: rg_rosette_2d_error
-    reference: "optimizer/reference_data/target_rg_n_clusters.csv"
+    reference: "optimizer/reference_data/target_rg_n_large_clusters.csv"
     kwargs:
-      metric: n_rg_clusters
+      metric: n_large_rg_clusters
 
-  # # 2. Rosette maturity over time — multi-row CSV with "time" + "mean_rosette_maturity"
+  # 2. Rosette maturity over time — single-value CSV with "mean_rosette_maturity"
+  - function: rg_rosette_2d_error
+    reference: "optimizer/reference_data/target_rg_rosette_maturity.csv"
+    kwargs:
+      metric: mean_rosette_maturity
+      smooth_window: 5        # light Savitzky-Golay smoothing before RMSE
+
+  # Optional: fraction of RG cells that live inside large clusters (>= 5 cells).
+  # Penalises scattered/fragmented RG distributions independently of cluster count.
+  # Add minimize to study.directions and uncomment to enable.
+  #
   # - function: rg_rosette_2d_error
-  #   reference: "optimizer/reference_data/target_rg_rosette_maturity.csv"
+  #   reference: "optimizer/reference_data/target_rg_large_cluster_fraction.csv"
   #   kwargs:
-  #     metric: mean_rosette_maturity
-  #     smooth_window: 5        # light Savitzky-Golay smoothing before RMSE
+  #     metric: large_cluster_fraction
 
-  # Optional: uncomment to add rg_fraction as a third objective and update
-  # study.directions to [minimize, minimize, minimize]
+  # Optional: uncomment to add rg_fraction as a further objective and update
+  # study.directions accordingly.
   #
   # - function: rg_rosette_2d_error
   #   reference: "optimizer/reference_data/target_rg_fraction.csv"
   #   kwargs:
   #     metric: rg_fraction
 
-  # Optional: final mean cluster size
-
-  - function: rg_rosette_2d_error
-    reference: "optimizer/reference_data/target_rg_mean_cluster_size.csv"
-    kwargs:
-      metric: mean_cluster_size
+  # Optional: final mean cluster size (large clusters only gives more signal).
+  # - function: rg_rosette_2d_error
+  #   reference: "optimizer/reference_data/target_rg_mean_cluster_size.csv"
+  #   kwargs:
+  #     metric: mean_cluster_size
 
 # ---------------------------------------------------------------------------
 # Parameters to search
@@ -91,7 +108,7 @@ objectives:
 #   RG_COMMIT_DECAY_RATE = k_decay: raises threshold; must keep x_eq_basal < 0.70
 #   RG_COMMIT_AUTOCRINE_RATE = k_auto: amplification; needs sp2 > 0 to fire
 #   RG_COMMIT_INHIBIT_RATE = k_inhibit: lateral fence; prevents cascade spread
-#   time-constant τ ≈ 1 / (k_basal + k_decay) → τ [s]; first NPC at ~0.35/x_eq × τ
+#   time-constant τ ≈ 1 / (k_auto*sp2 + k_decay) → τ [s]; first NEP at ~0.35/x_eq × τ
 # ---------------------------------------------------------------------------
 parameters:
 
@@ -109,15 +126,20 @@ parameters:
 
   RG_COMMIT_AUTOCRINE_RATE:
     type: float
-    low:  5.0e-6
-    high: 1.0e-4
-    log: true
+    low:  1.5e-5
+    high: 1.5e-4   # narrowed from [5e-6, 5e-4]: below ~2e-5 gives 0 RG; above ~1.5e-4 all cells commit (no pattern)
+    log: true      # log midpoint ~4.7e-5; current default 3.95e-5 sits just inside lower half
 
   RG_COMMIT_INHIBIT_RATE:
     type: float
-    low:  1.0e-6
-    high: 5.0e-5
+    low:  2.0e-6
+    high: 1.0e-4
     log: true
+
+  RG_SYMMETRIC_DIVISION_PROB:
+    type: float
+    low:  0.1
+    high: 0.5
 
   RG_EPITHELIAL_RATE:
     type: float
@@ -140,3 +162,60 @@ parameters:
       8:                # [RG, RG] entry
         low:  0.5
         high: 10.0
+
+  # sp2 diffusion coefficient.  Tighter L=sqrt(D/lambda) sharpens the local RG
+  # signal and prevents domain-wide homogeneous sp2.  Current default: D=0.03
+  # (L=27 µm). Range covers L = 7–50 µm (lambda=4e-5 s⁻¹ fixed).
+  DIFFUSION_COEFF_MULTI:
+    type: array_float
+    log: true
+    elements:
+      2:                # sp2 only
+        low:  2.0e-3
+        high: 0.1
+
+  # NEP (type-1) sp2 production multiplier.  Low values break symmetry: only RG
+  # local hotspots exceed threshold.  Default: 0.1.  Range: 0.01–0.5.
+  CELL_PRODUCTION_MULTIPLIER:
+    type: array_float
+    log: true
+    elements:
+      1:                # NEP production fraction relative to RG
+        low:  0.01
+        high: 0.5
+
+  # Absolute sp2 secretion rate for a fully committed RG cell [1/s].
+  # Scales both background (via NEP) and local RG hotspot equally, but combined
+  # with CELL_PRODUCTION_MULTIPLIER[1] controls the local-vs-background contrast.
+  INIT_CELL_PRODUCTION_RATES:
+    type: array_float
+    log: true
+    elements:
+      2:                # sp2 production rate for RG (type 2)
+        low:  1.0e-4
+        high: 2.0e-3
+
+  # sp2 saturation ceiling [µM]: the ECM voxel concentration that secreting cells
+  # drive toward.  Controls the MAXIMUM achievable sp2 near a cluster; also sets
+  # the timescale for sp2 to build up (slower approach as voxel nears ceiling).
+  # Crucially: q_RG cancels in the SNR ratio, so changing this shifts the absolute
+  # sp2 level without affecting C_local/C_bg.  Directly coupled to RG_COMMIT_AUTOCRINE_RATE:
+  # a low ceiling + high k_auto can produce the same x_eq as a high ceiling + low k_auto,
+  # but with very different transient timescales — which is why these two parameters have
+  # an outsized joint effect on when (and whether) the first RG rosette nucleates.
+  INIT_ECM_SAT_CONCENTRATION_VALS:
+    type: array_float
+    log: true
+    elements:
+      2:                # sp2 saturation ceiling
+        low:  0.2
+        high: 3.0  Together with D it sets L=sqrt(D/lambda)
+  # and the steady-state background level (C_bg ∝ N*q/lambda).  Default: 4e-5 s⁻¹
+  # (half-life 4.8 h).  Range: 1e-5–5e-4 s⁻¹ (half-life 23 min – 19 h).
+  ECM_DEGRADATION_RATE_MULTI:
+    type: array_float
+    log: true
+    elements:
+      2:                # sp2 only
+        low:  1.0e-5
+        high: 5.0e-4

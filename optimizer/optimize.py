@@ -105,8 +105,11 @@ def _normalize_objective_result(result) -> tuple[float, str | None]:
     return float(error), display_text
 
 
-def _format_objective_label(name: str, error: float, display_text: str | None) -> str:
-    label = f"{name}={error:.6f}"
+def _format_objective_label(
+    name: str, error: float, display_text: str | None, *, metric: str | None = None
+) -> str:
+    label_name = f"{name}[{metric}]" if metric else name
+    label = f"{label_name}={error:.6f}"
     if not display_text:
         return label
     return f"{label} {display_text}"
@@ -326,7 +329,10 @@ def make_objective(config: dict, model_script: str, base_result_dir: str):
                 raise optuna.TrialPruned()
 
         label = " | ".join(
-            _format_objective_label(obj["name"], error, display_text)
+            _format_objective_label(
+                obj["name"], error, display_text,
+                metric=obj.get("kwargs", {}).get("metric"),
+            )
             for obj, error, display_text in zip(obj_funcs, errors, display_texts)
         )
         trial.set_user_attr("display_texts", display_texts)
@@ -475,6 +481,7 @@ def main():
                     obj["name"],
                     value,
                     _get_display_text(display_texts, idx),
+                    metric=obj.get("kwargs", {}).get("metric"),
                 )
                 for idx, (obj, value) in enumerate(zip(objective_display_specs, t.values))
             )
@@ -500,6 +507,7 @@ def main():
             objective_display_specs[0]["name"],
             best.value,
             best_display_text,
+            metric=objective_display_specs[0].get("kwargs", {}).get("metric"),
         )
         print(f"\n{'='*60}")
         print(f"  Best trial #{best.number}")

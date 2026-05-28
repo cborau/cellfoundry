@@ -1581,7 +1581,14 @@ def rg_rosette_2d_error(results: dict, reference_path: str = None, **kwargs) -> 
                 f"Found columns: {list(ref.columns)}"
             )
         target = float(ref[metric_name].iloc[0])
+        if np.isnan(target):
+            raise ValueError(
+                f"Reference CSV '{reference_path}' has NaN for metric '{metric_name}'. "
+                "Check the CSV has the correct column name and a valid numeric value."
+            )
         sim_value = float(rg_df[metric_name].iloc[-1])
+        if np.isnan(sim_value):
+            sim_value = 0.0  # no organised rosette / no RG cells -> treat as zero
         error = abs(sim_value - target)
         return error, _format_percent_text(error, target)
 
@@ -1601,6 +1608,7 @@ def rg_rosette_2d_error(results: dict, reference_path: str = None, **kwargs) -> 
         sim_time = rg_df["step"].to_numpy(dtype=float)
 
     sim_metric = rg_df[metric_name].to_numpy(dtype=float)
+    sim_metric = np.where(np.isnan(sim_metric), 0.0, sim_metric)  # no RG -> treat as zero
 
     smooth_window = int(kwargs.get("smooth_window", 0))
     smooth_polyorder = int(kwargs.get("smooth_polyorder", 2))

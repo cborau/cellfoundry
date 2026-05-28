@@ -789,7 +789,7 @@ def print_diagnostics(args: argparse.Namespace) -> None:
     # Scenario suggestions.
     print("Scenario-specific suggestions")
     print("- no_rg:")
-    print(f"  1) Lower the NEP-to-RG sp2 threshold. Current no-inhibition threshold is {fmt(threshold_no_inhib, 'uM')}; this is high relative to expected peaks around 0.20-0.25 uM.")
+    print(f"  1) The minimum sp2 needed to reach the RG threshold (no lateral inhibition) is {fmt(threshold_no_inhib, 'uM')}. Observed peak sp2 is close to this, leaving a narrow driving window — at 0.20 uM sp2 it takes ~95 h to progress from x=0.35 to x=0.70. If sp2 peaks late in the run, cells may simply not have had enough time. Try: extend simulation duration, raise RG_COMMIT_AUTOCRINE_RATE (e.g. to 3e-5), or reduce RG_COMMIT_DECAY_RATE.")
     print("  2) Prefer one clean fate-side change first: set RG_COMMIT_AUTOCRINE_RATE to about 3e-5 if max_sp2 is near 0.21 uM, or reduce RG_COMMIT_DECAY_RATE to about 1.5e-6.")
     print("  3) If max_sp2 is genuinely below 0.20 uM, increase sp2 availability instead: raise INIT_CELL_PRODUCTION_RATES[2], raise INIT_ECM_SAT_CONCENTRATION_VALS[2], reduce ECM_DEGRADATION_RATE_MULTI[2], or seed a tiny NEP fraction for debugging.")
     print("  4) Temporarily set RG_COMMIT_INHIBIT_RATE=0 only as a diagnostic. It should not block the first RG when there are no RG neighbours, but it can block expansion after the first RG appears.")

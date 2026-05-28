@@ -12,6 +12,7 @@ import sys                                     # keep 'sys' available for existi
 import pathlib
 _ORIGINAL_ARGV = list(_sys.argv)          # snapshot BEFORE pyflamegpu touches sys.argv
 from pyflamegpu import *
+import subprocess
 import time, math
 from dataclasses import make_dataclass
 import pandas as pd
@@ -43,6 +44,7 @@ SAVE_PICKLE = True  # If True, dumps model configuration into a pickle file for 
 SHOW_PLOTS = False  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
 SAVE_EVERY_N_STEPS = 20 # Affects both the .vtk files and the Dataframes storing boundary data
+SAVE_NO_ANCHOR_CELL_FILES = True  # If True, runs tools/remove_anchors_from_cell_vtks.py after the simulation to strip anchor points from cell VTK files. Requires SAVE_DATA_TO_FILE=True and SAVE_PICKLE=True.
 DEBUG_PRINT_INTERVAL = 0  # [steps] Print live debug stats every N steps (0 = disabled). Only active when INCLUDE_RG_VARIABLES is True.
 
 CURR_PATH = pathlib.Path(__file__).resolve().parent
@@ -198,7 +200,7 @@ N_SPECIES = 3
 # Use check_hard_coded_values.py to automatically update all c++ files using N_SPECIES
 # Use tools/resize_array_variables.py to automatically resize all per-species arrays.
 DIFFUSION_COEFF_MULTI = [5.0, 5.0, 5.0]  # diffusion coefficient in [um^2/s] per specie
-ECM_DEGRADATION_RATE_MULTI = [0.0, 0.0, 0.0]  # first-order ECM degradation [1/s] per species (0 = no degradation)
+ECM_DEGRADATION_RATE_MULTI = [0.0, 0.0, 0.0]  # first-order ECM degradation (or decay) [1/s] per species (0 = no degradation)
 BOUNDARY_CONC_INIT_MULTI = [[2.5, 2.5, 2.5, 2.5, 2.5, 2.5],
                             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]  # add as many lines as different species
@@ -242,6 +244,7 @@ MONOLAYER_Z = None  # [µm] z-coordinate of the monolayer plane for MONOLAYER_AS
 CELL_K_ELAST = [2.0, 2.0, 2.0]  # [nN/um]
 CELL_D_DUMPING = [0.4, 0.4, 0.4]  # [nN·s/um]
 CELL_RADIUS = [5.0, 5.0, 5.0] # [um]
+MIN_ROSETTE_SIZE = 5  # minimum RG cells in a cluster to count as a genuine rosette
 CELL_NUCLEUS_RADIUS = [r / 2 for r in CELL_RADIUS] # [um]
 CELL_SPEED_REF = [0.00041817020062396415, 0.0006199050301202626, 0.0004034913399763545] # [um/s] Another option is to define it according to grid distance ECM_ECM_EQUILIBRIUM_DISTANCE / TIME_STEP / X. WARNING: if cell speed is too high, consider increasing N or reducing TIME_STEP.
 BROWNIAN_MOTION_STRENGTH_FACTOR = [0.001, 0.001, 0.001]
@@ -533,6 +536,11 @@ if _RESULT_DIR_OVERRIDE:
 # When running inside an Optuna trial, suppress verbose summaries.
 _OPTUNA_QUIET = bool(_PARAM_OVERRIDES)
 print(f"[DIAG] After overrides: STEPS={STEPS}, SAVE_PICKLE={SAVE_PICKLE}, RES_PATH={RES_PATH}, _OPTUNA_QUIET={_OPTUNA_QUIET}")
+if SAVE_NO_ANCHOR_CELL_FILES:
+    if not SAVE_DATA_TO_FILE:
+        print("[WARNING] SAVE_NO_ANCHOR_CELL_FILES is True but SAVE_DATA_TO_FILE is False — no VTK files will be produced; anchor removal will be skipped.")
+    if not SAVE_PICKLE:
+        print("[WARNING] SAVE_NO_ANCHOR_CELL_FILES is True but SAVE_PICKLE is False — the pickle file required for anchor removal will not be saved; anchor removal will be skipped.")
 
 # +====================================================================+
 # | OTHER DERIVED PARAMETERS AND MODEL CHECKS                          |
@@ -2566,7 +2574,7 @@ class CollectCellMetrics(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
         global INCLUDE_CELLS, STEPS, CELL_SPEED_METRICS, ORGANOID_METRICS_OVER_TIME
         global ORGANOID_ASSAY, SAVE_EVERY_N_STEPS, N_CELL_TYPES
-        global INCLUDE_RG_VARIABLES, RG_METRICS, RG_ROSETTE_METRICS_OVER_TIME, CELL_RADIUS
+        global INCLUDE_RG_VARIABLES, RG_METRICS, RG_ROSETTE_METRICS_OVER_TIME, CELL_RADIUS, MIN_ROSETTE_SIZE
 
         if not INCLUDE_CELLS:
             return
@@ -2693,6 +2701,20 @@ class CollectCellMetrics(pyflamegpu.HostFunction):
                 mean_cluster_size_val = 1.0
                 largest_cluster_size = 1
 
+            # --- Large-cluster metrics (min MIN_ROSETTE_SIZE cells = minimum viable rosette) ---
+            n_large_rg_clusters = 0
+            large_cluster_fraction = 0.0
+            large_cluster_mean_size = 0.0
+            if n_alive_rg >= 2:
+                _all_labels = labels[labels >= 0]
+                if len(_all_labels) > 0:
+                    _cs = np.bincount(_all_labels)
+                    _large = _cs[_cs >= MIN_ROSETTE_SIZE]
+                    n_large_rg_clusters = int(len(_large))
+                    if n_large_rg_clusters > 0:
+                        large_cluster_fraction = float(_large.sum()) / n_alive_rg
+                        large_cluster_mean_size = float(_large.mean())
+
             # --- Compactness metrics (PCA eigenvalue ratio; 0=linear, 1=circular) ---
             # rg_assembly_compactness: shape of the entire RG assembly in XY
             rg_assembly_compactness_val = 0.0
@@ -2729,6 +2751,9 @@ class CollectCellMetrics(pyflamegpu.HostFunction):
                 "n_alive_rg": n_alive_rg,
                 "rg_fraction": rg_fraction,
                 "n_rg_clusters": n_rg_clusters,
+                "n_large_rg_clusters": n_large_rg_clusters,
+                "large_cluster_fraction": large_cluster_fraction,
+                "large_cluster_mean_size": large_cluster_mean_size,
                 "mean_cluster_size": mean_cluster_size_val,
                 "largest_cluster_size": largest_cluster_size,
                 "mean_rosette_maturity": mean_rosette_maturity_val,
@@ -3698,4 +3723,16 @@ else:
     steps = logs.getStepLog()
     print(f"[DIAG] Got {len(steps)} step log entries")
     manageLogs(steps, ENSEMBLE, 0)
+if SAVE_NO_ANCHOR_CELL_FILES and SAVE_DATA_TO_FILE and SAVE_PICKLE:
+    _anchor_script = CURR_PATH / 'tools' / 'remove_anchors_from_cell_vtks.py'
+    _pickle_path = RES_PATH / 'output_data_0.pickle'
+    print(f"[INFO] Running anchor-removal script: {_anchor_script}")
+    subprocess.run(
+        [sys.executable, str(_anchor_script),
+         '--input-dir', str(RES_PATH),
+         '--pickle-path', str(_pickle_path)],
+        check=True,
+    )
+elif SAVE_NO_ANCHOR_CELL_FILES:
+    print("[WARNING] SAVE_NO_ANCHOR_CELL_FILES is True but SAVE_DATA_TO_FILE or SAVE_PICKLE is False — anchor removal skipped.")
 print("[DIAG] All done.")
