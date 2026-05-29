@@ -127,7 +127,7 @@ With `RG_COMMIT_NOISE = 1e-3` and 24h = 1440 steps of 60s:
 sigma_total ~ 1e-3 * sqrt(1440) ~ 0.038
 ```
 
-This spreads the NPC crossing time (commit = 0.35) by roughly +/- 3h across the
+This spreads the NEP crossing time (commit = 0.35) by roughly +/- 3h across the
 population, enabling spatially nucleated clusters rather than simultaneous
 whole-population transitions.
 
@@ -136,7 +136,7 @@ whole-population transitions.
 ## Morphogen sp2 -- The Signalling Species
 
 - **Species index**: 2 (out of N_SPECIES = 3)
-- **Produced by**: NPC (half rate) and RG (full rate) cells
+- **Produced by**: NEP (half rate) and RG (full rate) cells
 - **Secreted into**: the nearest ECM voxel each step (via `cell_ecm_interaction_metabolism`)
 - **Diffuses** through the ECM grid (D = 0.03 µm²/s for sp2; D = 0.1 µm²/s for sp0/sp1)
 - **Degraded** with first-order rate λ = 4×10⁻⁵ s⁻¹ (half-life ~4.8 h)
@@ -156,7 +156,7 @@ Each cell carries a unit vector `(apx, apy, apz)`. It is updated every step in
 ### 1. Concentration + type gate
 
 The local sp2 concentration at the cell's voxel is sampled from `C_SP_MACRO[2]`.
-The polarity rule only runs for NPC/RG cells (`cell_type >= 1`) when
+The polarity rule only runs for NEP/RG cells (`cell_type >= 1`) when
 `C0 > RG_POLARITY_SP2_THRESHOLD`. Outside this gate, only small XY noise is added.
 
 ### 2. Local lumen cue in XY (RG neighbours only)
@@ -172,12 +172,12 @@ new_ap_xy = (1 - beta_xy) * ap_xy + beta_xy * dir_to_rg_centroid_xy
 ```
 
 where `scale = rg_commit` for RG cells and
-`scale = epithelialization_level * rg_commit * 0.1` for NPC cells.
+`scale = epithelialization_level * rg_commit * 0.1` for NEP cells.
 
 If not enough RG neighbours are found, XY falls back to suppression only
 (no lumen cue).
 
-### 3. Intrinsic z-bias (NPC and RG only)
+### 3. Intrinsic z-bias (NEP and RG only)
 
 A small upward bias is also applied each step:
 
@@ -193,7 +193,7 @@ commitment (~0.7). With `RG_INTRINSIC_APICAL_Z = 2e-3` and commit=0.7:
 ```
 alpha_z = 1.4e-3 per step  ->  half-life ~ 495 steps ~ 8 h
 ```
-NPC cells scale by `epi * commit` so peripheral NPC cells (low commit from the
+NEP cells scale by `epi * commit` so peripheral NEP cells (low commit from the
 decay term) develop much weaker z-polarity, matching the gradient of
 pseudo-stratified polarity in cortical neuroepithelium.
 
@@ -214,9 +214,9 @@ Cell-cell adhesion is controlled by a 3x3 matrix `RG_ADHESION_MATRIX[self*3 + nb
 (flattened row-major, [nN/um]):
 
 ```
-         nb:  iPSC  NPC   RG
+         nb:  iPSC  NEP   RG
 self: iPSC  [ 0.4,  0.4,  0.2 ]
-      NPC   [ 0.4,  0.8,  0.6 ]
+      NEP   [ 0.4,  0.8,  0.6 ]
       RG    [ 0.2,  0.6,  1.2 ]   <- max with epi boost = 1.2 * 2.5 = 3.0
 ```
 
@@ -326,7 +326,7 @@ One time step runs the following layers in order:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| All cells become NPC at exactly the same step | `RG_COMMIT_NOISE` too small | Increase to ~1e-3 |
+| All cells become NEP at exactly the same step | `RG_COMMIT_NOISE` too small | Increase to ~1e-3 |
 | Apical vectors -> (0,0,1) within a few hours | `RG_INTRINSIC_APICAL_Z` too large OR bias applied to iPSC | Reduce to <= 5e-3; check cell_type gate |
 | Cells merge into a solid blob | `RG_ADHESION_MATRIX[RG,RG]` or boost too high vs repulsion | Ensure max adhesion < repulsion |
 | sp2 never builds up | `CELL_PRODUCTION_MULTIPLIER[1 or 2]` = 0, or `INIT_CELL_PRODUCTION_RATES[2]` = 0 | Check production config |
@@ -556,15 +556,21 @@ meaning at early timepoints.
 
 | Column | Definition | Biological meaning |
 |---|---|---|
+| `step` | Simulation step index | Time axis (integer) |
+| `time` | Wall time in seconds (`step × TIME_STEP`) | Time axis (seconds) |
+| `n_alive_total` | Count of all living cells | Total population size |
 | `n_alive_rg` | Count of living cells with cell_type == 2 | Total RG population |
+| `rg_fraction` | `n_alive_rg / n_alive_total` | Proportion of cells that are RG |
 | `n_rg_clusters` | DBSCAN cluster count (min_samples=2) | Raw cluster count including doublets |
-| `mean_rg_cluster_size` | Mean cells per cluster | Low → many tiny clusters |
+| `mean_cluster_size` | Mean cells per DBSCAN cluster (all clusters) | Low → many tiny clusters |
 | `n_large_rg_clusters` | Clusters with ≥ MIN_ROSETTE_SIZE cells | Genuine rosette candidates |
 | `large_cluster_fraction` | Fraction of RG cells in large clusters | How well organised the population is |
 | `large_cluster_mean_size` | Mean size of large clusters only | Typical rosette ring size |
+| `largest_cluster_size` | Cell count of the single largest DBSCAN cluster | Maximum rosette/aggregate size |
 | `mean_rosette_maturity` | Mean `rosette_maturity` of all RG cells | Per-cell apical alignment quality |
-| `mean_epithelialization` | Mean `epithelialization_level` of RG cells | Junction maturity |
-| `mean_rg_commit` | Mean `rg_commit_level` of RG cells | Commitment depth |
+| `mean_apz` | Mean absolute apical z-component across all RG cells | Degree of upward apical orientation |
+| `rg_assembly_compactness` | PCA eigenvalue ratio (λ_min/λ_max) of **all** RG cell positions in XY; 0 = elongated, 1 = isotropic/circular. **Population-level shape metric** — reflects global RG territory geometry, not per-rosette ring quality. With a single rosette it correlates with ring circularity; with multiple rosettes it primarily measures whether the rosettes are collinearly arranged vs. isotropically distributed across the monolayer. Complement with `mean_cluster_compactness` for per-rosette quality. | Global spatial organisation of the RG population |
+| `mean_cluster_compactness` | Size-weighted mean of per-cluster PCA compactness (λ_min/λ_max); requires ≥ 3 cells per cluster | Average circularity of individual clusters; values near 1 indicate ring-like (rosette) geometry |
 
 `MIN_ROSETTE_SIZE = 5` (configurable in `variants/radial_glia/__init__.py`)
 means a genuine rosette must have at least 5 RG cells in contact — this is
@@ -623,21 +629,33 @@ worsen the other. The user then picks a point on the front that balances the two
 ### Reference CSVs
 
 Each objective reads a target value from a CSV file in
-`optimizer/reference_data/`. The CSV must have exactly the column named in
-`metric_name` and exactly one data row (the target). No `time` column is needed:
+`optimizer/reference_data/`. Two formats are supported:
+
+**Format 1 — single scalar target** (no `time` column; one header row and one
+data row):
 
 ```
 n_large_rg_clusters
 2
 ```
 
-A common mistake is to accidentally include a `time` column header:
+**Format 2 — time-indexed targets** (a `time` column in seconds alongside the
+metric column; the objective code matches the simulated metric at the specified
+timepoint(s)):
+
+```
+time,n_large_rg_clusters
+86400,1
+432000,2
+```
+
+A common mistake in Format 1 is to accidentally add a `time` column:
 ```
 time,n_large_rg_clusters    ← WRONG: pandas will parse "2" as the time value,
 2                               leaving n_large_rg_clusters = NaN
 ```
 
-The objectives code now guards against NaN target values with an early error.
+The objectives code guards against NaN target values with an early error.
 
 ### Search parameters (13 total)
 
@@ -667,39 +685,11 @@ NSGA-II works by evolving a population of solutions. With 13 search parameters:
 - A typical `population_size = 20` means 200–400 evaluations for a reasonable
   Pareto front
 
-**100 trials is not enough for 13 parameters.** The optimizer will sample
-mostly random points and not have time to hill-climb. Use **300–500 trials**
-for meaningful results, or reduce the parameter count by fixing parameters you
-have good biological intuition for (e.g., fix D and m_NEP based on the SNR
-analysis above, leaving only the kinetic parameters to optimise).
+**NSGA-II convergence guidance**: with 13 free parameters, 300–500 trials are
+recommended for a well-resolved Pareto front. Reducing the parameter count by
+fixing those with strong mechanistic constraints (e.g., D and m_NEP from the SNR
+analysis) allows convergence with fewer trials.
 
-### Objective output format
-
-Each trial prints a line like:
-
-```
-Trial 042 | rg_rosette_2d_error[n_large_rg_clusters]=1.000000  ...
-                                 ^^^^^^^^^^^^^^^^^^^^
-                                 metric name shown in brackets
-```
-
-The `[metric_name]` label is added by `_format_objective_label` in `optimize.py`
-so you can distinguish multiple objectives of the same function type.
-
----
-
-## NPC → NEP Rename Note
-
-The cell type previously called "NPC" (neural progenitor cell) was renamed to
-"NEP" (neuroepithelial progenitor) in all source files, configs, and output
-CSVs. This was done to better match the developmental biology literature, where
-neuroepithelial cells are the direct columnar precursor of radial glia and are
-distinct from multipotent NPCs at later stages.
-
-If you encounter "NPC" anywhere in the codebase or output files it refers to the
-same cell type (type index 1). The rename is purely terminological.
-
----
 
 ## Frequently Asked Questions
 
@@ -719,7 +709,7 @@ A: Most likely the simulation crashes or returns NaN for many trials, leaving
 those trials with undefined objectives. Optuna's NSGA-II then converges on the
 few non-NaN trials. Check for:
 - Division by zero in the objective function (added NaN guard in objectives.py)
-- Reference CSV with wrong column names (no `time` header needed for single-value)
+- Reference CSV with wrong column names or a mismatched format (see Reference CSVs section)
 - Simulation completing with 0 RG cells (model failed to differentiate)
 
 **Q: DBSCAN shows 40 clusters but there are clearly only 2 rosettes. Why?**

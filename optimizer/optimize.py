@@ -315,18 +315,40 @@ def make_objective(config: dict, model_script: str, base_result_dir: str):
         errors = []
         display_texts = []
         for obj in obj_funcs:
+            _temp_ref = None
             try:
                 # Pass trial_dir so spatial objectives (e.g. organoid_size)
                 # can read VTK files directly
                 kw = dict(obj["kwargs"])
                 kw["trial_dir"] = trial_dir
-                raw_result = obj["func"](results, obj["reference"], **kw)
+                reference = obj["reference"]
+                # Global target_value support: if a scalar target is given in
+                # kwargs instead of a reference CSV path, synthesise a minimal
+                # single-row CSV so that ANY objective function can use it —
+                # without requiring per-function changes.
+                if reference is None and "target_value" in kw:
+                    _target = kw.pop("target_value")
+                    _col = kw.get("metric", "value")
+                    _tmp = tempfile.NamedTemporaryFile(
+                        mode="w", suffix=".csv", delete=False, newline=""
+                    )
+                    _tmp.write(f"{_col}\n{_target}\n")
+                    _tmp.close()
+                    reference = _tmp.name
+                    _temp_ref = _tmp.name
+                raw_result = obj["func"](results, reference, **kw)
                 error, display_text = _normalize_objective_result(raw_result)
                 errors.append(error)
                 display_texts.append(display_text)
             except Exception as e:
                 print(f"  [trial {trial.number}] Objective '{obj['name']}' failed: {e}")
                 raise optuna.TrialPruned()
+            finally:
+                if _temp_ref is not None:
+                    try:
+                        os.unlink(_temp_ref)
+                    except OSError:
+                        pass
 
         label = " | ".join(
             _format_objective_label(

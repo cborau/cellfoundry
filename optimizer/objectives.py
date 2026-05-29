@@ -1528,12 +1528,27 @@ def rg_rosette_2d_error(results: dict, reference_path: str = None, **kwargs) -> 
         ``"largest_cluster_size"``, ``"n_alive_rg"``,
         ``"rg_assembly_compactness"``, ``"mean_cluster_compactness"``.
 
-        ``rg_assembly_compactness`` — PCA eigenvalue ratio of ALL RG cell
-        positions in XY (0 = linear/branchy, 1 = circular).  Captures global
-        assembly shape independent of DBSCAN cluster count.
+        ``rg_assembly_compactness`` — PCA eigenvalue ratio (λ_min/λ_max) of
+        *all* RG cell positions in XY.  This is a **population-level shape
+        metric**: it measures whether the whole RG population is distributed
+        isotropically (→ 1) or elongated/fragmented along one axis (→ 0).
+        With a single rosette it correlates with ring quality, but with two or
+        more rosettes separated in space the ratio instead reflects their
+        spatial arrangement (e.g. two rosettes aligned on X give a low value
+        regardless of individual ring quality).  Complement with
+        ``mean_cluster_compactness`` for per-rosette quality.
 
-        ``mean_cluster_compactness`` — same PCA ratio computed per DBSCAN
-        cluster (size ≥ 3), then averaged weighted by cluster size.
+        ``mean_cluster_compactness`` — same PCA ratio computed *per DBSCAN
+        cluster* (size ≥ MIN_ROSETTE_SIZE), then averaged weighted by cluster
+        size.  Directly measures individual rosette ring quality and is
+        meaningful even when multiple rosettes are present.
+
+    target_value : float, optional
+        Inline scalar target — no CSV file required.  Set ``reference: null``
+        and ``kwargs: {target_value: 0.75}`` in the YAML; the ``optimize.py``
+        dispatch layer intercepts this kwarg, synthesises a temporary
+        single-row CSV, and passes it as ``reference_path``.  This mechanism
+        is universal — it works for *any* registered objective function.
 
     **Single-value CSV (final state)**
 
@@ -1569,7 +1584,12 @@ def rg_rosette_2d_error(results: dict, reference_path: str = None, **kwargs) -> 
         )
 
     if reference_path is None:
-        raise ValueError("reference_path is required for rg_rosette_2d_error.")
+        raise ValueError(
+            "reference_path is required for rg_rosette_2d_error. "
+            "To use an inline scalar target, set reference: null and "
+            "add target_value to kwargs in the YAML — the optimizer "
+            "dispatch layer will synthesise the CSV automatically."
+        )
 
     ref = _load_reference_csv(reference_path)
 

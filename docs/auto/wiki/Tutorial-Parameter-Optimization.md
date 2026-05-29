@@ -185,17 +185,29 @@ To optimize **multiple** objectives simultaneously, use `objectives` (plural) an
 
 ```yaml
 study:
-  directions: [minimize, minimize]
+  directions: [minimize, minimize, minimize]
   sampler: NSGA-II
 
 objectives:
-  - function: organoid_error
+  # Reference CSV: compare final n_large_rg_clusters against the value in the file
+  - function: rg_rosette_2d_error
+    reference: "optimizer/reference_data/target_rg_n_large_clusters.csv"
     kwargs:
-      target_metric: 50.0
-      metric: radius_of_gyration
-  - function: final_cell_count_error
+      metric: n_large_rg_clusters
+
+  # Time-series CSV: RMSE of mean_rosette_maturity interpolated onto reference time grid
+  - function: rg_rosette_2d_error
+    reference: "optimizer/reference_data/target_rg_rosette_maturity.csv"
     kwargs:
-      target_cell_count: 15
+      metric: mean_rosette_maturity
+      smooth_window: 5
+
+  # Inline scalar target: no CSV file needed (see section 7.1)
+  - function: rg_rosette_2d_error
+    reference: null
+    kwargs:
+      metric: mean_cluster_compactness
+      target_value: 0.75
 ```
 
 Optuna uses NSGA-II to maintain a **Pareto front** (a set of non-dominated solutions that represent the best trade-offs).  Results are saved to `pareto_trials.json`.
@@ -264,8 +276,9 @@ If you want richer console output, return a display string as the second tuple e
 
 ```python
 def my_custom_error(results: dict, reference_path: str = None, **kwargs) -> tuple[float, str | None]:
-    target = float(kwargs["target_value"])
-    simulated = float(results["CELL_METRICS_OVER_TIME"]["n_cells_alive"].iloc[-1])
+    ref = _load_reference_csv(reference_path)   # raises if reference_path is None
+    target = float(ref["my_metric"].iloc[0])
+    simulated = float(results["CELL_METRICS_OVER_TIME"]["my_metric"].iloc[-1])
     error = abs(simulated - target)
     display_text = f"({100.0 * error / abs(target):.2f}% off target)"
     return error, display_text
@@ -316,6 +329,36 @@ time,target_metric
 > **Important:** The `time` column in reference CSVs must be in the same
 > units as the simulation time — typically **seconds** (matching
 > `TIME_STEP`).  Do **not** use hours or other units.
+
+### 7.1 Inline scalar targets (no CSV file needed)
+
+When your target is a single number rather than a measured curve, you can skip
+creating a CSV entirely.  Set `reference: null` and add `target_value` to
+`kwargs`:
+
+```yaml
+- function: rg_rosette_2d_error
+  reference: null
+  kwargs:
+    metric: mean_cluster_compactness
+    target_value: 0.75    # desired per-rosette compactness (0=elongated, 1=circular)
+```
+
+The optimizer dispatch layer (`optimize.py`) intercepts `target_value`, writes
+a temporary single-row CSV of the form:
+
+```csv
+mean_cluster_compactness
+0.75
+```
+
+and passes it as `reference_path` to the objective function — then deletes
+the file.  **This works for any registered objective function**, not just
+`rg_rosette_2d_error`; no per-function changes are required.
+
+> **Note:** `target_value` always compares the **final** simulation value
+> (last row of the metrics DataFrame).  If you need a trajectory target,
+> create a time-series CSV instead.
 
 ---
 

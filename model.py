@@ -2732,7 +2732,7 @@ class CollectCellMetrics(pyflamegpu.HostFunction):
                 for _lid in range(n_rg_clusters):
                     _mask = (labels == _lid)
                     _sz = int(_mask.sum())
-                    if _sz < 3:
+                    if _sz < MIN_ROSETTE_SIZE:
                         continue
                     _cxy = pos_arr[np.where(_mask)[0], :2]
                     _cov = np.cov(_cxy.T)

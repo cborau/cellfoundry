@@ -11,13 +11,17 @@
 #        --config optimizer/optuna_config_radial_glia.yaml
 #
 # Objectives (minimized simultaneously via NSGA-II Pareto front):
-#   1. rg_rosette_error / n_large_rg_clusters  — target large cluster count (>=5 cells; CSV)
-#   2. rg_rosette_error / mean_rosette_maturity — target maturity over time
+#   1. rg_rosette_error / n_large_rg_clusters    — target large cluster count (>=5 cells; CSV)
+#   2. rg_rosette_error / mean_rosette_maturity  — target maturity over time (CSV)
+#   3. rg_rosette_error / mean_cluster_compactness — per-rosette ring quality (inline target)
+#      mean_cluster_compactness = PCA λ_min/λ_max per cluster (≥MIN_ROSETTE_SIZE), size-weighted.
+#      Range [0,1]: 0 = elongated/branchy ring, 1 = perfectly circular.
+#      Use target_value in kwargs — no CSV needed.
 #
 # Optional additional objectives (uncomment as needed):
-#   3. rg_rosette_error / large_cluster_fraction — fraction of RG cells in large clusters
-#   4. rg_rosette_error / rg_fraction            — target RG fraction over time
-#   5. rg_rosette_error / mean_cluster_size      — target mean cluster size
+#   4. rg_rosette_error / large_cluster_fraction — fraction of RG cells in large clusters
+#   5. rg_rosette_error / rg_fraction            — target RG fraction over time
+#   6. rg_rosette_error / mean_cluster_size      — target mean cluster size
 #
 # Equilibrium constraint (for reference, not enforced by optimizer):
 #   x_eq_basal = k_basal / (k_basal + k_decay)  must be < RG_COMMIT_THRESHOLD_RG (0.67)
@@ -36,7 +40,7 @@ study:
   n_trials: 500
   sampler: NSGA-II
   seed: 42
-  directions: [minimize, minimize]
+  directions: [minimize, minimize, minimize]
   storage: "sqlite:///cellfoundry_radial_glia.db"
 
 # ---------------------------------------------------------------------------
@@ -73,6 +77,16 @@ objectives:
     kwargs:
       metric: mean_rosette_maturity
       smooth_window: 5        # light Savitzky-Golay smoothing before RMSE
+
+  # 3. Per-rosette ring quality — PCA compactness averaged over all large clusters.
+  #    Pushes trial parameters toward configurations where individual rosettes are
+  #    isotropic (circular) rather than elongated.  No CSV needed: target_value is
+  #    set inline.  Adjust target_value between 0.6 (loose) and 0.9 (strict).
+  - function: rg_rosette_2d_error
+    reference: null
+    kwargs:
+      metric: mean_cluster_compactness
+      target_value: 0.75    # desired per-rosette compactness (0 = elongated, 1 = circular)
 
   # Optional: fraction of RG cells that live inside large clusters (>= 5 cells).
   # Penalises scattered/fragmented RG distributions independently of cluster count.
