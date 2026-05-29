@@ -17,11 +17,9 @@
 #      mean_cluster_compactness = PCA λ_min/λ_max per cluster (≥MIN_ROSETTE_SIZE), size-weighted.
 #      Range [0,1]: 0 = elongated/branchy ring, 1 = perfectly circular.
 #      Use target_value in kwargs — no CSV needed.
-#
-# Optional additional objectives (uncomment as needed):
-#   4. rg_rosette_error / large_cluster_fraction — fraction of RG cells in large clusters
-#   5. rg_rosette_error / rg_fraction            — target RG fraction over time
-#   6. rg_rosette_error / mean_cluster_size      — target mean cluster size
+#   4. rg_rosette_error / rg_fraction            — penalises zero-RG runs (inline target)
+#      Without this, trials producing 0 RG score exactly 100% on all three objectives above
+#      and may Pareto-dominate trials that found RG but in the wrong count/shape.
 #
 # Equilibrium constraint (for reference, not enforced by optimizer):
 #   x_eq_basal = k_basal / (k_basal + k_decay)  must be < RG_COMMIT_THRESHOLD_RG (0.67)
@@ -40,7 +38,7 @@ study:
   n_trials: 500
   sampler: NSGA-II
   seed: 42
-  directions: [minimize, minimize, minimize]
+  directions: [minimize, minimize, minimize, minimize]
   storage: "sqlite:///cellfoundry_radial_glia.db"
 
 # ---------------------------------------------------------------------------
@@ -88,6 +86,16 @@ objectives:
       metric: mean_cluster_compactness
       target_value: 0.75    # desired per-rosette compactness (0 = elongated, 1 = circular)
 
+  # 4. RG fraction — penalises zero-RG trials so they cannot Pareto-dominate trials
+  #    that found RG but in the wrong count or shape.  With 0 RG all three objectives
+  #    above score exactly 100% off target; this axis scores those trials much worse.
+  #    Adjust target_value to the expected RG fraction at day 7 (e.g. 0.3 = 30% RG).
+  - function: rg_rosette_2d_error
+    reference: null
+    kwargs:
+      metric: rg_fraction
+      target_value: 0.30    # ~30% of cells should be RG by end of simulation
+
   # Optional: fraction of RG cells that live inside large clusters (>= 5 cells).
   # Penalises scattered/fragmented RG distributions independently of cluster count.
   # Add minimize to study.directions and uncomment to enable.
@@ -96,14 +104,6 @@ objectives:
   #   reference: "optimizer/reference_data/target_rg_large_cluster_fraction.csv"
   #   kwargs:
   #     metric: large_cluster_fraction
-
-  # Optional: uncomment to add rg_fraction as a further objective and update
-  # study.directions accordingly.
-  #
-  # - function: rg_rosette_2d_error
-  #   reference: "optimizer/reference_data/target_rg_fraction.csv"
-  #   kwargs:
-  #     metric: rg_fraction
 
   # Optional: final mean cluster size (large clusters only gives more signal).
   # - function: rg_rosette_2d_error
@@ -223,7 +223,7 @@ parameters:
     elements:
       2:                # sp2 saturation ceiling
         low:  0.2
-        high: 3.0  Together with D it sets L=sqrt(D/lambda)
+        high: 3.0  # Together with D it sets L=sqrt(D/lambda)
   # and the steady-state background level (C_bg ∝ N*q/lambda).  Default: 4e-5 s⁻¹
   # (half-life 4.8 h).  Range: 1e-5–5e-4 s⁻¹ (half-life 23 min – 19 h).
   ECM_DEGRADATION_RATE_MULTI:

@@ -1523,7 +1523,8 @@ def rg_rosette_2d_error(results: dict, reference_path: str = None, **kwargs) -> 
     -----------------
     metric : str, default ``"n_rg_clusters"``
         Which rosette metric to compare.  Choices:
-        ``"n_rg_clusters"``, ``"mean_cluster_size"``,
+        ``"n_rg_clusters"``, ``"n_large_rg_clusters"``, ``"mean_cluster_size"``,
+        ``"large_cluster_mean_size"``, ``"large_cluster_fraction"``,
         ``"mean_rosette_maturity"``, ``"rg_fraction"``,
         ``"largest_cluster_size"``, ``"n_alive_rg"``,
         ``"rg_assembly_compactness"``, ``"mean_cluster_compactness"``.
@@ -1570,9 +1571,10 @@ def rg_rosette_2d_error(results: dict, reference_path: str = None, **kwargs) -> 
     rg_df = _get_rg_rosette_metrics_frame(results)
 
     metric_name = kwargs.get("metric", "n_rg_clusters")
-    valid_metrics = {"n_rg_clusters", "mean_cluster_size", "mean_rosette_maturity",
-                     "rg_fraction", "largest_cluster_size", "n_alive_rg",
-                     "rg_assembly_compactness", "mean_cluster_compactness"}
+    valid_metrics = {"n_rg_clusters", "n_large_rg_clusters", "mean_cluster_size",
+                     "large_cluster_mean_size", "large_cluster_fraction",
+                     "mean_rosette_maturity", "rg_fraction", "largest_cluster_size",
+                     "n_alive_rg", "rg_assembly_compactness", "mean_cluster_compactness"}
     if metric_name not in valid_metrics:
         raise ValueError(
             f"Unknown metric '{metric_name}'. Available: {sorted(valid_metrics)}"

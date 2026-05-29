@@ -85,7 +85,7 @@ def _read_log_tail(path: str, max_chars: int) -> str:
 # ---------------------------------------------------------------------------
 
 def load_config(config_path: str) -> dict:
-    with open(config_path, "r") as f:
+    with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
     return config
 
@@ -109,7 +109,7 @@ def _format_objective_label(
     name: str, error: float, display_text: str | None, *, metric: str | None = None
 ) -> str:
     label_name = f"{name}[{metric}]" if metric else name
-    label = f"{label_name}={error:.6f}"
+    label = f"{label_name}: err={error:.6f}"
     if not display_text:
         return label
     return f"{label} {display_text}"
