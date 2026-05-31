@@ -6,6 +6,7 @@ model.py.bak
 network_3d.pkl
 result_files/output_data_0.pickle
 optimizer/optuna_results/*
+optimizer/analysis_results/*
 optimizer/optuna_diff_modulus_results/*
 optimizer/optuna_cell_speed_results/*
 optimizer/optuna_cell_speed_control_results/*

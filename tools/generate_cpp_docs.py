@@ -203,6 +203,27 @@ def render_wiki_home() -> str:
         "- [Tutorial: Parameter Optimization](Tutorial-Parameter-Optimization)\n"
         "- [Tutorial: Parameter Overriding](Tutorial-Parameter-Overriding)\n"
         "- [Tutorial: Model Variants](Tutorial-Model-Variants)\n"
+        "- [Tutorial: Parameter Interpretability](Tutorial-Parameter-Interpretability)\n"
+    )
+
+
+def render_interpretability_tutorial_page(github_repo: str, github_ref: str) -> str:
+    """Return the markdown content for the Parameter Interpretability tutorial.
+
+    The canonical source lives in docs/auto/wiki/Tutorial-Parameter-Interpretability.md;
+    this function re-reads it so that the generated file stays in sync with edits to the
+    source document.
+    """
+    src = ROOT / "docs" / "auto" / "wiki" / "Tutorial-Parameter-Interpretability.md"
+    if src.exists():
+        return src.read_text(encoding="utf-8")
+    # Minimal fallback if the file is somehow missing
+    return (
+        "# Tutorial \u2014 Parameter Interpretability\n\n"
+        "See `optimizer/analyze.py` and run:\n\n"
+        "```bash\n"
+        "python -m optimizer.analyze --storage sqlite:///my_study.db\n"
+        "```\n"
     )
 
 
@@ -432,6 +453,7 @@ def main() -> int:
     wiki_editor_md = render_model_editor_page(github_repo, args.github_ref)
     wiki_configurator_md = render_model_configurator_page(github_repo, args.github_ref)
     wiki_post_md = render_post_processing_page(github_repo, args.github_ref)
+    wiki_interpretability_md = render_interpretability_tutorial_page(github_repo, args.github_ref)
 
     out_wiki_ref = ROOT / "docs" / "auto" / "wiki" / "Function-Reference.md"
     out_wiki_home = ROOT / "docs" / "auto" / "wiki" / "Home.md"
@@ -447,6 +469,7 @@ def main() -> int:
         out_wiki_editor: wiki_editor_md,
         out_wiki_configurator: wiki_configurator_md,
         out_wiki_post: wiki_post_md,
+        ROOT / "docs" / "auto" / "wiki" / "Tutorial-Parameter-Interpretability.md": wiki_interpretability_md,
     }
 
     changed = []
