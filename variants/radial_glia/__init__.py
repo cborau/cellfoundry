@@ -83,7 +83,7 @@ PARAMS = {
     "INCLUDE_LUMEN":              False,
 
     # --- Cell geometry ---
-    "MIN_ROSETTE_SIZE":           5,                         # minimum RG cells per cluster to count as a genuine rosette
+    "MIN_ROSETTE_SIZE":           12,                        # minimum RG cells per cluster to count as a genuine rosette
     "N_CELLS":                    300,
     "CELL_RADIUS":                [10.0, 10.0, 10.0],       # [µm]
 

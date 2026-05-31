@@ -1611,6 +1611,17 @@ def rg_rosette_2d_error(results: dict, reference_path: str = None, **kwargs) -> 
         sim_value = float(rg_df[metric_name].iloc[-1])
         if np.isnan(sim_value):
             sim_value = 0.0  # no organised rosette / no RG cells -> treat as zero
+        # Hard penalty for count metrics when no rosettes formed at all.
+        # |0 - 2| = 2 is deceptively good; 100 pushes these trials off the Pareto front.
+        if metric_name in {"n_large_rg_clusters", "n_rg_clusters"} and sim_value == 0.0:
+            import warnings as _w
+            _w.warn(
+                f"[rg_rosette_2d_error] Zero rosettes formed (metric='{metric_name}') — "
+                "applying hard penalty of 100.0 to suppress barren trials from Pareto front.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return 100.0, "0 rosettes (hard penalty)"
         error = abs(sim_value - target)
         return error, _format_percent_text(error, target)
 

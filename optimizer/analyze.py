@@ -1,5 +1,5 @@
 """
-CellFoundry Optimizer — Interpretability & Analysis Module
+Cellfoundry Optimizer — Interpretability & Analysis Module
 ===========================================================
 
 Generates a comprehensive HTML report explaining *why* a particular combination
@@ -70,6 +70,14 @@ from matplotlib.tri import Triangulation
 
 from scipy.stats import spearmanr
 from scipy.ndimage import uniform_filter1d
+
+# Suppress the KMeans/MKL memory-leak warning on Windows — it is cosmetic only.
+warnings.filterwarnings(
+    "ignore",
+    message="KMeans is known to have a memory leak",
+    category=UserWarning,
+    module="sklearn",
+)
 
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.inspection import permutation_importance
@@ -380,7 +388,7 @@ def _warn_box(text: str) -> str:
 def _plotly_div(fig) -> str:
     if not _PLOTLY:
         return "<p><em>plotly not available.</em></p>"
-    return plotly_to_html(fig, full_html=False, include_plotlyjs=False)
+    return plotly_to_html(fig, full_html=False, include_plotlyjs="cdn")
 
 
 # ===========================================================================
@@ -826,7 +834,7 @@ def _layer3_interactions(
         if len(sub) < 10:
             continue
 
-        fig, axes = plt.subplots(1, n_obj, figsize=(min(4.5*n_obj, 16), 4), squeeze=False)
+        fig, axes = plt.subplots(1, n_obj, figsize=(min(5.5*n_obj, 16), 5), squeeze=False)
         fig.suptitle(f"Interaction: {n1}  \u00d7  {n2}", fontsize=11, fontweight="bold")
 
         for i, vcol in enumerate(value_cols):
@@ -1114,10 +1122,26 @@ def _layer5_clusters(df: pd.DataFrame, obj_names: list[str]) -> tuple[pd.DataFra
     obj_labels = [_objective_label(c, obj_names) for c in value_cols]
 
     summary_rows: list[dict] = []
-    fig_c, axes_c = plt.subplots(best_k, len(param_cols),
-                                  figsize=(min(max(10, 2*len(param_cols)), 16), 3*best_k), squeeze=False)
+    # Chunked layout: at most MAX_COLS parameters per row to avoid tiny subplots.
+    MAX_COLS = 6
+    n_p = len(param_cols)
+    n_chunks = max(1, (n_p + MAX_COLS - 1) // MAX_COLS)
+    n_grid_cols = min(n_p, MAX_COLS)
+    n_grid_rows = best_k * n_chunks
+    fig_c, axes_c = plt.subplots(
+        n_grid_rows, n_grid_cols,
+        figsize=(min(2.5 * n_grid_cols, 15), 3 * n_grid_rows),
+        squeeze=False,
+    )
     fig_c.suptitle(f"Cluster Profiles — {best_k} clusters of Pareto trials",
                    fontsize=12, fontweight="bold")
+    # Hide axes slots that have no parameter assigned
+    for gr in range(n_grid_rows):
+        chunk_idx = gr % n_chunks
+        col_start = chunk_idx * MAX_COLS
+        n_in_chunk = min(MAX_COLS, n_p - col_start)
+        for gc in range(n_in_chunk, n_grid_cols):
+            axes_c[gr][gc].set_visible(False)
 
     for cluster_id in range(best_k):
         mask = pareto_df["cluster"] == cluster_id
@@ -1132,13 +1156,16 @@ def _layer5_clusters(df: pd.DataFrame, obj_names: list[str]) -> tuple[pd.DataFra
         summary_rows.append(row)
 
         for j, (p_col, p_lbl) in enumerate(zip(param_cols, param_labels)):
-            ax = axes_c[cluster_id][j]
+            chunk_idx = j // MAX_COLS
+            col_idx = j % MAX_COLS
+            row_idx = cluster_id * n_chunks + chunk_idx
+            ax = axes_c[row_idx][col_idx]
             ax.hist(pareto_df[p_col].values, bins=15, alpha=0.3, color="gray",
                     density=True, label="All Pareto")
             ax.hist(ct[p_col].values, bins=10, alpha=0.7,
                     color=plt.cm.tab10(cluster_id / max(best_k, 1)), density=True)
             ax.set_title(p_lbl, fontsize=7); ax.set_yticks([])
-            if j == 0:
+            if col_idx == 0:
                 ax.set_ylabel(f"Cluster {cluster_id}\n(n={n_c})", fontsize=8)
 
     plt.tight_layout()
@@ -1205,7 +1232,7 @@ def _layer6_sensitivity(
 
     html_parts.append(
         "<p><strong>Reading these plots:</strong> "
-        "The y-axis shows the <em>objective (error) value</em> — in CellFoundry this is always an error metric, "
+        "The y-axis shows the <em>objective (error) value</em> — in Cellfoundry this is always an error metric, "
         "so <strong>lower values = better match to the biological target</strong>. "
         "The navy trend line is a LOWESS-smoothed moving average: it answers "
         "'as I change only this parameter, how does the typical error change?' "
@@ -1230,7 +1257,7 @@ def _layer6_sensitivity(
         x_plot = np.log10(x_raw) if use_log else x_raw
         log_note = " (log\u2081\u2080 scale)" if use_log else ""
 
-        fig, axes = plt.subplots(1, n_obj, figsize=(5*n_obj, 4), squeeze=False)
+        fig, axes = plt.subplots(1, n_obj, figsize=(min(6*n_obj, 18), 5), squeeze=False)
         fig.suptitle(f"Sensitivity: {p_label}{log_note}", fontsize=11, fontweight="bold")
 
         max_slope = 0.0
@@ -1430,7 +1457,7 @@ _HTML_TEMPLATE = """\
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CellFoundry Analysis \u2014 {study_name}</title>
+<title>Cellfoundry Analysis \u2014 {study_name}</title>
 <style>
   body {{ font-family: "Segoe UI", sans-serif; max-width: 1600px; margin: 0 auto; padding: 1em 2em; color: #222; }}
   h1 {{ color: #c0392b; border-bottom: 2px solid #c0392b; display:flex; align-items:center; gap:0.4em; line-height:1.3; }}
@@ -1455,7 +1482,7 @@ _HTML_TEMPLATE = """\
 
 <h1>
   {icon_html}
-  CellFoundry Optimizer \u2014 Interpretability Report
+  Cellfoundry Optimizer \u2014 Interpretability Report
 </h1>
 
 <div class="meta">
@@ -1704,13 +1731,11 @@ def run_analysis(
     icon_b64 = _load_icon_b64()
     icon_html = (
         f'<img src="data:image/png;base64,{icon_b64}" '
-        f'style="height:1.1em;vertical-align:middle" alt="CellFoundry">'
+        f'style="height:1.1em;vertical-align:middle" alt="Cellfoundry">'
         if icon_b64 else ""
     )
-    plotly_js = (
-        '<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>'
-        if _PLOTLY else ""
-    )
+    # plotly CDN is now injected per-div via include_plotlyjs='cdn'
+    plotly_js = ""
 
     summary = {
         "study_name": study_name,
@@ -1766,7 +1791,7 @@ def run_analysis(
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="CellFoundry Optimizer — Interpretability & Analysis Report Generator",
+        description="Cellfoundry Optimizer — Interpretability & Analysis Report Generator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
             Examples:

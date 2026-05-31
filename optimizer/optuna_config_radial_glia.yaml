@@ -38,7 +38,7 @@ study:
   n_trials: 500
   sampler: NSGA-II
   seed: 42
-  directions: [minimize, minimize, minimize, minimize]
+  directions: [minimize, minimize, minimize]  # mean_rosette_maturity objective commented out
   storage: "sqlite:///cellfoundry_radial_glia.db"
 
 # ---------------------------------------------------------------------------
@@ -69,12 +69,14 @@ objectives:
     kwargs:
       metric: n_large_rg_clusters
 
-  # 2. Rosette maturity over time — single-value CSV with "mean_rosette_maturity"
-  - function: rg_rosette_2d_error
-    reference: "optimizer/reference_data/target_rg_rosette_maturity.csv"
-    kwargs:
-      metric: mean_rosette_maturity
-      smooth_window: 5        # light Savitzky-Golay smoothing before RMSE
+  # 2. Rosette maturity over time — COMMENTED OUT: maturity is time-asymptotic and
+  #    achievable by simply extending simulation time; not a genuine parameter constraint.
+  #    Re-enable to penalise slow maturation independently.
+  # - function: rg_rosette_2d_error
+  #   reference: "optimizer/reference_data/target_rg_rosette_maturity.csv"
+  #   kwargs:
+  #     metric: mean_rosette_maturity
+  #     smooth_window: 5        # light Savitzky-Golay smoothing before RMSE
 
   # 3. Per-rosette ring quality — PCA compactness averaged over all large clusters.
   #    Pushes trial parameters toward configurations where individual rosettes are
