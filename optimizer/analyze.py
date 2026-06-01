@@ -263,6 +263,27 @@ def _build_objectives_block(
         best = best_values[i] if i < len(best_values) else float("nan")
         best_str = f"{best:.5g}" if np.isfinite(best) else "—"
         direction = directions[i] if i < len(directions) else "minimize"
+        # Error % relative to numeric target
+        float_target: "float | None" = None
+        if target is not None:
+            try:
+                float_target = float(target)
+            except (ValueError, TypeError):
+                pass
+        if float_target is None:
+            resolved = meta.get("resolved_reference")
+            if resolved is not None and Path(resolved).exists():
+                try:
+                    _df_ref = pd.read_csv(resolved)
+                    _vcols = [c for c in _df_ref.columns
+                              if c.lower() not in ("time", "index", "t", "step")]
+                    if len(_df_ref) == 1 and _vcols:
+                        float_target = float(_df_ref[_vcols[0]].iloc[0])
+                except Exception:
+                    pass
+        err_pct_str = "—"
+        if float_target is not None and float_target != 0 and np.isfinite(best):
+            err_pct_str = f"{best / float_target * 100:.1f}%"
         rows.append(
             f"<tr>"
             f"<td><strong>{i}</strong></td>"
@@ -270,16 +291,19 @@ def _build_objectives_block(
             f"<td><code>{func}</code></td>"
             f"<td>{target_str}</td>"
             f"<td><strong style='color:#c0392b'>{best_str}</strong></td>"
+            f"<td>{err_pct_str}</td>"
             f"<td>{direction}</td>"
             f"</tr>"
         )
     return (
         "<h3>Objectives at a glance</h3>"
         "<p>All values in this report are <em>error metrics</em> — "
-        "<strong>lower = better match to the biological target</strong>.</p>"
+        "<strong>lower = better match to the biological target</strong>. "
+        "<em>Note: the Optuna database stores only the error value (e.g. |sim − target|), "
+        "not the raw simulation output — the raw value is not recoverable from the DB alone.</em></p>"
         "<table border='1' cellpadding='6' style='border-collapse:collapse;font-size:0.92em'>"
         "<tr><th>#</th><th>Name</th><th>Function</th>"
-        "<th>Target value</th><th>Best achieved</th><th>Direction</th></tr>"
+        "<th>Target value</th><th>Best error (raw)</th><th>Error (% of target)</th><th>Direction</th></tr>"
         + "\n".join(rows) + "</table>"
     )
 
@@ -357,13 +381,13 @@ def _fig_to_base64(fig: plt.Figure) -> str:
     return encoded
 
 
-def _img_html(b64: str, caption: str = "") -> str:
+def _img_html(b64: str, caption: str = "", max_width: str = "1400px") -> str:
     if not b64:
         return "<p><em>Figure could not be generated.</em></p>"
     return (
         f'<figure style="margin:1em 0">'
         f'<img src="data:image/png;base64,{b64}" '
-        f'style="max-width:900px;width:100%;height:auto" alt="{caption}"/>'
+        f'style="max-width:{max_width};width:100%;height:auto" alt="{caption}"/>'
         f'{"<figcaption>" + caption + "</figcaption>" if caption else ""}'
         f"</figure>"
     )
@@ -416,6 +440,7 @@ def _layer_rf_permutation(df: pd.DataFrame, obj_names: list[str]) -> tuple[list[
     top_params_by_obj: dict[str, list[str]] = {}
     r2_scores: dict[str, float] = {}
     r2_warnings: list[str] = []
+    _perm_figs: list[str] = []  # collect per-obj + combined figs for layout
 
     for i, v_col in enumerate(value_cols):
         obj_label = _objective_label(v_col, obj_names)
@@ -485,7 +510,7 @@ def _layer_rf_permutation(df: pd.DataFrame, obj_names: list[str]) -> tuple[list[
                  ha="center", va="top", fontsize=9, color=r2_color,
                  transform=fig.transFigure)
         plt.tight_layout(rect=[0, 0, 1, 0.94])
-        html_parts.append(_img_html(_fig_to_base64(fig)))
+        _perm_figs.append(_img_html(_fig_to_base64(fig)))
 
     # Combined chart
     if len(all_importances) > 1:
@@ -501,7 +526,17 @@ def _layer_rf_permutation(df: pd.DataFrame, obj_names: list[str]) -> tuple[list[
         ax.set_xlabel("Normalised importance (averaged over all objectives)")
         ax.set_title("Combined importance — averaged across all objectives", fontsize=10)
         plt.tight_layout()
-        html_parts.append(_img_html(_fig_to_base64(fig)))
+        _perm_figs.append(_img_html(_fig_to_base64(fig)))
+
+    # Arrange: side-by-side grid when n_obj ≤ 3, stacked otherwise
+    n_obj_total = len(value_cols)
+    if n_obj_total <= 3 and len(_perm_figs) > 1:
+        html_parts.append(
+            '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1em">'
+            + "".join(_perm_figs) + "</div>"
+        )
+    else:
+        html_parts.extend(_perm_figs)
 
     for w in r2_warnings:
         html_parts.append(_warn_box(w))
@@ -712,19 +747,26 @@ def _layer2_pareto(
                     values=plot_df[col].fillna(plot_df[col].median()),
                     range=[float(vals.min()), float(vals.max())],
                 ))
-            color_col = (first_obj_col if first_obj_col and first_obj_col in plot_df.columns
-                         else plot_df.columns[-1])
-            color_vals = plot_df[color_col].fillna(0)
-            fig_pc = go.Figure(data=go.Parcoords(
-                line=dict(color=color_vals, colorscale="RdYlGn_r", showscale=True,
-                          colorbar=dict(title=f"{color_col} (↓ better)")),
-                dimensions=dims,
-            ))
-            fig_pc.update_layout(
-                title=f"Parallel Coordinates — Pareto trials  |  colour = {color_col} (red = worst, green = best)",
-                height=500, margin=dict(l=80, r=80, t=60, b=20),
-            )
-            html_parts.append('<div style="overflow-x:auto">' + _plotly_div(fig_pc) + "</div>")
+            # One Parcoords plot per objective so every objective gets its own colour scale
+            _obj_cols_for_pc = [
+                _objective_label(vc, obj_names)
+                for vc in value_cols
+                if _objective_label(vc, obj_names) in plot_df.columns
+            ] or [plot_df.columns[-1]]
+            for _cc in _obj_cols_for_pc:
+                _color_vals = plot_df[_cc].fillna(0)
+                _fig_pc = go.Figure(data=go.Parcoords(
+                    line=dict(color=_color_vals, colorscale="RdYlGn_r", showscale=True,
+                              colorbar=dict(title=f"{_cc} (↓ better)")),
+                    dimensions=dims,
+                    labelfont=dict(size=9),
+                    tickfont=dict(size=8),
+                ))
+                _fig_pc.update_layout(
+                    title=f"Parallel Coordinates — Pareto trials  |  colour: {_cc} (red = worst, green = best)",
+                    height=520, margin=dict(l=80, r=120, t=110, b=80),
+                )
+                html_parts.append('<div style="overflow-x:auto">' + _plotly_div(_fig_pc) + "</div>")
         except Exception as exc:
             warnings.warn(f"Parallel coordinates (plotly) failed: {exc}")
             _draw_parallel_coords_mpl(pareto_df, param_cols, value_cols, obj_names, html_parts)
@@ -798,17 +840,17 @@ def _layer3_interactions(
         else:
             corr = np.atleast_2d(raw_corr)
 
-        fig, ax = plt.subplots(figsize=(max(6, n_p * 0.9), max(5, n_p * 0.85)))
+        fig, ax = plt.subplots(figsize=(max(6, n_p * 0.7), max(6, n_p * 0.7)))
         im = ax.imshow(corr, cmap="coolwarm", vmin=-1, vmax=1, aspect="auto")
         ax.set_xticks(range(n_p)); ax.set_yticks(range(n_p))
-        ax.set_xticklabels(param_data.columns, rotation=45, ha="right", fontsize=8)
-        ax.set_yticklabels(param_data.columns, fontsize=8)
+        ax.set_xticklabels(param_data.columns, rotation=45, ha="right", fontsize=7)
+        ax.set_yticklabels(param_data.columns, fontsize=7)
         plt.colorbar(im, ax=ax, label="Spearman \u03c1")
         ax.set_title("Parameter Spearman Correlation Matrix (all trials)")
         for ii in range(corr.shape[0]):
             for jj in range(corr.shape[1]):
                 ax.text(jj, ii, f"{corr[ii,jj]:.2f}", ha="center", va="center",
-                        fontsize=7, color="white" if abs(corr[ii,jj]) > 0.6 else "black")
+                        fontsize=6, color="white" if abs(corr[ii,jj]) > 0.6 else "black")
         for ii in range(corr.shape[0]):
             for jj in range(ii+1, corr.shape[1]):
                 if abs(corr[ii, jj]) > 0.4:
@@ -817,7 +859,8 @@ def _layer3_interactions(
                     )
         plt.tight_layout()
         html_parts.append(_img_html(_fig_to_base64(fig),
-            "Parameter Spearman \u03c1 — positive = sampled together; negative = explored in opposition"))
+            "Parameter Spearman \u03c1 — positive = sampled together; negative = explored in opposition",
+            max_width="900px"))
 
     # 2-D scatter + iso-contour per pair x objective
     pairs = [
@@ -834,7 +877,7 @@ def _layer3_interactions(
         if len(sub) < 10:
             continue
 
-        fig, axes = plt.subplots(1, n_obj, figsize=(min(5.5*n_obj, 16), 5), squeeze=False)
+        fig, axes = plt.subplots(1, n_obj, figsize=(min(5.5*n_obj, 16), max(4, min(5.5, 14/n_obj))), squeeze=False)
         fig.suptitle(f"Interaction: {n1}  \u00d7  {n2}", fontsize=11, fontweight="bold")
 
         for i, vcol in enumerate(value_cols):
@@ -954,7 +997,7 @@ def _layer4_objectives(df: pd.DataFrame, obj_names: list[str]) -> str:
             corr_result.pvalue if hasattr(corr_result, "pvalue") else corr_result[1]
         )
 
-    fig, ax = plt.subplots(figsize=(max(5, n_obj * 1.6), max(4, n_obj * 1.5)))
+    fig, ax = plt.subplots(figsize=(max(4, n_obj * 1.2), max(3.5, n_obj * 1.1)))
     im = ax.imshow(corr_mat, cmap="coolwarm", vmin=-1, vmax=1)
     plt.colorbar(im, ax=ax, label="Spearman \u03c1")
     ax.set_xticks(range(n_obj)); ax.set_yticks(range(n_obj))
@@ -969,7 +1012,7 @@ def _layer4_objectives(df: pd.DataFrame, obj_names: list[str]) -> str:
             ax.text(jj, ii, txt, ha="center", va="center",
                     fontsize=8, color="white" if abs(corr_mat[ii,jj]) > 0.6 else "black")
     plt.tight_layout()
-    html_parts.append(_img_html(_fig_to_base64(fig), "Objective Correlation Heatmap"))
+    _hmap_html = _img_html(_fig_to_base64(fig), "Objective Correlation Heatmap", max_width="700px")
 
     # Pairwise scatter
     n_row = n_obj - 1
@@ -988,7 +1031,11 @@ def _layer4_objectives(df: pd.DataFrame, obj_names: list[str]) -> str:
                 ax.legend(fontsize=7)
     fig2.suptitle("Objective Pairwise Scatter  (red = Pareto-optimal)", fontsize=11, fontweight="bold")
     plt.tight_layout()
-    html_parts.append(_img_html(_fig_to_base64(fig2), "Objective pairwise scatter matrix"))
+    _scatter_html = _img_html(_fig_to_base64(fig2), "Objective pairwise scatter matrix", max_width="900px")
+    html_parts.append(
+        '<div style="display:flex;justify-content:center">' + _hmap_html + "</div>"
+    )
+    html_parts.append(_scatter_html)
 
     # PCA of Pareto front
     pareto_vals = obj_df.loc[obj_df["is_pareto"], obj_labels].values
@@ -1116,7 +1163,7 @@ def _layer5_clusters(df: pd.DataFrame, obj_names: list[str]) -> tuple[pd.DataFra
         ax.set_xlabel("Number of clusters k"); ax.set_ylabel("Silhouette score")
         ax.set_title("K-means cluster quality"); ax.legend()
         plt.tight_layout()
-        html_parts.append(_img_html(_fig_to_base64(fig), f"Silhouette scores — best k={best_k}"))
+        html_parts.append(_img_html(_fig_to_base64(fig), f"Silhouette scores — best k={best_k}", max_width="500px"))
 
     param_labels = [_clean_param_name(c) for c in param_cols]
     obj_labels = [_objective_label(c, obj_names) for c in value_cols]
@@ -1220,6 +1267,86 @@ def _layer5_clusters(df: pd.DataFrame, obj_names: list[str]) -> tuple[pd.DataFra
 # Layer 6 — 1-D sensitivity slices (LOWESS-smoothed)
 # ===========================================================================
 
+
+def _direction_table(
+    df: pd.DataFrame,
+    param_cols: list[str],
+    value_cols: list[str],
+    obj_names: list[str],
+) -> str:
+    """HTML table showing Spearman-rho direction for each top param × objective.
+
+    Arrow meaning (objectives are errors — lower = better):
+      ↑ to improve → rho < 0 (higher param value → lower error)
+      ↓ to improve → rho > 0 (higher param value → higher error)
+      ↔ no clear trend → |rho| < 0.2
+    """
+    rows: list[str] = []
+    for p_col in param_cols:
+        p_label = _clean_param_name(p_col)
+        cells = [f"<td><code>{p_label}</code></td>"]
+        for v_col in value_cols:
+            obj_label = _objective_label(v_col, obj_names)
+            valid = df[[p_col, v_col]].notna().all(axis=1)
+            sub = df[valid]
+            if len(sub) < 10:
+                cells.append("<td style='color:#999'>&#8596;<br><small>too few</small></td>")
+                continue
+            rho, _ = spearmanr(sub[p_col].values, sub[v_col].values)
+            if abs(rho) < 0.2:
+                symbol = "&#8596;"
+                color = "#999"
+                label_txt = f"&#961;={rho:+.2f}"
+                fw = "normal"
+            elif rho < 0:  # higher param → lower error → increase to improve
+                symbol = "&#8593;&nbsp;to&nbsp;improve"
+                color = "#1a7abf"
+                label_txt = f"&#961;={rho:+.2f}"
+                fw = "bold" if abs(rho) > 0.4 else "normal"
+            else:  # higher param → higher error → decrease to improve
+                symbol = "&#8595;&nbsp;to&nbsp;improve"
+                color = "#c0392b"
+                label_txt = f"&#961;={rho:+.2f}"
+                fw = "bold" if abs(rho) > 0.4 else "normal"
+            strength = "strong" if abs(rho) > 0.5 else ("moderate" if abs(rho) > 0.3 else "weak")
+            tip = f"Spearman rho={rho:+.3f} ({strength})"
+            cells.append(
+                f'<td title="{tip}" style="color:{color};font-weight:{fw};white-space:nowrap">'
+                f"{symbol}<br><small>{label_txt}</small></td>"
+            )
+        rows.append("<tr>" + "".join(cells) + "</tr>")
+    if not rows:
+        return ""
+    headers = (
+        "<tr><th>Parameter</th>"
+        + "".join(
+            f"<th>{_objective_label(v, obj_names)}</th>" for v in value_cols
+        )
+        + "</tr>"
+    )
+    note = (
+        "<p><small>"
+        "<strong>&#8593;&nbsp;to&nbsp;improve</strong> = increasing the parameter reduces error &nbsp;|&nbsp; "
+        "<strong>&#8595;&nbsp;to&nbsp;improve</strong> = decreasing it reduces error &nbsp;|&nbsp; "
+        "<strong>&#8596;</strong> = no clear monotonic trend (|&#961;| &lt; 0.2 — check iso-contour plots below). "
+        "&#961; is Spearman rank correlation across <em>all</em> completed trials. "
+        "|&#961;| &gt; 0.5 = strong, &gt; 0.3 = moderate. "
+        "For log-scale parameters the direction applies to the exponent (order of magnitude). "
+        "Non-monotonic optima (U/V-shaped curves) will show weak &#961; — see 1-D sensitivity plots for the full picture."
+        "</small></p>"
+    )
+    return (
+        "<h4>Parameter Direction Guide</h4>"
+        + note
+        + '<div style="overflow-x:auto;display:flex;justify-content:center">'
+        + "<table border='1' cellpadding='5' style='border-collapse:collapse;font-size:0.85em'>"
+        + headers
+        + "\n".join(rows)
+        + "</table>"
+        + "</div>"
+    )
+
+
 def _layer6_sensitivity(
     df: pd.DataFrame,
     obj_names: list[str],
@@ -1242,6 +1369,11 @@ def _layer6_sensitivity(
         "flat regions mean the objective is insensitive. "
         "A U- or V-shaped curve suggests an optimal range between the extremes.</p>"
     )
+
+    # Direction guide: Spearman rho across all trials tells which way to nudge each parameter.
+    _dir_html = _direction_table(df, param_cols, value_cols, obj_names)
+    if _dir_html:
+        html_parts.append(_dir_html)
 
     top_sensitive: list[tuple[str, float]] = []
 
@@ -1388,7 +1520,7 @@ def _layer7_violin_distributions(df: pd.DataFrame, obj_names: list[str]) -> str:
     for idx in range(n_params, n_rows * n_cols):
         axes[idx // n_cols][idx % n_cols].set_visible(False)
 
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 1, 0.90])
     html_parts.append(_img_html(_fig_to_base64(fig),
         "Violin plots — wide blue: all search trials; narrow red: Pareto-optimal trials"))
 
@@ -1419,7 +1551,11 @@ def _layer7_violin_distributions(df: pd.DataFrame, obj_names: list[str]) -> str:
 # Summary table
 # ===========================================================================
 
-def _build_summary_table(df: pd.DataFrame, obj_names: list[str]) -> str:
+def _build_summary_table(
+    df: pd.DataFrame,
+    obj_names: list[str],
+    yaml_objectives: "list[dict] | None" = None,
+) -> str:
     value_cols = _value_columns(df)
     param_cols = _param_columns(df)
     pareto_df = df[df["is_pareto"]].copy()
@@ -1428,22 +1564,78 @@ def _build_summary_table(df: pd.DataFrame, obj_names: list[str]) -> str:
     pareto_df = pareto_df.sort_values("value_0").head(20).reset_index(drop=True)
     display = ["trial_number"] + value_cols + param_cols
     pareto_df = pareto_df[display]
-    pareto_df.columns = (
+    obj_labels = [_objective_label(c, obj_names) for c in value_cols]
+    param_labels_clean = [_clean_param_name(c) for c in param_cols]
+    pareto_df.columns = ["Trial"] + obj_labels + param_labels_clean
+
+    # Extract numeric targets for error-% display
+    float_targets: list = []
+    for idx in range(len(value_cols)):
+        meta = (yaml_objectives[idx] if yaml_objectives and idx < len(yaml_objectives) else {}) or {}
+        tval = meta.get("target_value")
+        ft = None
+        if tval is not None:
+            try:
+                ft = float(tval)
+            except (ValueError, TypeError):
+                pass
+        if ft is None:
+            resolved = meta.get("resolved_reference")
+            if resolved is not None and Path(resolved).exists():
+                try:
+                    _df_ref = pd.read_csv(resolved)
+                    _vcols = [c for c in _df_ref.columns
+                              if c.lower() not in ("time", "index", "t", "step")]
+                    if len(_df_ref) == 1 and _vcols:
+                        ft = float(_df_ref[_vcols[0]].iloc[0])
+                except Exception:
+                    pass
+        float_targets.append(ft)
+
+    def _fmt(v, obj_idx=None):
+        if not isinstance(v, float):
+            return str(v)
+        base = f"{v:.5g}"
+        if obj_idx is not None and obj_idx < len(float_targets):
+            ft = float_targets[obj_idx]
+            if ft is not None and ft != 0 and np.isfinite(v):
+                base += f" ({v / ft * 100:.0f}%)"
+        return base
+
+    rows = []
+    for _, row in pareto_df.iterrows():
+        cells = []
+        row_vals = list(row)
+        for ci, v in enumerate(row_vals):
+            oi = ci - 1 if 1 <= ci <= len(value_cols) else None
+            cells.append(f"<td>{_fmt(v, oi)}</td>")
+        rows.append("<tr>" + "".join(cells) + "</tr>")
+
+    # Column headers with sub-label for objective columns
+    header_cols = (
         ["Trial"]
-        + [_objective_label(c, obj_names) for c in value_cols]
-        + [_clean_param_name(c) for c in param_cols]
+        + [f'{lbl}<br><small style="font-weight:normal;color:#aaa">err (% of target)</small>'
+           for lbl in obj_labels]
+        + param_labels_clean
     )
+    header = "".join(f"<th>{c}</th>" for c in header_cols)
 
-    def _fmt(v):
-        return f"{v:.5g}" if isinstance(v, float) else str(v)
+    # Target row
+    tgt_cells = ["<td><em>target</em></td>"]
+    for ft in float_targets:
+        ft_str = f"{ft:.4g}" if ft is not None else "—"
+        tgt_cells.append(
+            f"<td style='background:#e8f8e8;color:#27ae60'><strong>{ft_str}</strong></td>"
+        )
+    tgt_cells += ["<td>—</td>" for _ in param_labels_clean]
+    tgt_row = "<tr style='background:#e8f8e8'>" + "".join(tgt_cells) + "</tr>"
 
-    rows = ["<tr>" + "".join(f"<td>{_fmt(v)}</td>" for v in row) + "</tr>"
-            for _, row in pareto_df.iterrows()]
-    header = "".join(f"<th>{c}</th>" for c in pareto_df.columns)
     return (
         "<div style='overflow-x:auto'>"
         "<table border='1' cellpadding='4' style='border-collapse:collapse;font-size:0.85em'>"
-        f"<tr>{header}</tr>" + "\n".join(rows) + "</table></div>"
+        f"<tr>{header}</tr>"
+        f"{tgt_row}"
+        + "\n".join(rows) + "</table></div>"
     )
 
 
@@ -1513,7 +1705,7 @@ _HTML_TEMPLATE = """\
 
 <div class="section" id="best-trials">
 <h2>Best Trials \u2014 Pareto Front</h2>
-<p>Sorted by first objective (ascending = best). All values are <strong>error metrics</strong> \u2014 lower = better match to target.</p>
+<p>Sorted by first objective (ascending = best). All columns under objective headers show <strong>error&nbsp;(% of target)</strong> — the Optuna DB stores the error value (|sim − target|), not the raw simulation output; the raw value cannot be recovered from the DB alone. Lower error = better match to the biological target.</p>
 {best_trials_table}
 </div>
 
@@ -1725,7 +1917,7 @@ def run_analysis(
     print("[analyze] Layer 7 \u2014 parameter violin distributions \u2026")
     html_l7 = _layer7_violin_distributions(df, obj_names)
 
-    best_trials_table = _build_summary_table(df, obj_names)
+    best_trials_table = _build_summary_table(df, obj_names, yaml_objectives)
     objectives_block = _build_objectives_block(obj_names, yaml_objectives, best_values, directions_list)
 
     icon_b64 = _load_icon_b64()

@@ -1,6 +1,6 @@
 # Tutorial — Parameter Interpretability
 
-This tutorial explains how to use the **CellFoundry Interpretability Module** (`optimizer/analyze.py`)
+This tutorial explains how to use the **Cellfoundry Interpretability Module** (`optimizer/analyze.py`)
 to understand *why* a parameter combination works and *which parameters* matter most for each
 biological objective.
 
@@ -11,7 +11,7 @@ The interpretability module turns this raw data into a layered HTML report that 
 - Which parameters drive cell behaviour most?
 - Do any parameters interact non-linearly?
 - Are the biological objectives in conflict with each other?
-- What are the distinct mechanistic "regimes" within the Pareto front?
+- What are the distinct mechanistic "regimes" within the Pareto front (the set of best compromise solutions in a multi-objective optimisation problem)?
 - Where in parameter space do the best solutions live?
 
 > **Prerequisites** — a completed optimization study (`.db` file) and the Python packages below.
@@ -103,7 +103,7 @@ print(f"Report: {report_path.resolve()}")
 ## 4. Understanding the report — layer by layer
 
 The HTML report is divided into eight layers of increasing complexity, each addressing a different
-facet of the optimization results.  **All objective values in CellFoundry are error metrics —
+facet of the optimization results.  **All objective values in Cellfoundry are error metrics —
 lower values = better match to the biological target.**
 
 ### Layer 0 — Surrogate model importance
@@ -114,11 +114,27 @@ lower values = better match to the biological target.**
 randomly shuffles each parameter one at a time and measures how much the surrogate's predictive accuracy
 decreases.
 
-**Why permutation importance?**
-Unlike the raw feature importances from a tree model, permutation importance is *model-agnostic* and
-accounts for correlations between parameters — if two parameters are correlated, only the one that
-actually drives the objective will have high permutation importance; the redundant one will have low
-importance because shuffling it barely changes predictions (the correlated partner compensates).
+Raw feature importances from tree-based models indicate which variables were frequently or effectively used to split the data, but they are model-specific and can sometimes be misleading, especially when parameters are correlated or have different value ranges. In contrast, permutation importance directly measures how much the model’s predictive performance worsens when the values of one parameter are randomly shuffled. Therefore, it answers a more practical question: *how much does the trained model actually rely on this parameter to make accurate predictions?*
+
+This is particularly useful when some parameters contain overlapping information. For example, if two parameters are strongly correlated, the model may rely mainly on one of them while treating the other as redundant. In that case, shuffling the truly useful parameter will strongly degrade model performance, while shuffling the redundant one may have little effect because the model can still recover similar information from the correlated parameter. However, permutation importance should still be interpreted carefully: when two correlated parameters are both used interchangeably by the model, their individual importance values may be underestimated. For this reason, permutation importance should be understood as a measure of model reliance, rather than definitive causal importance.
+
+### Simple example
+
+Imagine a model trained to predict tumour organoid growth from several simulation parameters. Two of these parameters are:
+
+- `A`: oxygen diffusion coefficient in the extracellular matrix
+- `B`: average oxygen concentration inside the organoid
+
+These two parameters are correlated: if oxygen diffuses more efficiently through the matrix, the average oxygen concentration inside the organoid will often be higher.
+
+Suppose the model learns that organoid growth is mainly determined by the average internal oxygen concentration, `B`, because this is the quantity most directly related to cell survival and proliferation.
+
+If we compute permutation importance:
+
+- When `B` is shuffled, the relationship between oxygen availability and growth is disrupted. The model’s predictions become much worse, so `B` receives high permutation importance.
+- When `A` is shuffled, the model may still predict growth reasonably well because `B` still contains the oxygen information it needs. Therefore, `A` receives lower permutation importance.
+
+In this example, `A` is biologically relevant, but `B` is the parameter the trained model relies on more directly. Permutation importance helps reveal this distinction.
 
 **The cross-validated R² indicator:**
 The cross-validated R² (5-fold by default) tells you how trustworthy the surrogate is:
@@ -174,7 +190,6 @@ its actual effect on the objective is weak.  Always compare MDI against fANOVA t
 
 The same fANOVA/MDI analysis is repeated on *only* the Pareto-optimal trials.
 
-**Why this matters:**
 Global importance (Layer 1) is often dominated by the *feasibility boundary* — the transition
 between "simulation produces no output" and "simulation produces output".  For example, in a
 radial-glia study, a parameter that controls whether any RG cells form at all will score very
@@ -203,19 +218,16 @@ traced at constant objective values through this mesh.  The result is an approxi
 "objective landscape" map in two-parameter space.
 
 **Interpretation:**
-- **Curved iso-contours** → the optimal value of parameter A depends on the value of parameter B.
-  These parameters interact and cannot be optimised independently.  An experimental design that
+- **Curved iso-contours** → suggest coupling, nonlinear response, or parameter interaction. E.g. The optimal value of parameter A depends on the value of parameter B. These parameters interact and cannot be optimised independently.  An experimental design that
   varies only one at a time will miss the true optimum.
 - **Parallel straight iso-contours** → the two parameters act roughly independently (additive effects).
-- **Tightly clustered ★ Pareto markers** → the optimal joint range is well-localised.
-  Use the iso-contour density to estimate confidence in that region.
+- **Tightly clustered ★ Pareto markers** → suggest that the optimal joint range is well-localised in this two-parameter projection. Confidence in that region is stronger when the cluster is supported by many nearby trials, not only by the contour shape itself.
 
 #### Spearman correlation matrix
 
 The Spearman ρ matrix at the top of this section shows whether the optimizer tended to
 sample parameters together.  This reflects the sampling history, not necessarily a causal
-relationship — a positive ρ means the optimizer discovered that both parameters tend to be
-high (or both low) in the best regions.
+relationship. If the correlation is computed over all trials, a positive ρ means that high values of one parameter were often sampled together with high values of the other, or low values with low values. If the correlation is computed only over the best or Pareto trials, then a positive ρ suggests that both parameters tend to be jointly high, or jointly low, in high-performing regions.
 
 ---
 
@@ -237,15 +249,29 @@ prioritise, or accept a Pareto-optimal compromise.
 
 #### PCA of the Pareto front in objective space
 
-Principal Component Analysis of the Pareto front decomposes it into independent axes of variation.
-Each principal component (PC) is a direction along which the best solutions vary.
+In a multi-objective optimisation problem, the **Pareto front** is the set of best compromise solutions. A solution belongs to the Pareto front if no other solution improves one objective without worsening at least one other objective.
 
-- **PC1 with high explained variance** → most of the variability in the Pareto front lies along
-  a single axis, typically representing the dominant trade-off.
-- **The loading plot** shows which objectives have large (absolute) loadings on each PC.
-  Two objectives with loadings of *opposite sign* on the same PC are in direct tension:
-  moving along that axis improves one and worsens the other.
-- **Aligned objectives** (same-sign loadings on PC1) tend to co-vary and can be jointly satisfied.
+Principal Component Analysis of the Pareto front decomposes these best compromise solutions into orthogonal axes of variation in objective space. Each principal component (PC) represents a direction along which the Pareto-optimal solutions differ from each other.
+
+This helps identify the main structure of the trade-offs between objectives: whether the Pareto front is mainly organised by one dominant compromise, or whether several trade-off directions are needed to describe it.
+
+* **PC1 with high explained variance** means that most of the variability in the Pareto front lies along a single dominant axis, usually the main trade-off between objectives.
+* **PC2, PC3, etc.** describe additional, weaker trade-offs that are not captured by PC1.
+* **The loading plot** shows which objectives contribute most strongly to each PC. Objectives with large absolute loadings are the main drivers of that component.
+* **Objectives with opposite-sign loadings on the same PC** are in tension: moving along that PC tends to improve one objective while worsening the other.
+* **Objectives with same-sign loadings on the same PC** tend to co-vary, meaning that they are often improved or worsened together within the Pareto front.
+
+For example, imagine an optimisation problem where an organoid model is calibrated using three objectives:
+
+* `growth_error`: difference between simulated and experimental organoid growth
+* `shape_error`: difference between simulated and experimental organoid morphology
+* `population_distribution_error`: difference between simulated and experimental spatial distribution of cell populations
+
+If PC1 explains most of the variance and has a strong positive loading for `growth_error` but strong negative loadings for `shape_error` and `population_distribution_error`, this suggests a dominant trade-off between matching growth and matching spatial organisation. Moving in one direction along PC1 gives solutions with lower growth error but higher shape and population-distribution errors. Moving in the opposite direction gives solutions that better reproduce morphology and cell population organisation, but with a worse match in overall growth.
+
+If `shape_error` and `population_distribution_error` have loadings with the same sign, this suggests that these two objectives tend to improve or worsen together within the Pareto front. In this example, parameter sets that reproduce organoid morphology well also tend to reproduce the spatial organisation of cell populations well.
+
+*Note*: since these are formulated as errors, improving an objective means reducing its value.
 
 ---
 
