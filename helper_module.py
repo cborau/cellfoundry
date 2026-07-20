@@ -7,6 +7,27 @@ import warnings
 import numpy as np
 import matplotlib.pyplot as plt
 
+
+def derive_cell_cell_adhesion_range(cell_radius, radius_multiplier):
+    """Return the per-type adhesive-shell thickness derived from cell radius."""
+    if isinstance(cell_radius, (list, tuple)):
+        return [
+            radius_multiplier * radius
+            for radius in cell_radius
+        ]
+    return radius_multiplier * cell_radius
+
+
+def derive_max_focad_arm_length(cell_radius, radius_multiplier):
+    """Return the maximum focal-adhesion arm length for the largest cell type."""
+    max_radius = (
+        max(cell_radius)
+        if isinstance(cell_radius, (list, tuple))
+        else cell_radius
+    )
+    return radius_multiplier * max_radius
+
+
 def compute_expected_boundary_pos_from_corners(
     BOUNDARY_COORDS,
     BOUNDARY_DISP_RATES,
@@ -3702,7 +3723,10 @@ def recompute_derived_params(ns: dict, pinned: set | None = None) -> None:
         if "CELL_FNODE_EXCLUSION_DISTANCE" not in pinned:
             ns["CELL_FNODE_EXCLUSION_DISTANCE"] = list(cr) if _is_list(cr) else cr
         if "CELL_CELL_ADHESION_RANGE" not in pinned:
-            ns["CELL_CELL_ADHESION_RANGE"] = _map1(lambda r: 0.5 * r, cr)
+            ns["CELL_CELL_ADHESION_RANGE"] = derive_cell_cell_adhesion_range(
+                cr,
+                ns["CELL_CELL_ADHESION_RANGE_RADIUS_MULTIPLIER"],
+            )
         _max_cr = max(cr) if _is_list(cr) else cr
         if "MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION" not in pinned:
             ns["MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION"] = 3.0 * _max_cr
@@ -3785,9 +3809,11 @@ def recompute_derived_params(ns: dict, pinned: set | None = None) -> None:
     # --- MAX_FOCAD_ARM_LENGTH uses max CELL_RADIUS ---
     if "CELL_RADIUS" in ns:
         cr = ns["CELL_RADIUS"]
-        _max_cr = max(cr) if _is_list(cr) else cr
         if "MAX_FOCAD_ARM_LENGTH" not in pinned:
-            ns["MAX_FOCAD_ARM_LENGTH"] = 3 * _max_cr
+            ns["MAX_FOCAD_ARM_LENGTH"] = derive_max_focad_arm_length(
+                cr,
+                ns["MAX_FOCAD_ARM_LENGTH_RADIUS_MULTIPLIER"],
+            )
 
     # --- LUMEN derived ---
     if "LUMEN_RADIUS" in ns:
@@ -3823,7 +3849,11 @@ def recompute_derived_params(ns: dict, pinned: set | None = None) -> None:
             ns["MAX_EXPECTED_N_CELLS"] = n_cells + 1
 
 
-def apply_param_overrides(ns: dict, overrides: dict) -> None:
+def apply_param_overrides(
+    ns: dict,
+    overrides: dict,
+    pinned: set[str] | None = None,
+) -> set[str]:
     """Apply parameter overrides to a namespace dict and recompute derived values.
 
     Parameters
@@ -3836,6 +3866,14 @@ def apply_param_overrides(ns: dict, overrides: dict) -> None:
         *   Scalar override:  ``{"CELL_D_DUMPING": 0.5}``
         *   Full list override: ``{"CELL_RADIUS": [8.0, 9.0, 7.5]}``
         *   Element override:   ``{"CELL_RADIUS[1]": 9.0}``
+    pinned : set[str] or None
+        Base parameter names explicitly set by an earlier override layer.
+
+    Returns
+    -------
+    set[str]
+        The accumulated explicit parameter names. Pass this set to the next
+        override layer so later recomputation preserves earlier explicit values.
     """
     import re
     _idx_re = re.compile(r'^(\w+)\[(\d+)\]$')
@@ -3868,14 +3906,16 @@ def apply_param_overrides(ns: dict, overrides: dict) -> None:
         else:
             print(f"WARNING: override key '{key}' not found in model parameters, ignoring")
 
-    # Collect base parameter names that were explicitly overridden so that
-    # recompute_derived_params does not clobber them.  Element-wise keys
-    # like "CELL_CELL_DV_MAX[0]" are mapped to their base name.
-    pinned: set[str] = set()
+    # Accumulate base parameter names explicitly overridden in this and earlier
+    # precedence layers so recomputation cannot clobber them. Element-wise keys
+    # like "CELL_CELL_DV_MAX[0]" are mapped to their base name. Callers applying
+    # multiple layers should pass the returned set into the next call.
+    accumulated_pins = set(pinned or ())
     for key in overrides:
         m = _idx_re.match(key)
-        pinned.add(m.group(1) if m else key)
-    recompute_derived_params(ns, pinned=pinned)
+        accumulated_pins.add(m.group(1) if m else key)
+    recompute_derived_params(ns, pinned=accumulated_pins)
+    return accumulated_pins
 
 
 def load_param_overrides_from_cli(argv=None):

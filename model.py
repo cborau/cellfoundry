@@ -23,6 +23,7 @@ import pickle
 import matplotlib.pyplot as plt
 import check_hard_coded_values
 from helper_module import compute_expected_boundary_pos_from_corners, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, compute_u_ref_from_anchor_pos, getRadialOrientations, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary, apply_param_overrides, load_param_overrides_from_cli, loadCachedCellInitialization, generateCellInitializationData, recompute_derived_params, getRandomOrientationOnPlane, getCoordsOnPlane, getCellTypeList
+from helper_module import derive_cell_cell_adhesion_range, derive_max_focad_arm_length
 
 # TODO LIST:
 # A- Add cell guidance by fibre orientation (cells prefer to move along the main fibre orientation, which could be implemented by making them prefer to move towards areas where the fibre segments are more aligned in a certain direction)
@@ -252,11 +253,13 @@ BROWNIAN_MOTION_STRENGTH = [s * f for s, f in zip(CELL_SPEED_REF, BROWNIAN_MOTIO
 ROTATIONAL_DIFFUSION_RATE = [0.001, 0.001, 0.001]  # [rad^2/s] Rotational diffusion coefficient per cell type. Controls how fast cell orientation decorrelates (persistence time ~ 1/(2*D_rot)). Set > 0 for tortuous random-walk trajectories. e.g. D_rot = 0.001 gives a persistence time of ~500s. 
 CELL_CELL_REPULSION_K = [2.0 * k for k in CELL_K_ELAST]  # [nN/um] contact exclusion stiffness
 CELL_CELL_ADHESION_K = [0.2 * k for k in CELL_K_ELAST]  # [nN/um] weak cohesion in near-contact shell
-CELL_CELL_ADHESION_RANGE = [1.0 * r for r in CELL_RADIUS]  # [um] adhesive shell thickness outside contact
+CELL_CELL_ADHESION_RANGE_RADIUS_MULTIPLIER = 1.0  # Adhesive shell thickness as a multiple of each cell type's radius.
+CELL_CELL_ADHESION_RANGE = derive_cell_cell_adhesion_range(CELL_RADIUS, CELL_CELL_ADHESION_RANGE_RADIUS_MULTIPLIER)  # [um] adhesive shell thickness outside contact
 # Search radius for the cell-cell spatial message.
 # Must cover the farthest distance at which two cells can interact:
 #   contact distance (r1 + r2) + adhesion shell (max of CELL_CELL_ADHESION_RANGE)
-# Using 3 * max(CELL_RADIUS) provides ~ 2*(R + 0.5*R) with a small margin.
+# With the default adhesion range R, the worst-case equal-radius reach is
+# 2*R contact distance + R adhesive shell = 3*R.
 MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION = 3.0 * max(CELL_RADIUS)  # [um]
 CELL_CELL_DV_MAX = [0.5 * s for s in CELL_SPEED_REF]  # [um/s] cap for cell-cell interaction velocity contribution
 CELL_FNODE_REPULSION_K = [0.5 * k for k in CELL_K_ELAST]  # [nN/um] exclusion stiffness around fibre nodes
@@ -369,7 +372,8 @@ INCLUDE_FOCAL_ADHESIONS = False
 INIT_N_FOCAD_PER_CELL = 10 # initial number of focal adhesions per cell. 
 N_ANCHOR_POINTS = 50 # number of anchor points to which focal adhesions can attach on the nucleus surface. Their positions change with nucleus deformation
 MAX_SEARCH_RADIUS_FOCAD = 3.0 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE  # TEMP(debug attach): increased to strongly favor FA-node encounters. Reasonable baseline: 1.0 * FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE
-MAX_FOCAD_ARM_LENGTH = 4 * max(CELL_RADIUS)  # maximum length of the focal adhesion "arm". Uses max radius across cell types. WARNING: make sure this value is consistent with CELL_RADIUS and MAX_SEARCH_RADIUS_FOCAD to avoid unrealistic behavior.
+MAX_FOCAD_ARM_LENGTH_RADIUS_MULTIPLIER = 4.0  # Maximum focal-adhesion arm length as a multiple of the largest cell radius.
+MAX_FOCAD_ARM_LENGTH = derive_max_focad_arm_length(CELL_RADIUS, MAX_FOCAD_ARM_LENGTH_RADIUS_MULTIPLIER)  # maximum length of the focal adhesion "arm". Uses max radius across cell types. WARNING: make sure this value is consistent with CELL_RADIUS and MAX_SEARCH_RADIUS_FOCAD to avoid unrealistic behavior.
 # WARNING: rate values below assume global timestep ~ 1.0 s
 FOCAD_REST_LENGTH_0 = min(r - r/2 for r in CELL_RADIUS) # [um] Reference rest length (shortest across types); per-agent value uses actual cell-type radii at init.
 FOCAD_MIN_REST_LENGTH = FOCAD_REST_LENGTH_0 / 10.0 # [um] Minimum rest length to prevent collapse. 
@@ -473,6 +477,7 @@ DUROTAXIS_USE_STRESS = True   # True: use stress eigenpair, False: use strain ei
 # applied later in this file at the appropriate execution points.
 _ACTIVE_VARIANT = None
 _VARIANT_NAME = None
+_PARAM_OVERRIDE_PINS = set()
 for _vi, _varg in enumerate(_ORIGINAL_ARGV):
     if _varg == "--variant" and _vi + 1 < len(_ORIGINAL_ARGV):
         _VARIANT_NAME = _ORIGINAL_ARGV[_vi + 1]
@@ -504,7 +509,11 @@ if _VARIANT_NAME:
     _variant_params = getattr(_ACTIVE_VARIANT, "PARAMS", {})
     if _variant_params:
         print(f"[VARIANT] Applying {len(_variant_params)} parameter(s) from variant '{_VARIANT_NAME}'")
-        apply_param_overrides(globals(), _variant_params)
+        _PARAM_OVERRIDE_PINS = apply_param_overrides(
+            globals(),
+            _variant_params,
+            pinned=_PARAM_OVERRIDE_PINS,
+        )
     print(f"[VARIANT] Loaded variant '{_VARIANT_NAME}' from {_variant_path}")
 
 # Variant-gated feature flags.
@@ -527,7 +536,11 @@ print(f"[DIAG] _PARAM_OVERRIDES keys = {list(_PARAM_OVERRIDES.keys()) if _PARAM_
 print(f"[DIAG] _RESULT_DIR_OVERRIDE = {_RESULT_DIR_OVERRIDE}")
 if _PARAM_OVERRIDES:
     print(f"Applying {len(_PARAM_OVERRIDES)} parameter override(s): {list(_PARAM_OVERRIDES.keys())}")
-    apply_param_overrides(globals(), _PARAM_OVERRIDES)
+    _PARAM_OVERRIDE_PINS = apply_param_overrides(
+        globals(),
+        _PARAM_OVERRIDES,
+        pinned=_PARAM_OVERRIDE_PINS,
+    )
 if _RESULT_DIR_OVERRIDE:
     RES_PATH = pathlib.Path(_RESULT_DIR_OVERRIDE)
     RES_PATH.mkdir(parents=True, exist_ok=True)
@@ -713,6 +726,7 @@ if INCLUDE_CELLS:
         critical_error = True
     if INCLUDE_FOCAL_ADHESIONS and MAX_FOCAD_ARM_LENGTH < _max_cell_radius:
         print('ERROR: MAX_FOCAD_ARM_LENGTH: {0} must be bigger than max(CELL_RADIUS): {1}, as focal adhesions are initiated at the cell surface and should be able to grow away'.format(MAX_FOCAD_ARM_LENGTH, _max_cell_radius))
+        critical_error = True
     if INCLUDE_FOCAL_ADHESIONS and any(nmax < INIT_N_FOCAD_PER_CELL for nmax in FOCAD_BIRTH_N_MAX):
         print('ERROR: FOCAD_BIRTH_N_MAX: {0} must be >= INIT_N_FOCAD_PER_CELL: {1}'.format(FOCAD_BIRTH_N_MAX, INIT_N_FOCAD_PER_CELL))
         critical_error = True

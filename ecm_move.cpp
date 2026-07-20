@@ -196,13 +196,13 @@ FLAMEGPU_AGENT_FUNCTION(ecm_move, flamegpu::MessageNone, flamegpu::MessageNone) 
   }
 
   if ((clamped_by_pos == 0) && (clamped_by_neg == 0)) {
-    agent_vy += (agent_fy) * ECM_ETA;
+    agent_vy += (agent_fy) / ECM_ETA;
     agent_y += agent_vy * TIME_STEP;
     inc_pos_max = fmaxf(inc_pos_max, fabsf(agent_vy * TIME_STEP));
   }
   
   if ((clamped_bz_pos == 0) && (clamped_bz_neg == 0)) {
-    agent_vz += (agent_fz) * ECM_ETA;
+    agent_vz += (agent_fz) / ECM_ETA;
     agent_z += agent_vz * TIME_STEP;
     inc_pos_max = fmaxf(inc_pos_max, fabsf(agent_vz * TIME_STEP));
   }
