@@ -428,22 +428,23 @@ FLAMEGPU_AGENT_FUNCTION(fnode_move, flamegpu::MessageNone, flamegpu::MessageNone
       }
     }
   }
-  // Add forces from elastic boundaries (therefore, not clamped)
-  if (fabsf(agent_x - COORD_BOUNDARY_X_POS) > fabsf(agent_x - COORD_BOUNDARY_X_NEG)) { //if closer to xpos
-    f_bx_pos += agent_boundary_fx;// agent_boundary_fx will be 0 except for agents closer to boundaries
+  // Add forces from elastic boundaries (therefore, not clamped). Attribute
+  // each force using the pre-move position from which it was calculated.
+  if (fabsf(prev_agent_x - COORD_BOUNDARY_X_POS) < fabsf(prev_agent_x - COORD_BOUNDARY_X_NEG)) { // if closer to xpos
+    f_bx_pos += agent_boundary_fx; // agent_boundary_fx will be 0 except for agents closer to boundaries
   }
   else {
     f_bx_neg += agent_boundary_fx;
   }
 
-  if (fabsf(agent_y - COORD_BOUNDARY_Y_POS) > fabsf(agent_y - COORD_BOUNDARY_Y_NEG)) { //if closer to ypos
+  if (fabsf(prev_agent_y - COORD_BOUNDARY_Y_POS) < fabsf(prev_agent_y - COORD_BOUNDARY_Y_NEG)) { // if closer to ypos
     f_by_pos += agent_boundary_fy; // agent_boundary_fy will be 0 except for agents closer to boundaries
   }
   else {
     f_by_neg += agent_boundary_fy;
   }
 
-  if (fabsf(agent_z - COORD_BOUNDARY_Z_POS) > fabsf(agent_z - COORD_BOUNDARY_Z_NEG)) { //if closer to zpos
+  if (fabsf(prev_agent_z - COORD_BOUNDARY_Z_POS) < fabsf(prev_agent_z - COORD_BOUNDARY_Z_NEG)) { // if closer to zpos
     f_bz_pos += agent_boundary_fz; // agent_boundary_fz will be 0 except for agents closer to boundaries
   }
   else {

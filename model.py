@@ -2197,7 +2197,9 @@ class initAgentPopulations(pyflamegpu.HostFunction):
             count = -1
             focad_progress_interval = max(1, N_CELLS // 100)
             for i in range(N_CELLS):
-                cell_type_i = i % N_CELL_TYPES
+                # Reuse the generated assignment (which may be shuffled, e.g. for
+                # monolayers) so each adhesion inherits its actual parent type.
+                cell_type_i = cell_types[i]
                 focad_pos = getRandomCoordsAroundPoint(INIT_N_FOCAD_PER_CELL, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_RADIUS[cell_type_i], on_surface=True)
                 for j in range(INIT_N_FOCAD_PER_CELL):
                     count += 1
@@ -3050,7 +3052,10 @@ def _build_default_layers():
 
     # L1: Agent_Locations
     model.newLayer("L1_Agent_Locations").addAgentFunction("BCORNER", "bcorner_output_location_data")
-    if INCLUDE_DIFFUSION:
+    # The ECM message carries both concentration data and mechanical state.
+    # Moving-boundary ECM mechanics (and VASC advection) need it even when
+    # soluble-factor diffusion is disabled.
+    if INCLUDE_DIFFUSION or MOVING_BOUNDARIES:
         model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_grid_location_data")
     if INCLUDE_CELLS:
         model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_spatial_location_data")
@@ -3090,8 +3095,11 @@ def _build_default_layers():
             model.newLayer("L4_ECM_Dsp_Update").addAgentFunction("ECM", "ecm_Dsp_update")
         if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
             model.newLayer("L4_ECM_Dsp_Lumen_Update").addAgentFunction("ECM", "ecm_Dsp_lumen_update")
-        # L5_Diffusion
+    # ecm_ecm_interaction always computes ECM spring/damping forces; only its
+    # concentration update is internally conditional on INCLUDE_DIFFUSION.
+    if INCLUDE_DIFFUSION or MOVING_BOUNDARIES:
         model.newLayer("L5_Diffusion").addAgentFunction("ECM", "ecm_ecm_interaction")
+    if INCLUDE_DIFFUSION:
         # L6_Diffusion_Boundary (called twice to ensure concentration at boundaries is properly shown visually)
         model.newLayer("L6_Diffusion_Boundary").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
     if INCLUDE_FIBRE_NETWORK:
@@ -3144,6 +3152,9 @@ def _build_default_layers():
         model.newLayer("L8_BCORNER_Movement").addAgentFunction("BCORNER", "bcorner_move")
         model.newLayer("L8_ECM_Movement").addAgentFunction("ECM", "ecm_move")
         if INCLUDE_VASCULARIZATION:
+            # Refresh the ECM Array3D after ecm_move.  Otherwise vasc_move
+            # consumes the pre-force/pre-move velocity broadcast in L1.
+            model.newLayer("L8_ECM_Locations_Post_Move").addAgentFunction("ECM", "ecm_grid_location_data")
             model.newLayer("L8_VASC_Movement").addAgentFunction("VASC", "vasc_move")
 
 

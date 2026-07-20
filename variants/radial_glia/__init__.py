@@ -315,7 +315,8 @@ def configure_layers(model, g: dict) -> None:
 
     # --- L1: Agent locations ---
     model.newLayer("L1_Agent_Locations").addAgentFunction("BCORNER", "bcorner_output_location_data")
-    if INCLUDE_DIFFUSION:
+    # ECM messages carry mechanical state as well as concentrations.
+    if INCLUDE_DIFFUSION or MOVING_BOUNDARIES:
         model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_grid_location_data")
     if INCLUDE_CELLS:
         model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_spatial_location_data")
@@ -342,7 +343,9 @@ def configure_layers(model, g: dict) -> None:
         model.newLayer("L4_ECM_Csp_Update").addAgentFunction("ECM", "ecm_Csp_update")
         if HETEROGENEOUS_DIFFUSION and INCLUDE_FIBRE_NETWORK:
             model.newLayer("L4_ECM_Dsp_Update").addAgentFunction("ECM", "ecm_Dsp_update")
+    if INCLUDE_DIFFUSION or MOVING_BOUNDARIES:
         model.newLayer("L5_Diffusion").addAgentFunction("ECM", "ecm_ecm_interaction")
+    if INCLUDE_DIFFUSION:
         model.newLayer("L6_Diffusion_Boundary").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
 
     # --- L6b: RG polarity update (NEW) ---
