@@ -29,15 +29,16 @@ This is a work in active development with new features added progressively. Chec
 If you use this framework in your research, please cite the following paper:
 
 ```bibtex
-@article{Borau2026.04.22.720218,
-  author    = {Borau, C. and Chisholm, R. and Richmond, P.},
-  title     = {Cellfoundry: a GPU-accelerated, multi-physics ABM framework for cellular microenvironment and organoid-scale studies},
-  journal   = {bioRxiv},
-  year      = {2026},
-  doi       = {10.64898/2026.04.22.720218},
-  publisher = {Cold Spring Harbor Laboratory},
-  URL       = {https://www.biorxiv.org/content/early/2026/04/25/2026.04.22.720218},
-  eprint    = {https://www.biorxiv.org/content/early/2026/04/25/2026.04.22.720218.full.pdf},
+@article{BORAU2026101107,
+author = {C. Borau and R. Chisholm and P. Richmond},
+title = {Cellfoundry: A GPU-accelerated, multi-physics ABM framework for cellular microenvironment and organoid-scale studies},
+journal = {Array},
+volume = {31},
+pages = {101107},
+year = {2026},
+issn = {2590-0056},
+doi = {https://doi.org/10.1016/j.array.2026.101107},
+url = {https://www.sciencedirect.com/science/article/pii/S2590005626004303},
 }
 ```
 
