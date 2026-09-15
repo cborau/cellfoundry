@@ -1,0 +1,110 @@
+{
+  "_description": "Full-framework multiscale integration case with ParaView output; one CELL, no fibre network.",
+  "INCLUDE_DIFFUSION": true,
+  "TIME_STEP": 2.0,
+  "TIME_STEP_DIFFUSION": [
+    0.05,
+    0.3,
+    2.0
+  ],
+  "DIFFUSION_COEFF_MULTI": [
+    100.0,
+    5.0,
+    0.0
+  ],
+  "ECM_DEGRADATION_RATE_MULTI": [
+    0.01,
+    0.0,
+    0.2
+  ],
+  "INIT_ECM_CONCENTRATION_VALS": [
+    0.0,
+    0.0,
+    1.0
+  ],
+  "BOUNDARY_CONC_INIT_MULTI": [
+    [
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1
+    ],
+    [
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1
+    ],
+    [
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1
+    ]
+  ],
+  "BOUNDARY_CONC_FIXED_MULTI": [
+    [
+      1,
+      0,
+      -1,
+      -1,
+      -1,
+      -1
+    ],
+    [
+      0,
+      1,
+      -1,
+      -1,
+      -1,
+      -1
+    ],
+    [
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1
+    ]
+  ],
+  "STEPS": 5,
+  "INCLUDE_CELLS": true,
+  "INCLUDE_FIBRE_NETWORK": false,
+  "INCLUDE_FOCAL_ADHESIONS": false,
+  "INCLUDE_CELL_CYCLE": false,
+  "INCLUDE_CELL_FNODE_REPULSION": false,
+  "INCLUDE_NETWORK_REMODELING": false,
+  "INCLUDE_VASCULARIZATION": false,
+  "INCLUDE_VASCULAR_CELL_RECRUITMENT": false,
+  "INCLUDE_LUMEN": false,
+  "ORGANOID_ASSAY": false,
+  "MONOLAYER_ASSAY": false,
+  "HETEROGENEOUS_DIFFUSION": false,
+  "VISUALISATION": false,
+  "DEBUG_PRINTING": false,
+  "SAVE_PICKLE": false,
+  "SAVE_NO_ANCHOR_CELL_FILES": false,
+  "SAVE_DATA_TO_FILE": true,
+  "SHOW_PLOTS": false,
+  "N_CELLS": 1,
+  "INCLUDE_CHEMOTAXIS": true,
+  "INIT_CELL_CONSUMPTION_RATES": [
+    0.01,
+    0.02,
+    0.0
+  ],
+  "INIT_CELL_PRODUCTION_RATES": [
+    0.0,
+    0.0,
+    0.01
+  ],
+  "SAVE_EVERY_N_STEPS": 1,
+  "DIFFUSION_MIN_SPACING": null
+}

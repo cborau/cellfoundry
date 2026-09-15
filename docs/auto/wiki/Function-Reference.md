@@ -983,6 +983,101 @@ Generated automatically from Doxygen-style docblocks in `.cpp` files.
   - MessageSpatial3D record for nearby agent queries
 - - -
 
+## 📄 multiscale_ecm_diffusion_commit.cpp
+
+### 🔹 [multiscale_ecm_diffusion_commit](https://github.com/cborau/cellfoundry/blob/master/multiscale_ecm_diffusion_commit.cpp)
+**Type:** `agent`  
+**Source:** [Open multiscale_ecm_diffusion_commit.cpp](https://github.com/cborau/cellfoundry/blob/master/multiscale_ecm_diffusion_commit.cpp)
+
+- 🔸 **Purpose:** Copy final subcycled ECM concentrations into the shared macro property.
+- ⬇️ **Inputs:**
+  - Agent grid_lin_id and C_sp after every diffusion group has finished
+- ⬆️ **Outputs:**
+  - C_SP_MACRO updated for every species at this agent's grid position
+- 📝 **Notes:**
+  - Runs once per main timestep. This is the reverse direction to
+  - ecm_Csp_update, which imports cellular exchange from C_SP_MACRO into C_sp.
+- - -
+
+## 📄 multiscale_ecm_diffusion_output.cpp
+
+### 🔹 [multiscale_ecm_diffusion_output](https://github.com/cborau/cellfoundry/blob/master/multiscale_ecm_diffusion_output.cpp)
+**Type:** `agent`  
+**Source:** [Open multiscale_ecm_diffusion_output.cpp](https://github.com/cborau/cellfoundry/blob/master/multiscale_ecm_diffusion_output.cpp)
+
+- 🔸 **Purpose:** Publish the ECM state needed by the next explicit diffusion substep.
+- ⬇️ **Inputs:**
+  - Agent grid_i, grid_j, grid_k and spatial position x, y, z
+  - Agent concentration C_sp and local diffusion coefficient D_sp
+- ⬆️ **Outputs:**
+  - One MessageArray3D entry per ECM grid position
+- 📝 **Notes:**
+  - Run before each diffusion update so all agents read the same previous
+  - concentration snapshot. Mechanical variables are published separately
+  - by ecm_grid_location_data on the main simulation clock.
+- - -
+
+## 📄 multiscale_ecm_diffusion_prepare.cpp
+
+### 🔹 [multiscale_ecm_diffusion_prepare](https://github.com/cborau/cellfoundry/blob/master/multiscale_ecm_diffusion_prepare.cpp)
+**Type:** `agent`  
+**Source:** [Open multiscale_ecm_diffusion_prepare.cpp](https://github.com/cborau/cellfoundry/blob/master/multiscale_ecm_diffusion_prepare.cpp)
+
+- 🔸 **Purpose:** Cache boundary concentrations for the upcoming diffusion substeps and restore imposed concentrations after the main cellular exchange step.
+- ⬇️ **Inputs:**
+  - Agent x, y, z, C_sp and diffusion_vascular_floor
+  - COORDS_BOUNDARIES and ECM_BOUNDARY_INTERACTION_RADIUS
+  - BOUNDARY_CONC_INIT_MULTI and BOUNDARY_CONC_FIXED_MULTI macro properties
+- ⬆️ **Outputs:**
+  - Agent diffusion_boundary: prescribed concentration, or -1 if unconstrained
+  - Agent C_sp with vascular floors and prescribed boundary values applied
+- 📝 **Notes:**
+  - Boundary geometry and sources remain fixed during a diffusion submodel.
+  - Cache them once per main timestep. At intersecting faces the maximum
+  - prescribed concentration wins, matching ecm_boundary_concentration_conditions.
+- - -
+
+## 📄 multiscale_ecm_diffusion_step.cpp
+
+### 🔹 [multiscale_ecm_diffusion_step](https://github.com/cborau/cellfoundry/blob/master/multiscale_ecm_diffusion_step.cpp)
+**Type:** `agent`  
+**Source:** [Open multiscale_ecm_diffusion_step.cpp](https://github.com/cborau/cellfoundry/blob/master/multiscale_ecm_diffusion_step.cpp)
+
+- 🔸 **Purpose:** Advance the selected species by one fixed explicit diffusion timestep, followed by first-order degradation and prescribed concentration constraints.
+- ⬇️ **Inputs:**
+  - MessageArray3D: previous substep's ECM positions, C_sp and D_sp
+  - Agent position, grid indices, C_sp, D_sp and cached concentration constraints
+  - DIFFUSION_ACTIVE_SPECIES, TIME_STEP_DIFFUSION and ECM_AGENTS_PER_DIR
+  - HETEROGENEOUS_DIFFUSION, DIFFUSION_COEFF_MULTI, ECM_DEGRADATION_RATE_MULTI
+  - DIFFUSION_CFL_SAFETY
+- ⬆️ **Outputs:**
+  - Updated agent C_sp for the active species only
+  - diffusion_error: 0 = valid, 1 = invalid data, 2 = unsafe fixed timestep
+- 📝 **Notes:**
+  - The same ordinary C++ function is registered in the parent and submodels.
+  - Each model's environment selects its species; no source-code placeholders
+  - or per-group C++ function names are needed. Missing grid neighbors have
+  - zero flux. Symmetric pair coefficients conserve equal-reference-volume
+  - mass in the absence of degradation and imposed concentrations.
+- - -
+
+## 📄 multiscale_ecm_velocity_output.cpp
+
+### 🔹 [multiscale_ecm_velocity_output](https://github.com/cborau/cellfoundry/blob/master/multiscale_ecm_velocity_output.cpp)
+**Type:** `agent`  
+**Source:** [Open multiscale_ecm_velocity_output.cpp](https://github.com/cborau/cellfoundry/blob/master/multiscale_ecm_velocity_output.cpp)
+
+- 🔸 **Purpose:** Publish updated ECM velocities for vascular advection after ECM movement.
+- ⬇️ **Inputs:**
+  - Agent grid_i, grid_j, grid_k and velocity vx, vy, vz
+- ⬆️ **Outputs:**
+  - MessageArray3D entry containing vx, vy and vz for vasc_move
+- 📝 **Notes:**
+  - Runs once per main timestep, outside diffusion submodels. The separate
+  - message list avoids writing twice to the original ECM array message in
+  - one step, which raises ArrayMessageWriteConflict in the installed rc.5.
+- - -
+
 ## 📄 vasc_Csp_update.cpp
 
 ### 🔹 [vasc_Csp_update](https://github.com/cborau/cellfoundry/blob/master/vasc_Csp_update.cpp)

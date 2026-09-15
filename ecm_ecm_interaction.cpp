@@ -125,7 +125,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
   
   // Agent array variables
   const uint8_t N_SPECIES = 3; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
-  const uint32_t ECM_POPULATION_SIZE = 61206; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  const uint32_t ECM_POPULATION_SIZE = 1331; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
   auto C_SP_MACRO = FLAMEGPU->environment.getMacroProperty<float, N_SPECIES, ECM_POPULATION_SIZE>("C_SP_MACRO");
     
   // Agent properties in local register
@@ -146,6 +146,9 @@ FLAMEGPU_AGENT_FUNCTION(ecm_ecm_interaction, flamegpu::MessageArray3D, flamegpu:
   float agent_vz = FLAMEGPU->getVariable<float>("vz");
   // Agent concentration of species
   int INCLUDE_DIFFUSION = FLAMEGPU->environment.getProperty<int>("INCLUDE_DIFFUSION");
+  // Multiscale transport has its own layers/submodels. This parent call then
+  // performs mechanics only, exactly once per biological TIME_STEP.
+  if (FLAMEGPU->environment.getProperty<unsigned int>("MULTISCALE_DIFFUSION")) INCLUDE_DIFFUSION = 0;
   int HETEROGENEOUS_DIFFUSION = FLAMEGPU->environment.getProperty<int>("HETEROGENEOUS_DIFFUSION");
   int UNSTABLE_DIFFUSION = FLAMEGPU->environment.getProperty<int>("UNSTABLE_DIFFUSION");
   float D_sp[N_SPECIES] = {}; 

@@ -1,0 +1,15 @@
+Radial glia variant: required domain configuration
+
+Before using this variant, manually set the main model domain to:
+
+BOUNDARY_COORDS = [500.0, -500.0, 500.0, -500.0, 25.0, -25.0]
+
+These coordinates are in micrometers, ordered +X, -X, +Y, -Y, +Z, -Z.
+With N = 6, the derived ECM grid is [101, 101, 6] and
+ECM_POPULATION_SIZE is 61206. The radial glia C++ functions retain this size.
+
+After manually setting the domain, synchronize the shared C++ dimensions
+executing check_hard_coded_values.py and verify the active variant as well.
+The main model's automatic check excludes inactive variant folders.
+For a base-model-only manual check, use:
+  python check_hard_coded_values.py --exclude-dir variants

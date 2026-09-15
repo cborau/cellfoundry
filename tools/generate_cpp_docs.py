@@ -203,6 +203,7 @@ def render_wiki_home() -> str:
         "- [Tutorial: Parameter Optimization](Tutorial-Parameter-Optimization)\n"
         "- [Tutorial: Parameter Overriding](Tutorial-Parameter-Overriding)\n"
         "- [Tutorial: Model Variants](Tutorial-Model-Variants)\n"
+        "- [Tutorial: Multiscale Diffusion](Tutorial-Multiscale-Diffusion)\n"
         "- [Tutorial: Parameter Interpretability](Tutorial-Parameter-Interpretability)\n"
     )
 
@@ -439,6 +440,18 @@ def main() -> int:
     parser.add_argument("--github-repo", default=GITHUB_REPO, help="GitHub repository URL used in source links")
     args = parser.parse_args()
 
+    out_wiki_ref = ROOT / "docs" / "auto" / "wiki" / "Function-Reference.md"
+    out_wiki_home = ROOT / "docs" / "auto" / "wiki" / "Home.md"
+    out_wiki_what = ROOT / "docs" / "auto" / "wiki" / "What-is-Cellfoundry.md"
+    out_wiki_editor = ROOT / "docs" / "auto" / "wiki" / "Model-Editor.md"
+    out_wiki_configurator = ROOT / "docs" / "auto" / "wiki" / "Model-Configurator.md"
+    out_wiki_post = ROOT / "docs" / "auto" / "wiki" / "Post-Processing.md"
+    out_wiki_multiscale = ROOT / "docs" / "auto" / "wiki" / "Tutorial-Multiscale-Diffusion.md"
+    out_wiki_interpretability = ROOT / "docs" / "auto" / "wiki" / "Tutorial-Parameter-Interpretability.md"
+
+    if not out_wiki_multiscale.is_file():
+        parser.error(f"Missing maintained tutorial: {out_wiki_multiscale}")
+
     cpp_files = sorted([p for p in ROOT.glob("*.cpp") if p.is_file()])
     all_docs: Dict[str, List[FunctionDoc]] = {}
 
@@ -453,14 +466,8 @@ def main() -> int:
     wiki_editor_md = render_model_editor_page(github_repo, args.github_ref)
     wiki_configurator_md = render_model_configurator_page(github_repo, args.github_ref)
     wiki_post_md = render_post_processing_page(github_repo, args.github_ref)
+    wiki_multiscale_md = out_wiki_multiscale.read_text(encoding="utf-8")
     wiki_interpretability_md = render_interpretability_tutorial_page(github_repo, args.github_ref)
-
-    out_wiki_ref = ROOT / "docs" / "auto" / "wiki" / "Function-Reference.md"
-    out_wiki_home = ROOT / "docs" / "auto" / "wiki" / "Home.md"
-    out_wiki_what = ROOT / "docs" / "auto" / "wiki" / "What-is-Cellfoundry.md"
-    out_wiki_editor = ROOT / "docs" / "auto" / "wiki" / "Model-Editor.md"
-    out_wiki_configurator = ROOT / "docs" / "auto" / "wiki" / "Model-Configurator.md"
-    out_wiki_post = ROOT / "docs" / "auto" / "wiki" / "Post-Processing.md"
 
     outputs: Dict[pathlib.Path, str] = {
         out_wiki_ref: wiki_reference_md,
@@ -469,7 +476,8 @@ def main() -> int:
         out_wiki_editor: wiki_editor_md,
         out_wiki_configurator: wiki_configurator_md,
         out_wiki_post: wiki_post_md,
-        ROOT / "docs" / "auto" / "wiki" / "Tutorial-Parameter-Interpretability.md": wiki_interpretability_md,
+        out_wiki_multiscale: wiki_multiscale_md,
+        out_wiki_interpretability: wiki_interpretability_md,
     }
 
     changed = []

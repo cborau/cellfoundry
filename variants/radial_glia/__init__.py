@@ -313,6 +313,9 @@ def configure_layers(model, g: dict) -> None:
 
     # --- L0: VASC (skipped — INCLUDE_VASCULARIZATION = False) ---
 
+    if g.get("MULTISCALE_DIFFUSION"):
+        model.newLayer("L0_ECM_Diffusion_Boundary").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
+
     # --- L1: Agent locations ---
     model.newLayer("L1_Agent_Locations").addAgentFunction("BCORNER", "bcorner_output_location_data")
     # ECM messages carry mechanical state as well as concentrations.
@@ -322,7 +325,7 @@ def configure_layers(model, g: dict) -> None:
         model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_spatial_location_data")
 
     # --- L2: Boundary interactions ---
-    if INCLUDE_DIFFUSION:
+    if INCLUDE_DIFFUSION and not g.get("MULTISCALE_DIFFUSION"):
         model.newLayer("L2_ECM_Boundary_Interactions").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
 
     # --- L2b: Cell cycle (override enabled; runs before metabolism so newly born
@@ -345,6 +348,8 @@ def configure_layers(model, g: dict) -> None:
             model.newLayer("L4_ECM_Dsp_Update").addAgentFunction("ECM", "ecm_Dsp_update")
     if INCLUDE_DIFFUSION or MOVING_BOUNDARIES:
         model.newLayer("L5_Diffusion").addAgentFunction("ECM", "ecm_ecm_interaction")
+    if g.get("MULTISCALE_DIFFUSION"):
+        g["_add_multiscale_diffusion_layers"]()
     if INCLUDE_DIFFUSION:
         model.newLayer("L6_Diffusion_Boundary").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
 

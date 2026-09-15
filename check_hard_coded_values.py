@@ -206,11 +206,18 @@ def load_reference_values(model_path: str) -> ReferenceValues:
 # Plain-text scanning (all files)
 # -----------------------------
 
-def iter_project_files(root: str, exts: set, excluded_dirs: set) -> List[str]:
+def iter_project_files(root: str, exts: set, excluded_dirs: set, recursive: bool = True) -> List[str]:
     root = os.path.abspath(root)
+    if os.path.isfile(root):
+        return [root] if os.path.splitext(root)[1].lower() in exts else []
     files: List[str] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in excluded_dirs]
+        # Accept directory basenames (e.g. variants) or root-relative paths
+        # (e.g. variants/radial_glia) without excluding the active variant.
+        dirnames[:] = [d for d in dirnames if d not in excluded_dirs
+                       and os.path.relpath(os.path.join(dirpath, d), root).replace(os.sep, "/") not in excluded_dirs]
+        if not recursive:
+            dirnames.clear()
         for fn in filenames:
             _, ext = os.path.splitext(fn)
             if ext.lower() in exts:
@@ -274,11 +281,12 @@ def find_mismatches(
     excluded_files_abs: set,
     exts: set,
     excluded_dirs: set,
+    recursive: bool = True,
 ) -> List[Mismatch]:
     scan_root = os.path.abspath(scan_root)
 
     mismatches: List[Mismatch] = []
-    for path in iter_project_files(scan_root, exts=exts, excluded_dirs=excluded_dirs):
+    for path in iter_project_files(scan_root, exts=exts, excluded_dirs=excluded_dirs, recursive=recursive):
         abs_path = os.path.abspath(path)
         base = os.path.basename(abs_path)
 
@@ -354,13 +362,26 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--model-file", default="model.py")
     parser.add_argument(
         "--scan-root",
+        action="append",
         default=None,
-        help="Directory to scan. Default: the directory containing the model file.",
+        help="Directory or file to scan; repeatable. Default: the directory containing the model file.",
     )
     parser.add_argument(
         "--exts",
         default=",".join(sorted(DEFAULT_EXTS)),
         help="Comma-separated extensions to scan.",
+    )
+    parser.add_argument("--exclude-dir", action="append", default=[],
+                        help="Directory basename or scan-root-relative directory to skip; repeatable.")
+    parser.add_argument(
+        "--exclude-variants",
+        action="store_true",
+        help="Skip the variants directory and all its contents.",
+    )
+    parser.add_argument(
+        "--no-recursive",
+        action="store_true",
+        help="Scan only files directly in each scan root, without entering subdirectories.",
     )
     parser.add_argument(
         "--fail-on-mismatch",
@@ -391,7 +412,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("")
 
     # Default scan root: SAME folder as model.py (not parent)
-    scan_root = os.path.abspath(args.scan_root) if args.scan_root else os.path.dirname(ref.model_path)
+    scan_roots = list(dict.fromkeys(
+        os.path.abspath(path) for path in (args.scan_root or [os.path.dirname(ref.model_path)])
+    ))
+    report_root = scan_roots[0] if os.path.isdir(scan_roots[0]) else os.path.dirname(scan_roots[0])
 
     exts = {e.strip().lower() for e in args.exts.split(",") if e.strip()}
     expected = {
@@ -407,18 +431,27 @@ def main(argv: Optional[List[str]] = None) -> int:
     # - model.py itself
     # - the checker script itself
     excluded_files_abs = {os.path.abspath(ref.model_path), checker_file}
+    excluded_dirs = EXCLUDED_DIRS_DEFAULT | {p.replace("\\", "/").rstrip("/") for p in args.exclude_dir}
+    if args.exclude_variants:
+        excluded_dirs.add("variants")
 
-    print(f"Scanning (plain text) under: {scan_root}")
+    for scan_root in scan_roots:
+        print(f"Scanning (plain text) under: {scan_root}")
     print(f"Extensions: {', '.join(sorted(exts))}")
     print("")
 
-    mismatches = find_mismatches(
-        scan_root=scan_root,
-        expected=expected,
-        excluded_files_abs=excluded_files_abs,
-        exts=exts,
-        excluded_dirs=EXCLUDED_DIRS_DEFAULT,
-    )
+    mismatches = []
+    for scan_root in scan_roots:
+        mismatches.extend(find_mismatches(
+            scan_root=scan_root,
+            expected=expected,
+            excluded_files_abs=excluded_files_abs,
+            exts=exts,
+            excluded_dirs=excluded_dirs,
+            recursive=not args.no_recursive,
+        ))
+    # Overlapping scan roots can find the same assignment more than once.
+    mismatches = list(dict.fromkeys(mismatches))
 
     if not mismatches:
         print("No mismatches found (hard-coded integer assignments only).")
@@ -426,7 +459,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     print("Mismatches found:")
     for mm in sorted(mismatches, key=lambda x: (x.file_path, x.line, x.var_name)):
-        rel = os.path.relpath(mm.file_path, scan_root)
+        rel = os.path.relpath(mm.file_path, report_root)
         print(f"  - {rel}:{mm.line}: {mm.var_name} = {mm.found_value} (expected {mm.expected_value})")
         print(f"    {mm.line_text}")
 

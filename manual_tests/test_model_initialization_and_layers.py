@@ -65,6 +65,8 @@ def _run_default_layer_builder(**overrides):
         "INCLUDE_VASCULARIZATION": False,
         "INCLUDE_VASCULAR_CELL_RECRUITMENT": False,
         "INCLUDE_DIFFUSION": False,
+        "MULTISCALE_DIFFUSION": False,
+        "MONOLAYER_ASSAY": False,
         "MOVING_BOUNDARIES": False,
         "INCLUDE_CELLS": False,
         "INCLUDE_FOCAL_ADHESIONS": False,
@@ -76,6 +78,9 @@ def _run_default_layer_builder(**overrides):
         "HETEROGENEOUS_DIFFUSION": False,
         "INCLUDE_CELL_CELL_INTERACTION": False,
         "INCLUDE_CELL_FNODE_REPULSION": False,
+        "_add_multiscale_diffusion_layers": lambda: fake_model.events.append(
+            ("L5_Transport", "ECM", "subcycled_diffusion")
+        ),
     }
     namespace.update(overrides)
     exec(compile(isolated_module, str(MODEL_PATH), "exec"), namespace)
@@ -111,6 +116,9 @@ def _run_radial_glia_layer_builder(**overrides):
         "INCLUDE_CELL_FNODE_REPULSION": False,
         "INCLUDE_NETWORK_REMODELING": False,
         "HETEROGENEOUS_DIFFUSION": False,
+        "_add_multiscale_diffusion_layers": lambda: fake_model.events.append(
+            ("L5_Transport", "ECM", "subcycled_diffusion")
+        ),
     }
     variant_globals.update(overrides)
     namespace = {
@@ -123,6 +131,36 @@ def _run_radial_glia_layer_builder(**overrides):
 
 
 class TestECMLayerDependencies(unittest.TestCase):
+    def test_multiscale_keeps_cell_and_mechanical_operators_on_parent_clock(self):
+        events = _run_default_layer_builder(
+            INCLUDE_DIFFUSION=True, MULTISCALE_DIFFUSION=True,
+            INCLUDE_CELLS=True, MOVING_BOUNDARIES=True,
+        )
+        functions = [function for _, _, function in events]
+        for function in ("cell_ecm_interaction_metabolism", "ecm_ecm_interaction", "cell_move", "ecm_move"):
+            self.assertEqual(functions.count(function), 1)
+        self.assertLess(functions.index("ecm_boundary_concentration_conditions"), functions.index("ecm_grid_location_data"))
+        self.assertEqual(functions.count("ecm_grid_location_data"), 1)
+        self.assertLess(functions.index("cell_ecm_interaction_metabolism"), functions.index("ecm_Csp_update"))
+        self.assertLess(functions.index("ecm_Csp_update"), functions.index("subcycled_diffusion"))
+        self.assertLess(functions.index("subcycled_diffusion"), functions.index("cell_move"))
+
+    def test_existing_variant_uses_shared_multiscale_transport(self):
+        functions = [f for _, _, f in _run_radial_glia_layer_builder(
+            INCLUDE_DIFFUSION=True, MULTISCALE_DIFFUSION=True)]
+        self.assertEqual(functions.count("subcycled_diffusion"), 1)
+        self.assertEqual(functions.count("ecm_grid_location_data"), 1)
+        self.assertLess(functions.index("ecm_boundary_concentration_conditions"), functions.index("ecm_grid_location_data"))
+        self.assertLess(functions.index("ecm_Csp_update"), functions.index("subcycled_diffusion"))
+
+    def test_multiscale_vascular_motion_uses_distinct_array_message(self):
+        functions = [f for _, _, f in _run_default_layer_builder(
+            INCLUDE_DIFFUSION=True, MULTISCALE_DIFFUSION=True,
+            MOVING_BOUNDARIES=True, INCLUDE_VASCULARIZATION=True)]
+        self.assertEqual(functions.count("ecm_grid_location_data"), 1)
+        self.assertLess(functions.index("ecm_move"), functions.index("multiscale_ecm_velocity_output"))
+        self.assertLess(functions.index("multiscale_ecm_velocity_output"), functions.index("vasc_move"))
+
     def test_static_ecm_without_diffusion_skips_message_and_interaction(self):
         events = _run_default_layer_builder()
         functions = [function for _, _, function in events]
