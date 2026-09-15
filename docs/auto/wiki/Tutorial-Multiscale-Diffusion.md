@@ -219,6 +219,26 @@ Inspect a ParaView slice at Z = 0. Expect a nutrient dip near the cell, a spread
 
 For automatically generated `no_anchor_cells_t*.vtk` files, set both `SAVE_PICKLE` and `SAVE_NO_ANCHOR_CELL_FILES` to `true`, keeping `SAVE_DATA_TO_FILE` enabled.
 
+### Plot concentration traces and profiles
+
+For a quick check without ParaView, plot the ECM at the center and 20 µm along X:
+
+```powershell
+python postprocessing/plot_diffusion_results.py --results-dir result_files/multiscale_cell --config configs/multiscale_cell.json --datasets ecm --probe 0 0 0 --probe 20 0 0 --plots traces summary profiles --show
+```
+
+The script discovers all species and saves figures and CSVs in `result_files/multiscale_cell/diffusion_plots/`. Traces sample the nearest grid point at each saved step. Summary plots show the population mean with the minimum-to-maximum range shaded. Profiles compare the first and last saved steps along the nearest X grid line; both probes here select the same Y/Z line, so it is plotted once.
+
+To compare intracellular and extracellular concentrations, use `--datasets ecm cells --subplot-mode by_dataset`. Vascular data is available with `--datasets vascular` for runs that save it. The plotter excludes cell anchors and ECM corner markers automatically. Use `--species 0 1` to narrow the selection, and `--help` for tracking and step-selection options.
+
+For 2D concentration maps at selected times:
+
+```powershell
+python postprocessing/plot_diffusion_results.py --results-dir result_files/multiscale_cell --plots maps --planes z=0 --steps 1 10 25 50 --time-step 2 --show
+```
+
+Each species gets its own figure, with planes in rows and time in columns. Omit `--planes` for X=0, Y=0 and Z=0; omit `--steps` for all saved times, or use `--every 5` to read every fifth saved file. Select specific species with `--species 0 2`. Maps display one pixel per ECM agent by default; add `--smooth` for bilinear display interpolation. Color scales remain fixed across time. Long runs are paginated with six time columns per page; `--map-columns` sets that limit.
+
 ### Read the debug output
 
 With `DEBUG_PRINTING = true` and `DEBUG_PRINT_INTERVAL = 1`, the model reports every submodel call:

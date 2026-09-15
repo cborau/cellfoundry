@@ -29,7 +29,9 @@ The `postprocessing/` folder contains analysis and plotting utilities for simula
 - [`plot_boundary_results.py`](https://github.com/cborau/cellfoundry/blob/master/postprocessing/plot_boundary_results.py)
   - Loads boundary-related outputs from pickle and produces force/position/shear visualizations.
 - [`plot_diffusion_results.py`](https://github.com/cborau/cellfoundry/blob/master/postprocessing/plot_diffusion_results.py)
-  - Demonstrates time-series plotting for concentration variables from VTK-derived datasets.
+  - Discovers ECM, cell and vascular species and plots selectable probes, population summaries, ECM profiles and plane maps over time.
+  - Exports figures and CSVs; supports agent tracking, step selection and physical-time axes.
+  - See the [diffusion plotting guide](https://github.com/cborau/cellfoundry/blob/master/postprocessing/README.md) for commands and interpretation.
 
 ## Typical Outputs
 

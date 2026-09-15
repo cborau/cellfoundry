@@ -365,6 +365,7 @@ def render_post_processing_page(github_repo: str, github_ref: str) -> str:
     compare_linc = github_blob_url(github_repo, github_ref, "postprocessing/compare_linc_runs.py")
     plot_boundary = github_blob_url(github_repo, github_ref, "postprocessing/plot_boundary_results.py")
     plot_diffusion = github_blob_url(github_repo, github_ref, "postprocessing/plot_diffusion_results.py")
+    diffusion_guide = github_blob_url(github_repo, github_ref, "postprocessing/README.md")
     plot_migration = github_blob_url(github_repo, github_ref, "postprocessing/plot_migration_results.py")
     plot_migration_comp = github_blob_url(github_repo, github_ref, "postprocessing/plot_migration_comparison.py")
     plot_migration_diff = github_blob_url(github_repo, github_ref, "postprocessing/plot_migration_diff_profiles_comparison.py")
@@ -401,7 +402,9 @@ def render_post_processing_page(github_repo: str, github_ref: str) -> str:
         f"- [`plot_boundary_results.py`]({plot_boundary})\n"
         "  - Loads boundary-related outputs from pickle and produces force/position/shear visualizations.\n"
         f"- [`plot_diffusion_results.py`]({plot_diffusion})\n"
-        "  - Demonstrates time-series plotting for concentration variables from VTK-derived datasets.\n\n"
+        "  - Discovers ECM, cell and vascular species and plots selectable probes, population summaries, ECM profiles and plane maps over time.\n"
+        "  - Exports figures and CSVs; supports agent tracking, step selection and physical-time axes.\n"
+        f"  - See the [diffusion plotting guide]({diffusion_guide}) for commands and interpretation.\n\n"
         "## Typical Outputs\n\n"
         "- Time-series CSV files for metrics and polarity indicators.\n"
         "- Summary CSV files for run-level comparison.\n"
