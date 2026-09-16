@@ -69,8 +69,10 @@ Two common options:
 
 ```powershell
 python postprocessing/report_cell_population.py
-python postprocessing/plot_diffusion_results.py
+python postprocessing/plot_diffusion_results.py --results-dir result_files --show
 ```
+
+The diffusion plotter discovers available species and populations, saves figures and CSVs in `result_files/diffusion_plots/`, and filters anchor/corner markers automatically. Use `--help` for probe, species and plotting options.
 
 Note: cell files contain not only cell position and parameters, but also their anchor points, which increases size and complexity of the files. If you want a simplified point-only cell representation (without anchors), run:
 

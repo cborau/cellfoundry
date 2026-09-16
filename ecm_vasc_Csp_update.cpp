@@ -27,7 +27,7 @@ FLAMEGPU_AGENT_FUNCTION(ecm_vasc_Csp_update, flamegpu::MessageSpatial3D, flamegp
     float agent_z = FLAMEGPU->getVariable<float>("z");
 
     const uint8_t N_SPECIES = 3;           // WARNING: hard-coded, must match model.py
-    const uint32_t ECM_POPULATION_SIZE = 61206; // WARNING: hard-coded, must match model.py
+    const uint32_t ECM_POPULATION_SIZE = 1331; // WARNING: hard-coded, must match model.py
 
     int grid_lin_id = FLAMEGPU->getVariable<int>("grid_lin_id");
     auto C_SP_MACRO = FLAMEGPU->environment.getMacroProperty<float, N_SPECIES, ECM_POPULATION_SIZE>("C_SP_MACRO");
@@ -70,6 +70,13 @@ FLAMEGPU_AGENT_FUNCTION(ecm_vasc_Csp_update, flamegpu::MessageSpatial3D, flamegp
     }
 
 
+    if (FLAMEGPU->environment.getProperty<unsigned int>("MULTISCALE_DIFFUSION")) {
+        // Rebuild the source cache even when no live vessel remains nearby.
+        // Transport reapplies it internally without stepping any VASC agent.
+        for (int i = 0; i < N_SPECIES; ++i)
+            FLAMEGPU->setVariable<float, N_SPECIES>("diffusion_vascular_floor", i,
+                found_alive ? max_vasc_C_sp[i] : -1.0f);
+    }
     if (found_alive) {
         for (int i = 0; i < N_SPECIES; i++) {
             if (max_vasc_C_sp[i] > C_sp[i]) {

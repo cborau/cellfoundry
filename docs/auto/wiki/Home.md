@@ -15,4 +15,5 @@ This wiki content is generated from source code and project metadata.
 - [Tutorial: Parameter Optimization](Tutorial-Parameter-Optimization)
 - [Tutorial: Parameter Overriding](Tutorial-Parameter-Overriding)
 - [Tutorial: Model Variants](Tutorial-Model-Variants)
+- [Tutorial: Multiscale Diffusion](Tutorial-Multiscale-Diffusion)
 - [Tutorial: Parameter Interpretability](Tutorial-Parameter-Interpretability)

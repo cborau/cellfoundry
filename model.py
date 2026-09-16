@@ -22,6 +22,7 @@ import os
 import pickle
 import matplotlib.pyplot as plt
 import check_hard_coded_values
+from helper_module import expected_min_diffusion_spacing, validate_diffusion_parameters
 from helper_module import compute_expected_boundary_pos_from_corners, build_model_config_from_namespace, load_fibre_network, getRandomCoordsAroundPoint, compute_u_ref_from_anchor_pos, getRadialOrientations, build_save_data_context, save_data_to_file_step, print_fibre_calibration_summary, print_focad_birth_calibration_summary, apply_param_overrides, load_param_overrides_from_cli, loadCachedCellInitialization, generateCellInitializationData, recompute_derived_params, getRandomOrientationOnPlane, getCoordsOnPlane, getCellTypeList
 from helper_module import derive_cell_cell_adhesion_range, derive_max_focad_arm_length
 
@@ -46,7 +47,7 @@ SHOW_PLOTS = False  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
 SAVE_EVERY_N_STEPS = 20 # Affects both the .vtk files and the Dataframes storing boundary data
 SAVE_NO_ANCHOR_CELL_FILES = True  # If True, runs tools/remove_anchors_from_cell_vtks.py after the simulation to strip anchor points from cell VTK files. Requires SAVE_DATA_TO_FILE=True and SAVE_PICKLE=True.
-DEBUG_PRINT_INTERVAL = 0  # [steps] Print live debug stats every N steps (0 = disabled). Only active when INCLUDE_RG_VARIABLES is True.
+DEBUG_PRINT_INTERVAL = 0  # [steps] Periodic RG stats and multiscale diffusion diagnostics (0 = disabled; diffusion also requires DEBUG_PRINTING).
 
 CURR_PATH = pathlib.Path(__file__).resolve().parent
 RES_PATH = CURR_PATH / 'result_files'
@@ -59,7 +60,7 @@ print("Executing in ", CURR_PATH)
 # If domain is not cubical, N is asigned to the shorter dimension and more agents are added to the longer ones
 # NOTE: ECM agents are always present (mandatory) eventhough they are only used when INCLUDE_DIFFUSION is True. If there is no diffusion, set N to a small value to reduce computational cost.
 # ----------------------------------------------------------------------
-N = 6
+N = 11
 
 # Time simulation parameters
 # ----------------------------------------------------------------------
@@ -77,7 +78,7 @@ ECM_D_DUMPING = 0.04  # [nN·s/um]
 ECM_ETA = 0.15  # [nN·s/µm] Effective drag for overdamped FNODE motion (calibration parameter)
 
 #BOUNDARY_COORDS = [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]  # +X,-X,+Y,-Y,+Z,-Z
-BOUNDARY_COORDS = [500.0, -500.0, 500.0, -500.0, 25.0, -25.0]  # microdevice dimensions in um
+BOUNDARY_COORDS = [50.0, -50.0, 50.0, -50.0, 50.0, -50.0]  # microdevice dimensions in um
 #BOUNDARY_COORDS = [coord / 1000.0 for coord in BOUNDARY_COORDS] # in mm
 BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
 BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[um/s]
@@ -201,6 +202,10 @@ N_SPECIES = 3
 # Use check_hard_coded_values.py to automatically update all c++ files using N_SPECIES
 # Use tools/resize_array_variables.py to automatically resize all per-species arrays.
 DIFFUSION_COEFF_MULTI = [5.0, 5.0, 5.0]  # diffusion coefficient in [um^2/s] per specie
+TIME_STEP_DIFFUSION = None  # [s] per-species maximum dt, e.g. [0.01, 0.1, 1.0]. None retains the legacy solver.
+DIFFUSION_MIN_SPACING = None  # [um] optional minimum neighbor distances for the run; None estimates them from boundary speeds and duration.
+DIFFUSION_CFL_SAFETY = 0.9  # explicit diffusion uses at most this fraction of its positivity limit
+DIFFUSION_MAX_SUBSTEPS = 1000000  # fail clearly if an explicit species becomes impractically expensive
 ECM_DEGRADATION_RATE_MULTI = [0.0, 0.0, 0.0]  # first-order ECM degradation (or decay) [1/s] per species (0 = no degradation)
 BOUNDARY_CONC_INIT_MULTI = [[2.5, 2.5, 2.5, 2.5, 2.5, 2.5],
                             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -588,10 +593,17 @@ ORGANOID_METRICS_OVER_TIME = pd.DataFrame()
 # ----------------------------------------------------------------------
 critical_error = False
 try:
+    # Check the model directory and the active variant, including Optuna runs.
     hard_coded_check_args = [
         "--model-file", str(CURR_PATH / "model.py"),
         "--scan-root", str(CURR_PATH),
+        "--no-recursive",
     ]
+    if _ACTIVE_VARIANT is not None:
+        # Package variants keep their kernels beside __init__.py. A legacy
+        # flat variant contributes only its own file, not its siblings.
+        variant_scan_root = _variant_path.parent if _variant_path.name == "__init__.py" else _variant_path
+        hard_coded_check_args.extend(["--scan-root", str(variant_scan_root)])
     if _OPTUNA_QUIET:
         hard_coded_check_args.append("--fail-on-mismatch")
 
@@ -675,8 +687,17 @@ else:
     N_VASC_NODES = 0
 
 UNSTABLE_DIFFUSION = False
+MULTISCALE_DIFFUSION = INCLUDE_DIFFUSION and TIME_STEP_DIFFUSION is not None
+DIFFUSION_GROUPS = ()
+if MULTISCALE_DIFFUSION:
+    DIFFUSION_GROUPS = validate_diffusion_parameters(globals())
+    DIFFUSION_MIN_SPACING_EFFECTIVE = (list(DIFFUSION_MIN_SPACING) if DIFFUSION_MIN_SPACING is not None
+                                       else expected_min_diffusion_spacing(globals()))
+    print(f"Diffusion minimum spacing for fixed clocks: {DIFFUSION_MIN_SPACING_EFFECTIVE} um")
+    for group in DIFFUSION_GROUPS:
+        print(f"Diffusion species {group.species}: {group.substeps} substeps x {group.dt:g} s per {TIME_STEP:g} s main step")
 # Check diffusion parameters
-if INCLUDE_DIFFUSION:
+if INCLUDE_DIFFUSION and not MULTISCALE_DIFFUSION:
     if (len(DIFFUSION_COEFF_MULTI) != N_SPECIES) or (len(BOUNDARY_CONC_INIT_MULTI) != N_SPECIES) or (
             len(BOUNDARY_CONC_FIXED_MULTI) != N_SPECIES):
         print('ERROR: you must define a diffusion coefficient and the boundary conditions for each species simulated')
@@ -779,6 +800,192 @@ if not _OPTUNA_QUIET:
 # +====================================================================+
 # | FLAMEGPU2 IMPLEMENTATION                                           |
 # +====================================================================+
+
+
+# Multiscale diffusion host functions and submodel construction
+
+class CheckDiffusionStability(pyflamegpu.HostFunction):
+    """Reject invalid geometry/data or an unsafe fixed diffusion timestep.
+
+    The agent function sets a named error code. Checking before the next
+    substep (or the final macro commit) prevents a failed update from being
+    accepted or exported. This check never changes the planned timestep.
+    """
+
+    def run(self, api):
+        error = api.agent("ECM").maxUInt("diffusion_error")
+        if error == 1:
+            raise ValueError("Multiscale diffusion encountered a non-finite concentration, "
+                             "invalid diffusion coefficient, or zero/invalid neighbor distance")
+        if error == 2:
+            raise ValueError("Multiscale diffusion exceeded the fixed CFL bound. "
+                             "Choose a smaller DIFFUSION_MIN_SPACING or TIME_STEP_DIFFUSION "
+                             "and restart; no timestep adaptation is performed.")
+
+
+class DiffusionSubmodelDebug(pyflamegpu.HostFunction):
+    """Report submodel calls and two ECM probes without logging every substep."""
+
+    def __init__(self, group_index, group, phase, dimensions, interval, time_step, log_cell=False):
+        super().__init__()
+        self.group_index = group_index
+        self.group = group
+        self.phase = phase
+        self.interval = interval
+        self.time_step = time_step
+        self.log_cell = log_cell
+        center = tuple(n // 2 for n in dimensions)
+        neighbor = (min(center[0] + 1, dimensions[0] - 1), center[1], center[2])
+        self.probes = {center: "center", neighbor: "+x neighbor"}
+
+    def run(self, api):
+        step = api.getStepCounter() + 1
+        if step != 1 and step % self.interval != 0:
+            return
+        print(f"[DIFFUSION] main step {step} | t={(step - 1) * self.time_step:g}.."
+              f"{step * self.time_step:g} s | submodel {self.group_index} {self.phase} | "
+              f"species={list(self.group.species)} | {self.group.substeps} x {self.group.dt:g} s")
+        for item in api.agent("ECM").getPopulationData():
+            grid = tuple(item.getVariableUInt8(f"grid_{axis}") for axis in "ijk")
+            if grid in self.probes:
+                xyz = tuple(item.getVariableFloat(axis) for axis in "xyz")
+                concentrations = ", ".join(f"{value:.6g}" for value in item.getVariableArrayFloat("C_sp"))
+                print(f"  ECM {self.probes[grid]} grid={grid} xyz={xyz} C_sp=[{concentrations}]")
+        if self.log_cell:
+            for item in api.agent("CELL").getPopulationData():
+                xyz = tuple(item.getVariableFloat(axis) for axis in "xyz")
+                concentrations = ", ".join(f"{value:.6g}" for value in item.getVariableArrayFloat("C_sp"))
+                print(f"  CELL id={item.getVariableInt('id')} xyz={xyz} C_sp=[{concentrations}]")
+                break  # One representative cell is enough for a debug sample.
+
+
+class ExitAfterDiffusionSubsteps(pyflamegpu.HostCondition):
+    """Validate each substep and exit after the fixed count planned at startup."""
+
+    def __init__(self, substeps):
+        super().__init__()
+        self.substeps = substeps
+        self.stability_check = CheckDiffusionStability()
+
+    def run(self, api):
+        self.stability_check.run(api)
+        # FLAMEGPU evaluates this before incrementing the local step counter.
+        # The counter resets each time the parent invokes this submodel.
+        completed_substeps = api.getStepCounter() + 1
+        return pyflamegpu.EXIT if completed_substeps >= self.substeps else pyflamegpu.CONTINUE
+
+
+def _new_diffusion_message(model, size, dimensions):
+    """Declare the position/concentration message used within a diffusion model."""
+    message = model.newMessageArray3D("multiscale_ecm_diffusion_message")
+    message.setDimensions(*dimensions)
+    for name in ("x", "y", "z"):
+        message.newVariableFloat(name)
+    for name in ("C_sp", "D_sp"):
+        message.newVariableArrayFloat(name, size)
+    return message
+
+
+def _register_multiscale_diffusion(model, ns):
+    """Register ordinary C++ functions and the fixed diffusion submodels.
+
+    ECM agent variables are declared with the main ECM schema below. Each
+    submodel maps the variables it uses. Its own DIFFUSION_ACTIVE_SPECIES
+    environment array selects its group; C++ source files are never rewritten.
+    """
+    size = ns["N_SPECIES"]
+    dimensions = ns["ECM_AGENTS_PER_DIR"]
+    groups = ns["DIFFUSION_GROUPS"]
+    env = model.Environment()
+    agent = model.Agent("ECM")
+    _new_diffusion_message(model, size, dimensions)
+
+    # Requested timesteps remain in the Python configuration. The environment
+    # contains the effective dt = TIME_STEP / substeps used for each species.
+    effective_timesteps = [0.0] * size
+    parent_active_species = [0] * size
+    for group in groups:
+        for species in group.species:
+            effective_timesteps[species] = group.dt
+            if group.substeps == 1:
+                parent_active_species[species] = 1
+    env.newPropertyArrayFloat("TIME_STEP_DIFFUSION", effective_timesteps)
+    env.newPropertyArrayUInt("DIFFUSION_ACTIVE_SPECIES", parent_active_species)
+    env.newPropertyFloat("DIFFUSION_CFL_SAFETY", ns["DIFFUSION_CFL_SAFETY"])
+
+    agent.newRTCFunctionFile("multiscale_ecm_diffusion_output", "multiscale_ecm_diffusion_output.cpp").setMessageOutput("multiscale_ecm_diffusion_message")
+    agent.newRTCFunctionFile("multiscale_ecm_diffusion_prepare", "multiscale_ecm_diffusion_prepare.cpp")
+    agent.newRTCFunctionFile("multiscale_ecm_diffusion_commit", "multiscale_ecm_diffusion_commit.cpp")
+    if any(parent_active_species):
+        agent.newRTCFunctionFile("multiscale_ecm_diffusion_step", "multiscale_ecm_diffusion_step.cpp").setMessageInput("multiscale_ecm_diffusion_message")
+
+    if ns.get("MOVING_BOUNDARIES") and ns.get("INCLUDE_VASCULARIZATION"):
+        velocity = model.newMessageArray3D("multiscale_ecm_velocity_message")
+        velocity.setDimensions(*dimensions)
+        for name in ("vx", "vy", "vz"):
+            velocity.newVariableFloat(name)
+        agent.newRTCFunctionFile("multiscale_ecm_velocity_output", "multiscale_ecm_velocity_output.cpp").setMessageOutput("multiscale_ecm_velocity_message")
+
+    nested = [group.substeps > 1 for group in groups]
+    submodels = []
+    keep_alive = []
+    debug_loggers = {}
+    debug_interval = int(ns.get("DEBUG_PRINT_INTERVAL", 0))
+    for group_index, group in enumerate(groups):
+        if group.substeps == 1:
+            submodels.append(None)
+            continue
+
+        sub = pyflamegpu.ModelDescription(f"multiscale_diffusion_group_{group_index}")
+        sub_env = sub.Environment()
+        active_species = [int(species in group.species) for species in range(size)]
+        # This selector belongs only to this submodel and is NOT mapped to the
+        # parent's selector (which enables only the species needing one step).
+        sub_env.newPropertyArrayUInt("DIFFUSION_ACTIVE_SPECIES", active_species)
+        sub_env.newPropertyArrayFloat("TIME_STEP_DIFFUSION", effective_timesteps)
+        sub_env.newPropertyArrayUInt("ECM_AGENTS_PER_DIR", dimensions)
+        sub_env.newPropertyArrayFloat("ECM_DEGRADATION_RATE_MULTI", ns["ECM_DEGRADATION_RATE_MULTI"])
+        sub_env.newPropertyUInt("HETEROGENEOUS_DIFFUSION", ns["HETEROGENEOUS_DIFFUSION"])
+        sub_env.newPropertyArrayFloat("DIFFUSION_COEFF_MULTI", ns["DIFFUSION_COEFF_MULTI"])
+        sub_env.newPropertyFloat("DIFFUSION_CFL_SAFETY", ns["DIFFUSION_CFL_SAFETY"])
+
+        sub_agent = sub.newAgent("ECM")
+        for name in ("x", "y", "z"):
+            sub_agent.newVariableFloat(name)
+        for name in ("grid_i", "grid_j", "grid_k"):
+            sub_agent.newVariableUInt8(name)
+        for name in ("C_sp", "D_sp"):
+            sub_agent.newVariableArrayFloat(name, size)
+        for name in ("diffusion_boundary", "diffusion_vascular_floor"):
+            sub_agent.newVariableArrayFloat(name, size, [-1.0] * size)
+        sub_agent.newVariableUInt("diffusion_error", 0)
+        _new_diffusion_message(sub, size, dimensions)
+        sub_agent.newRTCFunctionFile("multiscale_ecm_diffusion_output", "multiscale_ecm_diffusion_output.cpp").setMessageOutput("multiscale_ecm_diffusion_message")
+        sub_agent.newRTCFunctionFile("multiscale_ecm_diffusion_step", "multiscale_ecm_diffusion_step.cpp").setMessageInput("multiscale_ecm_diffusion_message")
+        sub.newLayer("Publish_Concentrations").addAgentFunction("ECM", "multiscale_ecm_diffusion_output")
+        sub.newLayer("Diffusion_Step").addAgentFunction("ECM", "multiscale_ecm_diffusion_step")
+        condition = ExitAfterDiffusionSubsteps(group.substeps)
+        sub.addExitCondition(condition)
+        binding = model.newSubModel(f"multiscale_diffusion_group_{group_index}", sub)
+        binding.bindAgent("ECM", "ECM", True, True)
+        for prop in ("TIME_STEP_DIFFUSION", "ECM_AGENTS_PER_DIR", "ECM_DEGRADATION_RATE_MULTI",
+                     "HETEROGENEOUS_DIFFUSION", "DIFFUSION_COEFF_MULTI", "DIFFUSION_CFL_SAFETY"):
+            binding.SubEnvironment().mapProperty(prop, prop)
+        submodels.append(binding)
+        keep_alive.extend((sub, condition, binding))
+        if ns.get("DEBUG_PRINTING", False) and debug_interval > 0:
+            log_cell = ns.get("INCLUDE_CELLS", False) and not debug_loggers
+            before = DiffusionSubmodelDebug(group_index, group, "START", dimensions,
+                                           debug_interval, ns["TIME_STEP"], log_cell=log_cell)
+            after = DiffusionSubmodelDebug(group_index, group, "END", dimensions,
+                                          debug_interval, ns["TIME_STEP"])
+            debug_loggers[group_index] = (before, after)
+            keep_alive.extend((before, after))
+
+    stability_check = CheckDiffusionStability()
+    keep_alive.append(stability_check)
+    return dict(groups=groups, nested=nested, submodels=submodels,
+                stability_check=stability_check, keep_alive=keep_alive, debug_loggers=debug_loggers)
 
 
 # ++==================================================================++
@@ -906,6 +1113,7 @@ env.newPropertyArrayUInt("ECM_AGENTS_PER_DIR", ECM_AGENTS_PER_DIR)
 env.newPropertyUInt("INCLUDE_DIFFUSION", INCLUDE_DIFFUSION)
 env.newPropertyUInt("HETEROGENEOUS_DIFFUSION", HETEROGENEOUS_DIFFUSION)
 env.newPropertyUInt("UNSTABLE_DIFFUSION", UNSTABLE_DIFFUSION)
+env.newPropertyUInt("MULTISCALE_DIFFUSION", MULTISCALE_DIFFUSION)
 if INCLUDE_FIBRE_NETWORK:
     env.newPropertyUInt("AVG_NETWORK_VOXEL_DENSITY", AVG_NETWORK_VOXEL_DENSITY)
 env.newPropertyArrayFloat("DIFFUSION_COEFF_MULTI", DIFFUSION_COEFF_MULTI)
@@ -1527,6 +1735,10 @@ ECM_agent.newVariableUInt8("grid_k", 0)
 ECM_agent.newVariableArrayFloat("D_sp", N_SPECIES) # diffusion coefficient of each species at the agent location (used for heterogeneous diffusion)
 ECM_agent.newVariableArrayFloat("C_sp", N_SPECIES) # species concentrations at this ECM node
 ECM_agent.newVariableArrayFloat("C_sp_sat", N_SPECIES) # saturation concentrations for each species
+if MULTISCALE_DIFFUSION:
+    ECM_agent.newVariableArrayFloat("diffusion_boundary", N_SPECIES, [-1.0] * N_SPECIES) # cached prescribed boundary concentration; -1 = none
+    ECM_agent.newVariableArrayFloat("diffusion_vascular_floor", N_SPECIES, [-1.0] * N_SPECIES) # cached vascular minimum concentration; -1 = none
+    ECM_agent.newVariableUInt("diffusion_error", 0) # 0 = valid, 1 = invalid data, 2 = unsafe fixed diffusion timestep
 ECM_agent.newVariableFloat("k_elast") # ECM spring stiffness [nN/um] (used only for smooth grid adapation if boundaries move)
 ECM_agent.newVariableFloat("d_dumping") # ECM damping coefficient [nN*s/um] (used only for smooth grid adapation if boundaries move)
 ECM_agent.newVariableFloat("vx") # ECM grid-point velocity [um/s] (used only for smooth grid adapation if boundaries move)
@@ -1551,6 +1763,8 @@ if INCLUDE_CELLS and (ORGANOID_ASSAY or MONOLAYER_ASSAY) and INCLUDE_LUMEN and H
     ECM_agent.newRTCFunctionFile("ecm_Dsp_lumen_update", ecm_Dsp_lumen_update_file).setMessageInput("lumen_spatial_location_message")
 if MOVING_BOUNDARIES:
     ECM_agent.newRTCFunctionFile("ecm_move", ecm_move_file)
+
+_DIFFUSION_ENGINE = _register_multiscale_diffusion(model, globals()) if MULTISCALE_DIFFUSION else None
 
 """
   CELL agent
@@ -1835,7 +2049,8 @@ if INCLUDE_VASCULARIZATION:
     VASC_agent.newRTCFunctionFile("vasc_Csp_update", vasc_Csp_update_file).setMessageInput("vasc_bucket_location_message")
     VASC_agent.newRTCFunctionFile("vasc_spatial_location_data", vasc_spatial_location_data_file).setMessageOutput("vasc_spatial_location_message")
     if MOVING_BOUNDARIES:
-        VASC_agent.newRTCFunctionFile("vasc_move", vasc_move_file).setMessageInput("ecm_grid_location_message")
+        VASC_agent.newRTCFunctionFile("vasc_move", vasc_move_file).setMessageInput(
+            "multiscale_ecm_velocity_message" if MULTISCALE_DIFFUSION else "ecm_grid_location_message")
     if INCLUDE_CELLS and INCLUDE_VASCULAR_CELL_RECRUITMENT:
         vasc_ecm_cell_spawn_fn = VASC_agent.newRTCFunctionFile("vasc_ecm_cell_spawn", vasc_ecm_cell_spawn_file)
         vasc_ecm_cell_spawn_fn.setAgentOutput(CELL_agent)
@@ -2307,6 +2522,10 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                     instance.setVariableArrayFloat("D_sp", DIFFUSION_COEFF_MULTI)
                     instance.setVariableArrayFloat("C_sp", INIT_ECM_CONCENTRATION_VALS)
                     instance.setVariableArrayFloat("C_sp_sat", INIT_ECM_SAT_CONCENTRATION_VALS)
+                    if MULTISCALE_DIFFUSION:
+                        instance.setVariableArrayFloat("diffusion_boundary", [-1.0] * N_SPECIES)
+                        instance.setVariableArrayFloat("diffusion_vascular_floor", [-1.0] * N_SPECIES)
+                        instance.setVariableUInt("diffusion_error", 0)
                     instance.setVariableUInt8("clamped_bx_pos", 0)
                     instance.setVariableUInt8("clamped_bx_neg", 0)
                     instance.setVariableUInt8("clamped_by_pos", 0)
@@ -2908,7 +3127,7 @@ class UpdateBoundaryConcentrationMulti(pyflamegpu.HostFunction):
     def run(self, FLAMEGPU):
         global BOUNDARY_CONC_INIT_MULTI, BOUNDARY_CONC_FIXED_MULTI
         stepCounter = FLAMEGPU.getStepCounter() + 1
-        if stepCounter == 2:  # after first step BOUNDARY_CONC_INIT_MULTI is removed (set to -1.0) and BOUNDARY_CONC_FIXED_MULTI prevails
+        if stepCounter == (1 if MULTISCALE_DIFFUSION else 2):  # new solver holds initial BCs for exactly one parent interval
             print("====== CONCENTRATION MULTI BOUNDARY CONDITIONS SET  ======")
             print("Initial concentration boundary conditions [+X,-X,+Y,-Y,+Z,-Z]: ", BOUNDARY_CONC_INIT_MULTI)
             print("Fixed concentration boundary conditions [+X,-X,+Y,-Y,+Z,-Z]: ", BOUNDARY_CONC_FIXED_MULTI)
@@ -3039,6 +3258,27 @@ if INCLUDE_FOCAL_ADHESIONS:
   relevant portion of the block manually.  See Tutorial-Model-Variants.md.
 """
 
+def _add_multiscale_diffusion_layers():
+    """Schedule fixed diffusion groups after cellular exchange and D_sp updates."""
+    engine = _DIFFUSION_ENGINE
+    model.newLayer("L5_Diffusion_Prepare").addAgentFunction("ECM", "multiscale_ecm_diffusion_prepare")
+    model.newLayer("L5_Diffusion_Publish").addAgentFunction("ECM", "multiscale_ecm_diffusion_output")
+    for group_index, group in enumerate(engine["groups"]):
+        if group.substeps > 1:
+            loggers = engine.get("debug_loggers", {}).get(group_index)
+            if loggers:
+                model.newLayer(f"L5_Diffusion_Debug_Start_{group_index}").addHostFunction(loggers[0])
+            model.newLayer(f"L5_Diffusion_Group_{group_index}").addSubModel(engine["submodels"][group_index])
+            if loggers:
+                model.newLayer(f"L5_Diffusion_Debug_End_{group_index}").addHostFunction(loggers[1])
+        else:
+            # Groups are formed by substep count, so there is at most one
+            # single-step group. Independent species share this input snapshot.
+            model.newLayer(f"L5_Diffusion_Group_{group_index}").addAgentFunction("ECM", "multiscale_ecm_diffusion_step")
+            model.newLayer("L5_Diffusion_Check").addHostFunction(engine["stability_check"])
+    model.newLayer("L5_Diffusion_Commit").addAgentFunction("ECM", "multiscale_ecm_diffusion_commit")
+
+
 def _build_default_layers():
     # L0: VASC concentration update — runs BEFORE L1 so the ECM grid message
     # (broadcast in L1) already reflects the VASC-imposed concentration floor.
@@ -3050,6 +3290,10 @@ def _build_default_layers():
         if INCLUDE_CELLS and INCLUDE_VASCULAR_CELL_RECRUITMENT:
             model.newLayer("L0_VASC_Cell_Spawn").addAgentFunction("VASC", "vasc_ecm_cell_spawn")
 
+    if MULTISCALE_DIFFUSION:
+        # Array3D producers append within a parent step, so pin before the one
+        # L1 broadcast instead of attempting to overwrite the same message.
+        model.newLayer("L0_ECM_Diffusion_Boundary").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
     # L1: Agent_Locations
     model.newLayer("L1_Agent_Locations").addAgentFunction("BCORNER", "bcorner_output_location_data")
     # The ECM message carries both concentration data and mechanical state.
@@ -3061,7 +3305,7 @@ def _build_default_layers():
         model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_spatial_location_data")
         if INCLUDE_FOCAL_ADHESIONS:
             model.newLayer("L1_CELL_Locations_2").addAgentFunction("CELL", "cell_bucket_location_data")  # these functions share data of the same agent, so must be in separate layers
-    if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+    if INCLUDE_CELLS and (ORGANOID_ASSAY or MONOLAYER_ASSAY) and INCLUDE_LUMEN:
         model.newLayer("L1_LUMEN_Locations").addAgentFunction("LUMEN", "lumen_spatial_location_data")
     if INCLUDE_FIBRE_NETWORK:
         model.newLayer("L1_FNODE_Locations_1").addAgentFunction("FNODE", "fnode_spatial_location_data")
@@ -3069,7 +3313,7 @@ def _build_default_layers():
         model.newLayer("L1_FNODE_Locations_2").addAgentFunction("FNODE", "fnode_bucket_location_data")
 
     # L2: Boundary_Interactions
-    if INCLUDE_DIFFUSION:
+    if INCLUDE_DIFFUSION and not MULTISCALE_DIFFUSION:
         model.newLayer("L2_ECM_Boundary_Interactions").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
     if INCLUDE_FIBRE_NETWORK:
         model.newLayer("L2_FNODE_Boundary_Interactions").addAgentFunction("FNODE", "fnode_boundary_interaction")
@@ -3093,12 +3337,14 @@ def _build_default_layers():
         model.newLayer("L4_ECM_Csp_Update").addAgentFunction("ECM", "ecm_Csp_update")
         if HETEROGENEOUS_DIFFUSION and INCLUDE_FIBRE_NETWORK:
             model.newLayer("L4_ECM_Dsp_Update").addAgentFunction("ECM", "ecm_Dsp_update")
-        if INCLUDE_CELLS and ORGANOID_ASSAY and INCLUDE_LUMEN:
+        if INCLUDE_CELLS and (ORGANOID_ASSAY or MONOLAYER_ASSAY) and INCLUDE_LUMEN and HETEROGENEOUS_DIFFUSION:
             model.newLayer("L4_ECM_Dsp_Lumen_Update").addAgentFunction("ECM", "ecm_Dsp_lumen_update")
-    # ecm_ecm_interaction always computes ECM spring/damping forces; only its
-    # concentration update is internally conditional on INCLUDE_DIFFUSION.
+    # ECM spring/damping forces run once on the parent clock. In compatibility
+    # mode this function also performs the historical concentration update.
     if INCLUDE_DIFFUSION or MOVING_BOUNDARIES:
         model.newLayer("L5_Diffusion").addAgentFunction("ECM", "ecm_ecm_interaction")
+    if MULTISCALE_DIFFUSION:
+        _add_multiscale_diffusion_layers()
     if INCLUDE_DIFFUSION:
         # L6_Diffusion_Boundary (called twice to ensure concentration at boundaries is properly shown visually)
         model.newLayer("L6_Diffusion_Boundary").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
@@ -3154,7 +3400,8 @@ def _build_default_layers():
         if INCLUDE_VASCULARIZATION:
             # Refresh the ECM Array3D after ecm_move.  Otherwise vasc_move
             # consumes the pre-force/pre-move velocity broadcast in L1.
-            model.newLayer("L8_ECM_Locations_Post_Move").addAgentFunction("ECM", "ecm_grid_location_data")
+            model.newLayer("L8_ECM_Locations_Post_Move").addAgentFunction(
+                "ECM", "multiscale_ecm_velocity_output" if MULTISCALE_DIFFUSION else "ecm_grid_location_data")
             model.newLayer("L8_VASC_Movement").addAgentFunction("VASC", "vasc_move")
 
 
@@ -3168,6 +3415,9 @@ if _ACTIVE_VARIANT is not None and hasattr(_ACTIVE_VARIANT, "configure_layers"):
     _ACTIVE_VARIANT.configure_layers(model, globals())
 else:
     _build_default_layers()
+
+if MULTISCALE_DIFFUSION and not model.hasLayer("L5_Diffusion_Commit"):
+    raise ValueError("A custom configure_layers() must call g['_add_multiscale_diffusion_layers']() after C_sp/D_sp preparation")
 
 # ++==================================================================++
 # ++ Logging                                                           |
@@ -3295,6 +3545,8 @@ if ENSEMBLE:
     ensemble.Config().out_format = "json"
     ensemble.Config().concurrent_runs = 1  # This is concurrent runs per device, higher values may improve performance for "small" models
     ensemble.Config().timing = False
+    if DEBUG_PRINTING:
+        ensemble.Config().verbosity = pyflamegpu.Verbosity_Verbose
     ensemble.Config().error_level = pyflamegpu.CUDAEnsembleConfig.Fast  # Kills the ensemble as soon as the first error is detected
 
     # Pass any logging configs to the CUDAEnsemble
@@ -3305,6 +3557,8 @@ if ENSEMBLE:
 else:
     simulation = pyflamegpu.CUDASimulation(model)
     simulation.SimulationConfig().steps = STEPS
+    if DEBUG_PRINTING:
+        simulation.SimulationConfig().verbosity = pyflamegpu.Verbosity_Verbose
     simulation.setStepLog(step_log)
     simulation.setExitLog(logging_config)
 
@@ -3383,6 +3637,10 @@ print(f"[DIAG] About to simulate: ENSEMBLE={ENSEMBLE}, STEPS={STEPS}")
 _sim_start_time = time.time()
 PYTHON_SETUP_TIME = _sim_start_time - start_time
 print(f"--- PYTHON SETUP TIME: {PYTHON_SETUP_TIME:.6f} seconds ---")
+if DEBUG_PRINTING:
+    print("[DIAG] Preparing GPU kernels (runtime compilation or cache loading). "
+          "Enabling features such as vascularization can require new compilation; "
+          "agent initialization and main-step output follow this stage.", flush=True)
 if ENSEMBLE:
     # Execute the ensemble using the specified RunPlans
     errs = ensemble.simulate(ensemble_runs)

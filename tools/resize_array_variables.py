@@ -172,6 +172,7 @@ PER_CELL_TYPE_VARS: frozenset[str] = frozenset({
 # Variables whose Python length == N_SPECIES (simple 1-D lists)
 PER_SPECIES_VARS: frozenset[str] = frozenset({
     "DIFFUSION_COEFF_MULTI",
+    "TIME_STEP_DIFFUSION",
     "CHEMOTAXIS_SENSITIVITY",
     "CHEMOKINESIS_SENSITIVITY",
     "CHEMOKINESIS_SIGNAL_SAT",

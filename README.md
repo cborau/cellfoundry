@@ -10,6 +10,8 @@ The framework integrates interacting cells, extracellular matrix (ECM), fibre ne
 
 Cellfoundry is modular, extensible, and suitable for large-scale parameter studies, digital twin development, and mechanobiology-driven hypothesis testing.
 
+For species-specific diffusion clocks, configuration examples, and a reproducible GPU numerical validation, see [Multiscale diffusion](docs/auto/wiki/Tutorial-Multiscale-Diffusion.md).
+
 <p align="center">
   <img src="assets/SuppVideo2_Migration_Focad.gif" alt="Cell migration showcase">
 </p>

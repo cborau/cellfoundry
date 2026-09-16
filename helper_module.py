@@ -3,6 +3,9 @@ import os
 import pickle
 import time
 import warnings
+from dataclasses import dataclass
+from pathlib import Path
+import re
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -1340,7 +1343,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
     include_network_remodeling = config["INCLUDE_NETWORK_REMODELING"]
     include_lumen = config["INCLUDE_LUMEN"]
     # nucleus_t VTK is meaningful whenever nuclear deformation can occur
-    include_nucleus_vtk = (include_focal_adhesions
+    include_nucleus_vtk = include_cells and (include_focal_adhesions
                            or include_cell_cell_interaction
                            or include_cell_fnode_repulsion
                            or include_lumen)
@@ -2703,6 +2706,12 @@ class ModelParameterConfig:
         heterogeneous_diffusion: bool = None,
         n_species: int = None,
         diffusion_coeff_multi: list = None,
+        ecm_degradation_rate_multi: list = None,
+        time_step_diffusion: list = None,
+        diffusion_min_spacing=None,
+        diffusion_cfl_safety: float = None,
+        diffusion_max_substeps: int = None,
+        diffusion_groups: list = None,
         boundary_conc_init_multi: list = None,
         boundary_conc_fixed_multi: list = None,
         init_ecm_concentration_vals: list = None,
@@ -2918,6 +2927,12 @@ class ModelParameterConfig:
         self.HETEROGENEOUS_DIFFUSION = heterogeneous_diffusion
         self.N_SPECIES = n_species
         self.DIFFUSION_COEFF_MULTI = diffusion_coeff_multi
+        self.ECM_DEGRADATION_RATE_MULTI = ecm_degradation_rate_multi
+        self.TIME_STEP_DIFFUSION = time_step_diffusion
+        self.DIFFUSION_MIN_SPACING = diffusion_min_spacing
+        self.DIFFUSION_CFL_SAFETY = diffusion_cfl_safety
+        self.DIFFUSION_MAX_SUBSTEPS = diffusion_max_substeps
+        self.DIFFUSION_GROUPS = diffusion_groups
         self.BOUNDARY_CONC_INIT_MULTI = boundary_conc_init_multi
         self.BOUNDARY_CONC_FIXED_MULTI = boundary_conc_fixed_multi
         self.INIT_ECM_CONCENTRATION_VALS = init_ecm_concentration_vals
@@ -3475,6 +3490,13 @@ def build_model_config_from_namespace(ns: dict) -> ModelParameterConfig:
         heterogeneous_diffusion=ns.get("HETEROGENEOUS_DIFFUSION"),
         n_species=ns.get("N_SPECIES"),
         diffusion_coeff_multi=ns.get("DIFFUSION_COEFF_MULTI"),
+        ecm_degradation_rate_multi=ns.get("ECM_DEGRADATION_RATE_MULTI"),
+        time_step_diffusion=ns.get("TIME_STEP_DIFFUSION"),
+        diffusion_min_spacing=ns.get("DIFFUSION_MIN_SPACING"),
+        diffusion_cfl_safety=ns.get("DIFFUSION_CFL_SAFETY"),
+        diffusion_max_substeps=ns.get("DIFFUSION_MAX_SUBSTEPS"),
+        diffusion_groups=[{"species": list(g.species), "substeps": g.substeps, "dt": g.dt}
+                          for g in ns.get("DIFFUSION_GROUPS", ())],
         boundary_conc_init_multi=ns.get("BOUNDARY_CONC_INIT_MULTI"),
         boundary_conc_fixed_multi=ns.get("BOUNDARY_CONC_FIXED_MULTI"),
         init_ecm_concentration_vals=ns.get("INIT_ECM_CONCENTRATION_VALS"),
@@ -4219,3 +4241,133 @@ def create_u_shaped_scalar_profile(
         scalar = np.where(depth <= local_reach, scalar, 0.0)
 
     return scalar.astype(dtype).ravel(order="C")
+
+
+# Fixed species diffusion clocks
+# GPU host functions, model construction, and layers remain in model.py.
+
+@dataclass(frozen=True)
+class DiffusionGroup:
+    species: tuple[int, ...]
+    substeps: int
+    dt: float
+
+
+def _nonnegative(values, size, name):
+    if not isinstance(values, (list, tuple)) or len(values) != size:
+        raise ValueError(f"{name} must contain {size} entries")
+    if any(isinstance(v, bool) or not isinstance(v, (int, float))
+           or not math.isfinite(v) or v < 0 for v in values):
+        raise ValueError(f"{name} entries must be finite and nonnegative")
+
+
+def substep_count(interval, limit, maximum=1000000):
+    """Round up, allowing only floating-point noise at integer ratios."""
+    ratio = interval / limit
+    if not math.isfinite(ratio) or ratio > maximum:
+        raise ValueError(f"Diffusion needs more than {maximum} substeps per main step")
+    nearest = round(ratio)
+    count = nearest if math.isclose(ratio, nearest, rel_tol=1e-12, abs_tol=1e-12) else math.ceil(ratio)
+    return max(1, count)
+
+
+def plan_diffusion(time_step, time_steps, coefficients, spacing, *,
+                   safety=0.9, max_substeps=1000000, coefficient_upper_bounds=None):
+    """Return groups with identical clocks using the anisotropic 3-D CFL bound.
+
+    dt <= safety / (2 D_max sum(1 / h_axis**2)).  The runtime also checks the
+    actual edge coefficients after heterogeneous/lumen updates and grid motion.
+    """
+    if not math.isfinite(time_step) or time_step <= 0:
+        raise ValueError("TIME_STEP must be positive and finite")
+    if not math.isfinite(safety) or not 0 < safety < 1:
+        raise ValueError("DIFFUSION_CFL_SAFETY must lie strictly between 0 and 1")
+    if isinstance(max_substeps, bool) or not isinstance(max_substeps, int) or not 1 <= max_substeps <= 2147483647:
+        raise ValueError("DIFFUSION_MAX_SUBSTEPS must be a positive int32")
+    size = len(coefficients)
+    if not size:
+        raise ValueError("At least one diffusing species is required")
+    _nonnegative(coefficients, size, "DIFFUSION_COEFF_MULTI")
+    _nonnegative(time_steps, size, "TIME_STEP_DIFFUSION")
+    if any(dt <= 0 or dt > time_step for dt in time_steps):
+        raise ValueError("TIME_STEP_DIFFUSION entries must satisfy 0 < dt <= TIME_STEP")
+    _nonnegative(spacing, 3, "Diffusion grid spacing")
+    if any(h <= 0 for h in spacing):
+        raise ValueError("Diffusion grid spacing must be positive")
+    bounds = coefficients if coefficient_upper_bounds is None else coefficient_upper_bounds
+    _nonnegative(bounds, size, "Diffusion coefficient upper bounds")
+    if any(b < d for b, d in zip(bounds, coefficients)):
+        raise ValueError("Diffusion coefficient upper bounds cannot be below base coefficients")
+    inverse_spacing = sum(1 / h**2 for h in spacing)
+    groups = {}
+    for species, (requested, diffusion) in enumerate(zip(time_steps, bounds)):
+        stable = safety / (2 * diffusion * inverse_spacing) if diffusion else math.inf
+        count = substep_count(time_step, min(requested, stable), max_substeps)
+        groups.setdefault(count, []).append(species)
+    return tuple(DiffusionGroup(tuple(indices), count, time_step / count)
+                 for count, indices in groups.items())
+
+
+def expected_min_diffusion_spacing(ns):
+    """Estimate minimum per-axis spacing from prescribed normal boundary motion.
+
+    For each axis, width(t) = width(0) + (v_plus - v_minus)*t. Constant normal
+    speeds make the minimum occur at an endpoint of [0, STEPS*TIME_STEP].
+    Dividing by the number of grid intervals assumes uniform compression.
+    Tangential shear cannot shorten the normal projection of an affine grid
+    edge. Local spring-driven compression may differ, so the device CFL check
+    remains necessary. An explicit DIFFUSION_MIN_SPACING can be more conservative.
+    """
+    dimensions = ns["ECM_AGENTS_PER_DIR"]
+    initial_widths = [ns[f"L0_{axis}"] for axis in "xyz"]
+    rates = ns.get("BOUNDARY_DISP_RATES", [0.0] * 6)
+    if len(rates) != 6 or any(not math.isfinite(rate) for rate in rates):
+        raise ValueError("BOUNDARY_DISP_RATES must contain six finite speeds")
+    duration = ns.get("STEPS", 0) * ns["TIME_STEP"]
+    if not math.isfinite(duration) or duration < 0:
+        raise ValueError("Simulation duration must be finite and nonnegative")
+    minimum_spacing = []
+    for axis, (width, count) in enumerate(zip(initial_widths, dimensions)):
+        final_width = width + (rates[2 * axis] - rates[2 * axis + 1]) * duration
+        if final_width <= 0:
+            raise ValueError(f"Predicted boundary crossing on axis {'xyz'[axis]}: "
+                             "normal boundary speeds close the domain before the run ends")
+        minimum_spacing.append(min(width, final_width) / (count - 1))
+    return minimum_spacing
+
+
+def validate_diffusion_parameters(ns):
+    """Validate after JSON/variant overrides, before constructing GPU schemas."""
+    size = ns["N_SPECIES"]
+    for name in ("DIFFUSION_COEFF_MULTI", "ECM_DEGRADATION_RATE_MULTI",
+                 "INIT_ECM_CONCENTRATION_VALS", "INIT_ECM_SAT_CONCENTRATION_VALS"):
+        _nonnegative(ns[name], size, name)
+    for name in ("BOUNDARY_CONC_INIT_MULTI", "BOUNDARY_CONC_FIXED_MULTI"):
+        rows = ns[name]
+        if len(rows) != size or any(len(row) != 6 for row in rows):
+            raise ValueError(f"{name} must have shape [N_SPECIES][6]")
+        if any(not math.isfinite(v) or (v < 0 and v != -1) for row in rows for v in row):
+            raise ValueError(f"{name} entries must be -1 (no flux) or finite and nonnegative")
+    bounds = list(ns["DIFFUSION_COEFF_MULTI"])
+    if ns.get("INCLUDE_LUMEN"):
+        lumen = ns["LUMEN_DIFFUSION_COEFF_MULTI"]
+        _nonnegative(lumen, size, "LUMEN_DIFFUSION_COEFF_MULTI")
+        bounds = [max(a, b) for a, b in zip(bounds, lumen)]
+    dimensions = ns["ECM_AGENTS_PER_DIR"]
+    if any(n < 2 or n > 256 for n in dimensions):
+        raise ValueError("ECM grid dimensions must be 2..256 (grid indices are uint8)")
+    spacing = [ns[f"L0_{axis}"] / (n - 1) for axis, n in zip("xyz", dimensions)]
+    minimum_spacing = ns.get("DIFFUSION_MIN_SPACING")
+    if minimum_spacing is None:
+        minimum_spacing = expected_min_diffusion_spacing(ns)
+    _nonnegative(minimum_spacing, 3, "DIFFUSION_MIN_SPACING")
+    if any(h <= 0 for h in minimum_spacing):
+        raise ValueError("DIFFUSION_MIN_SPACING entries must be positive")
+    if any(lower > initial * (1 + 1e-12) for lower, initial in zip(minimum_spacing, spacing)):
+        raise ValueError("DIFFUSION_MIN_SPACING cannot exceed the initial grid spacing")
+    spacing = minimum_spacing
+    return plan_diffusion(ns["TIME_STEP"], ns["TIME_STEP_DIFFUSION"],
+                          ns["DIFFUSION_COEFF_MULTI"], spacing,
+                          safety=ns["DIFFUSION_CFL_SAFETY"],
+                          max_substeps=ns["DIFFUSION_MAX_SUBSTEPS"],
+                          coefficient_upper_bounds=bounds)
