@@ -21,4 +21,12 @@ result_files/*
 *.tex
 *.log
 *.db
+*.pdf
 network_generator/.vscode/settings.json
+tmp
+*.ps1
+tools/revise_pni_doc.py
+literature
+STRATEGIC_ROADMAP.md
+docs/validation
+/pni_roadmap/
