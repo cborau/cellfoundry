@@ -3,6 +3,12 @@
 **Last updated:** 2026-05-19 (rev 2)  
 **Target file:** `variants/radial_glia/__init__.py` + supporting `.cpp` files
 
+> The implementation sketches below describe the original integration. For the
+> current hooks, structural-parameter constraints and full schedule ownership,
+> use the [variants tutorial](../../docs/auto/wiki/Tutorial-Model-Variants.md)
+> and the variant's `__init__.py` and `runtime.py`. The core no longer uses
+> `INCLUDE_RG_VARIABLES` or `configure_globals`.
+
 ---
 
 ## 1. Goal

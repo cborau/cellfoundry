@@ -1490,7 +1490,7 @@ def _get_rg_rosette_metrics_frame(results: dict) -> pd.DataFrame:
     if metrics is None:
         raise KeyError(
             "Key 'RG_ROSETTE_METRICS_OVER_TIME' not found in results pickle. "
-            "Ensure INCLUDE_RG_VARIABLES=True and the radial_glia variant is active."
+            "Run with --variant radial_glia and SAVE_PICKLE=True."
         )
     if isinstance(metrics, list):
         metrics = pd.DataFrame(metrics)
@@ -1510,7 +1510,7 @@ def rg_rosette_2d_error(results: dict, reference_path: str = None, **kwargs) -> 
     """Compare RG rosette metrics over time against a reference CSV.
 
     Reads from the ``RG_ROSETTE_METRICS_OVER_TIME`` DataFrame stored in the
-    results pickle by ``CollectCellMetrics`` — no VTK files needed.
+    results pickle by the radial-glia runtime collector — no VTK files needed.
 
     Parameters
     ----------

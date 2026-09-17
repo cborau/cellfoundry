@@ -344,7 +344,8 @@ One time step runs the following layers in order:
 
 | File | Role |
 |---|---|
-| `variants/radial_glia/__init__.py` | PARAMS, FILES list, configure_globals (env properties), configure_layers |
+| `variants/radial_glia/__init__.py` | PARAM_DEFAULTS, PARAMS, FILES, declaration/function/runtime hooks, full configure_layers schedule |
+| `variants/radial_glia/runtime.py` | CELL initialization, VTK fields, debug output, and rosette metrics |
 | `variants/radial_glia/cell_rg_differentiation.cpp` | Commitment ODE, cell_type switching, epithelialization update |
 | `variants/radial_glia/cell_rg_polarity_update.cpp` | Apical vector update (RG-only local centroid lumen cue + intrinsic z-bias) |
 | `variants/radial_glia/cell_move.cpp` | RG override: substrate spring, apical bias force, anchor point update |

@@ -1,7 +1,7 @@
 """
 Diagnostic calculations for the radial-glia rosette variant.
 
-The script reads the variant __init__.py extracts PARAMS and configure_globals() assignments, inspects the relevant C++
+The script reads PARAMS and PARAM_DEFAULTS from the variant __init__.py, inspects the relevant C++
 files when present, and prints equilibrium thresholds plus scenario-specific
 parameter suggestions.
 
@@ -104,7 +104,7 @@ def _safe_literal(node: ast.AST) -> Any:
 
 
 def read_variant_config(config_path: Path) -> Dict[str, Any]:
-    """Read PARAMS and g["..."] assignments from the radial-glia __init__.py."""
+    """Read current parameter dictionaries and legacy configure_globals files."""
     source = config_path.read_text(encoding="utf-8", errors="replace")
     tree = ast.parse(source, filename=str(config_path))
 
@@ -114,7 +114,7 @@ def read_variant_config(config_path: Path) -> Dict[str, Any]:
     for node in tree.body:
         if isinstance(node, ast.Assign):
             for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == "PARAMS":
+                if isinstance(target, ast.Name) and target.id in ("PARAMS", "PARAM_DEFAULTS"):
                     value = _safe_literal(node.value)
                     if isinstance(value, dict):
                         params.update(value)

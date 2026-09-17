@@ -1,127 +1,130 @@
-"""
-Variant: organoid
-=================
-Configures CellFoundry to reproduce the organoid growth assay described in
-organoid_paper.json.  Cells start as a compact cluster and expand radially
-while undergoing cell-cycle driven proliferation.
+"""Copy this directory to variants/<your_name>/ and fill in the relevant hooks.
 
-Usage
------
-    # Direct run:
-    python model.py --variant organoid
+Run unchanged: python model.py --variant variant_template
+This uses core parameter defaults and the complete generic schedule below.
 
-    # With additional JSON overrides (JSON wins over variant PARAMS):
-    python model.py --variant organoid --overrides configs/my_overrides.json
+Only configure_layers(ctx) is REQUIRED. The other four functions and three
+dictionaries below are the complete set of OPTIONAL variant entry points.
+Python helpers can have any name, but the framework only calls recognized hooks.
+Do not import model.py: the construction context supplies the native objects.
 
-    # Optimizer (via YAML model.variant key — see Tutorial-Model-Variants.md):
-    python -m optimizer.optimize --config optimizer/optuna_config_organoid_variant.yaml
-
+Guide: docs/auto/wiki/Tutorial-Model-Variants.md
+Worked example: docs/auto/wiki/Tutorial-Variant-Cell-Markers.md
 """
 
-from __future__ import annotations
-
-
-# ---------------------------------------------------------------------------
-# PARAMS — parameter overrides
-# ---------------------------------------------------------------------------
-# All keys must exist as globals in model.py.  Scalars are broadcast to lists
-# of the correct length by apply_param_overrides().  Explicitly override here
-# only the values that differ from the base model defaults.
-PARAMS: dict = {
-    # --- Simulation control -------------------------------------------------
-    "STEPS": 2400,
-    "TIME_STEP": 180,           # [s] 3-minute steps — 2400 × 180 s = 120 h
-    "SAVE_EVERY_N_STEPS": 12,
-
-    # --- Feature flags ------------------------------------------------------
-    "INCLUDE_CELLS": True,
-    "INCLUDE_CELL_CELL_INTERACTION": True,
-    "INCLUDE_CELL_CYCLE": True,
-    "INCLUDE_FOCAL_ADHESIONS": False,
-    "DEAD_CELLS_DISAPPEAR": False,
-    "PERIODIC_BOUNDARIES_FOR_CELLS": False,
-    "INCLUDE_CELL_FNODE_REPULSION": False,
-    "INCLUDE_FIBRE_NETWORK": False,
-    "INCLUDE_NETWORK_REMODELING": False,
-    "INCLUDE_DIFFUSION": False,
-    "INCLUDE_CHEMOTAXIS": False,
-    "INCLUDE_CHEMOKINESIS": False,
-    "INCLUDE_LUMEN": False,
-    "INCLUDE_VASCULARIZATION": False,
-
-    # --- Organoid initialisation --------------------------------------------
-    "ORGANOID_ASSAY": True,
-    "MONOLAYER_ASSAY": False,
-    "ORGANOID_INIT_RADIUS": 20.0,           # [um] tight initial cluster
-    "ORGANOID_ORIENTATION_NOISE": 0.3,      # [rad] mild radial jitter
-
-    # --- Output & visualisation ---------------------------------------------
-    "VISUALISATION": False,
-    "SHOW_PLOTS": False,
-    "SAVE_DATA_TO_FILE": True,
-    "SAVE_PICKLE": True,
-
-    # --- Cell population ----------------------------------------------------
-    "N_CELLS": 13,
-    "CELL_RADIUS": [20.0, 20.0, 20.0],     # [um] large cells for organoid
-
-    # --- Cell migration (calibrated from organoid_paper) --------------------
-    # Scalars are broadcast to all N_CELL_TYPES automatically.
-    "CELL_SPEED_REF": 0.006197015748809144,          # [um/s]
-    "ROTATIONAL_DIFFUSION_RATE": 0.0004325207525386532,  # [rad^2/s]
-
-    # --- Cell–cell mechanics (calibrated) -----------------------------------
-    "CELL_CELL_DV_MAX": 0.000285673742984719,        # [um/s] — scalar broadcast
-    "CELL_CELL_ADHESION_K": 9.857444189237748,       # [nN/um]
-    "CELL_CELL_REPULSION_K": 60.793730704953695,     # [nN/um]
-
-    # --- Cell cycle timing --------------------------------------------------
-    # Non-uniform G1 durations give three distinct proliferation rates.
-    "DIVISION_RATE_MULTIPLIER": [1.0, 1.0, 1.0],
-    "CYCLE_PHASE_G1_DURATION": [12000.0, 24000.0, 36000.0],  # [s]
-
-    # --- Damage / death (disabled — no diffusion in this assay) ------------
-    "CELL_HYPOXIA_DAMAGE_RATE": [0.0, 0.0, 0.0],
-    "CELL_NUTRIENT_DAMAGE_RATE": [0.0, 0.0, 0.0],
-    "CELL_STRESS_DAMAGE_RATE": [0.0, 0.0, 0.0],
-    "CELL_BASAL_DAMAGE_REPAIR_RATE": [0.0, 0.0, 0.0],
-}
-
-
-# ---------------------------------------------------------------------------
-# FILES — agent function file overrides
-# ---------------------------------------------------------------------------
-# Keys are the *_file variable names set in model.py (e.g. cell_cycle_file).
-# Values are paths relative to the project root (CURR_PATH in model.py).
-# Only include files that actually differ from the base model.
-FILES: dict = {
-    # Custom cell-cycle logic: apical cells (type 0) undergo asymmetric
-    # division; luminal cells (type 1) exit cycle at high density.
-    "cell_cycle_file": "variants/organoid/cell_cycle.cpp",
-}
-
-
+# OPTIONAL: introduce new parameter names, available to JSON/optimizer overrides.
+# Do not redeclare core names (N, N_SPECIES, TIME_STEP, etc.) here.
 PARAM_DEFAULTS = {
-    "ORGANOID_CONTACT_INHIBIT_SIGMA": 1.5,  # kPa
-    "ORGANOID_CONTACT_INHIBIT_FACTOR": 3.0,
+    # "MY_RATE": 0.1,
+    # "CUSTOM_CAPACITY": 100,
+}
+
+# OPTIONAL: change core parameters or defaults introduced above.
+# Core/default values -> PARAMS -> user JSON (highest priority).
+# Structural grid/array/kernel settings remain core-controlled; see the guide.
+PARAMS = {
+    # "SAVE_PICKLE": True,
+    # "MY_RATE": 0.2,
+}
+
+# OPTIONAL: replace a core RTC file BEFORE its function is registered.
+# Keep the kernel's existing function name and compatible message signature.
+# Adding a new function uses register_functions(), not this dictionary.
+FILES = {
+    # "cell_cycle_file": "variants/your_name/cell_cycle.cpp",
 }
 
 
 def validate_config(config):
-    import math
-    for name in PARAM_DEFAULTS:
-        value = config[name]
-        if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
-            raise ValueError(f"{name} must be finite and non-negative")
+    """OPTIONAL, once during construction: reject unsupported effective settings.
+
+    Receives the resolved configuration, including JSON/optimizer overrides.
+    Treat it as read-only. Raise ValueError with an actionable explanation.
+    This hook does not construct agents, edit parameters or run every step.
+    """
+    # if not config["INCLUDE_CELLS"]:
+    #     raise ValueError("This variant requires INCLUDE_CELLS=True")
+    # if config["MY_RATE"] < 0:
+    #     raise ValueError("MY_RATE must be non-negative")
+    pass
 
 
 def declare_model(ctx):
-    for name in PARAM_DEFAULTS:
-        ctx.env.newPropertyFloat(name, ctx.config[name])
+    """OPTIONAL, once during construction: describe variables, types and messages.
+
+    Core agents already exist. No live agent instances exist yet. Define new
+    GPU environment properties explicitly; a Python parameter is not one.
+    Reserve new custom-ID populations HERE, before message bounds are fixed.
+    """
+    # Extend an enabled core agent, with a constant default (no initializer needed):
+    # ctx.agents["CELL"].newVariableFloat("my_value", 0.0)
+    # ctx.env.newPropertyFloat("MY_RATE", ctx.config["MY_RATE"])
+
+    # Create a new type, an initial state, and an initially empty birth reservation:
+    # agent = ctx.model.newAgent("CUSTOM")
+    # agent.newVariableInt("id")
+    # agent.newVariableFloat("value", 0.0)
+    # agent.newState("active")
+    # ctx.agents["CUSTOM"] = agent
+    # ids = ctx.add_population("CUSTOM", count=0,
+    #                          capacity=ctx.config["CUSTOM_CAPACITY"], state="active")
+    # message = ctx.model.newMessageBucket("custom_report")
+    # message.setBounds(ids.begin, ids.end)  # Upper bound is exclusive.
+    # message.newVariableFloat("value")
+    # ctx.messages["custom_report"] = message
+    # For GPU births use variant_ids.cuh with the counter AND exhaustion flag.
+    pass
 
 
+def register_functions(ctx):
+    """OPTIONAL, once during construction: register and bind extra GPU functions.
+
+    Declarations are complete. Files must exist and their signatures must match
+    their message bindings. Registration alone never schedules execution.
+    """
+    # directory = ctx.root / "variants" / ctx.name
+    # function = ctx.agents["CUSTOM"].newRTCFunctionFile(
+    #     "custom_publish", str(directory / "custom_publish.cpp"))
+    # function.setInitialState("active")
+    # function.setEndState("active")
+    # function.setMessageOutput("custom_report")
+    # ctx.functions["CUSTOM.custom_publish"] = function  # Optional handle storage.
+
+    # A receiving function must have the matching MessageBucket input signature:
+    # receiver.setMessageInput("custom_report")
+    # A CELL function creating CUSTOM must explicitly bind its birth target:
+    # birth.setAgentOutput("CUSTOM", "active")
+    # A function returning flamegpu::DEAD must explicitly allow death:
+    # aging.setAllowAgentDeath(True)
+    pass
+
+
+def register_runtime(ctx):
+    """OPTIONAL, once during construction: register callbacks for later execution.
+
+    The runtime.py filename is a convenience, not a framework entry point.
+    Uncomment only the imports/registrations actually needed by your variant.
+    Per-agent callbacks do not run for GPU births; initialize daughters in C++.
+    """
+    # from .runtime import initialize_cell, initialize_custom, Runtime
+    # ctx.add_agent_initializer("CELL", initialize_cell)
+    # ctx.add_agent_initializer("CUSTOM", initialize_custom)
+    # ctx.cell_vtk_scalars.append(("my_value", "my_value", "float"))
+    # ctx.cell_vtk_vectors.append(("my_vector", "my_x", "my_y", "my_z"))
+
+    # if ctx.config["SAVE_PICKLE"]:
+    #     runtime = Runtime(ctx)
+    #     ctx.add_init_function(runtime.initialize)
+    #     ctx.add_step_function(runtime.step)
+    #     ctx.add_exit_function(runtime.finish)
+    # Keep intermediate GPU/host ordering explicit in configure_layers().
+    pass
+
+
+# REQUIRED hook: edit this complete schedule directly; no core layers are added
+# implicitly. Place your own functions after their producers and before consumers.
 def configure_layers(ctx):
-    """Complete organoid schedule, including explicitly enabled optional features."""
+    """REQUIRED: the entire GPU schedule for all enabled generic features."""
     model, config = ctx.model, ctx.config
     HETEROGENEOUS_DIFFUSION = config["HETEROGENEOUS_DIFFUSION"]
     INCLUDE_CELLS = config["INCLUDE_CELLS"]
@@ -263,3 +266,7 @@ def configure_layers(ctx):
             model.newLayer("L8_ECM_Locations_Post_Move").addAgentFunction(
                 "ECM", "multiscale_ecm_velocity_output" if MULTISCALE_DIFFUSION else "ecm_grid_location_data")
             model.newLayer("L8_VASC_Movement").addAgentFunction("VASC", "vasc_move")
+
+    # Example addition (after its producer/consumer ordering has been decided):
+    # model.newLayer("Custom_Publication").addAgentFunction("CUSTOM", "custom_publish")
+    # model.newLayer("Custom_Response").addAgentFunction("CELL", "cell_custom_response")

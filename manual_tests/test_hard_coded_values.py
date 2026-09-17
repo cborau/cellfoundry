@@ -56,8 +56,8 @@ class HardCodedScanScopeTests(unittest.TestCase):
         self.run_checker()
         self.assert_fixed_only(*self.files)
 
-    def test_exlude_variants_skips_entire_tree(self):
-        self.run_checker("--exlude-variants")
+    def test_exclude_variants_skips_entire_tree(self):
+        self.run_checker("--exclude-variants")
         self.assert_fixed_only("kernel.cpp", "helpers/kernel.cpp")
 
     def test_exclude_variants_alias_skips_entire_tree(self):
@@ -65,7 +65,7 @@ class HardCodedScanScopeTests(unittest.TestCase):
         self.assert_fixed_only("kernel.cpp", "helpers/kernel.cpp")
 
     def test_variant_exclusion_combines_with_other_exclusions(self):
-        self.run_checker("--exlude-variants", "--exclude-dir", "helpers")
+        self.run_checker("--exclude-variants", "--exclude-dir", "helpers")
         self.assert_fixed_only("kernel.cpp")
 
     def test_relative_exclusion_preserves_other_variants(self):

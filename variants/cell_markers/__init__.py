@@ -1,127 +1,117 @@
+"""End-to-end teaching variant: CELL creates short-lived MARKER agents.
+
+The complete generic schedule is written below, followed by four marker layers.
+Markers are inert observations: they do not supply chemical mass or forces.
+See docs/auto/wiki/Tutorial-Variant-Cell-Markers.md for the walkthrough.
 """
-Variant: organoid
-=================
-Configures CellFoundry to reproduce the organoid growth assay described in
-organoid_paper.json.  Cells start as a compact cluster and expand radially
-while undergoing cell-cycle driven proliferation.
-
-Usage
------
-    # Direct run:
-    python model.py --variant organoid
-
-    # With additional JSON overrides (JSON wins over variant PARAMS):
-    python model.py --variant organoid --overrides configs/my_overrides.json
-
-    # Optimizer (via YAML model.variant key — see Tutorial-Model-Variants.md):
-    python -m optimizer.optimize --config optimizer/optuna_config_organoid_variant.yaml
-
-"""
-
-from __future__ import annotations
-
-
-# ---------------------------------------------------------------------------
-# PARAMS — parameter overrides
-# ---------------------------------------------------------------------------
-# All keys must exist as globals in model.py.  Scalars are broadcast to lists
-# of the correct length by apply_param_overrides().  Explicitly override here
-# only the values that differ from the base model defaults.
-PARAMS: dict = {
-    # --- Simulation control -------------------------------------------------
-    "STEPS": 2400,
-    "TIME_STEP": 180,           # [s] 3-minute steps — 2400 × 180 s = 120 h
-    "SAVE_EVERY_N_STEPS": 12,
-
-    # --- Feature flags ------------------------------------------------------
-    "INCLUDE_CELLS": True,
-    "INCLUDE_CELL_CELL_INTERACTION": True,
-    "INCLUDE_CELL_CYCLE": True,
-    "INCLUDE_FOCAL_ADHESIONS": False,
-    "DEAD_CELLS_DISAPPEAR": False,
-    "PERIODIC_BOUNDARIES_FOR_CELLS": False,
-    "INCLUDE_CELL_FNODE_REPULSION": False,
-    "INCLUDE_FIBRE_NETWORK": False,
-    "INCLUDE_NETWORK_REMODELING": False,
-    "INCLUDE_DIFFUSION": False,
-    "INCLUDE_CHEMOTAXIS": False,
-    "INCLUDE_CHEMOKINESIS": False,
-    "INCLUDE_LUMEN": False,
-    "INCLUDE_VASCULARIZATION": False,
-
-    # --- Organoid initialisation --------------------------------------------
-    "ORGANOID_ASSAY": True,
-    "MONOLAYER_ASSAY": False,
-    "ORGANOID_INIT_RADIUS": 20.0,           # [um] tight initial cluster
-    "ORGANOID_ORIENTATION_NOISE": 0.3,      # [rad] mild radial jitter
-
-    # --- Output & visualisation ---------------------------------------------
-    "VISUALISATION": False,
-    "SHOW_PLOTS": False,
-    "SAVE_DATA_TO_FILE": True,
-    "SAVE_PICKLE": True,
-
-    # --- Cell population ----------------------------------------------------
-    "N_CELLS": 13,
-    "CELL_RADIUS": [20.0, 20.0, 20.0],     # [um] large cells for organoid
-
-    # --- Cell migration (calibrated from organoid_paper) --------------------
-    # Scalars are broadcast to all N_CELL_TYPES automatically.
-    "CELL_SPEED_REF": 0.006197015748809144,          # [um/s]
-    "ROTATIONAL_DIFFUSION_RATE": 0.0004325207525386532,  # [rad^2/s]
-
-    # --- Cell–cell mechanics (calibrated) -----------------------------------
-    "CELL_CELL_DV_MAX": 0.000285673742984719,        # [um/s] — scalar broadcast
-    "CELL_CELL_ADHESION_K": 9.857444189237748,       # [nN/um]
-    "CELL_CELL_REPULSION_K": 60.793730704953695,     # [nN/um]
-
-    # --- Cell cycle timing --------------------------------------------------
-    # Non-uniform G1 durations give three distinct proliferation rates.
-    "DIVISION_RATE_MULTIPLIER": [1.0, 1.0, 1.0],
-    "CYCLE_PHASE_G1_DURATION": [12000.0, 24000.0, 36000.0],  # [s]
-
-    # --- Damage / death (disabled — no diffusion in this assay) ------------
-    "CELL_HYPOXIA_DAMAGE_RATE": [0.0, 0.0, 0.0],
-    "CELL_NUTRIENT_DAMAGE_RATE": [0.0, 0.0, 0.0],
-    "CELL_STRESS_DAMAGE_RATE": [0.0, 0.0, 0.0],
-    "CELL_BASAL_DAMAGE_REPAIR_RATE": [0.0, 0.0, 0.0],
-}
-
-
-# ---------------------------------------------------------------------------
-# FILES — agent function file overrides
-# ---------------------------------------------------------------------------
-# Keys are the *_file variable names set in model.py (e.g. cell_cycle_file).
-# Values are paths relative to the project root (CURR_PATH in model.py).
-# Only include files that actually differ from the base model.
-FILES: dict = {
-    # Custom cell-cycle logic: apical cells (type 0) undergo asymmetric
-    # division; luminal cells (type 1) exit cycle at high density.
-    "cell_cycle_file": "variants/organoid/cell_cycle.cpp",
-}
+import math
+from numbers import Integral
 
 
 PARAM_DEFAULTS = {
-    "ORGANOID_CONTACT_INHIBIT_SIGMA": 1.5,  # kPa
-    "ORGANOID_CONTACT_INHIBIT_FACTOR": 3.0,
+    "MARKER_CAPACITY": 16,          # Total IDs available over the run, not live count.
+    "MARKER_LIFETIME_STEPS": 2,     # Includes the birth step's observation.
+    "MARKER_DETECTION_RADIUS": 15.0,  # um, Euclidean distance to an ECM node.
+}
+PARAMS = {
+    "N_CELLS": 4, "STEPS": 4, "TIME_STEP": 1.0,
+    "INCLUDE_CELLS": True, "INCLUDE_CELL_CELL_INTERACTION": True,
+    "INCLUDE_CELL_CYCLE": False, "INCLUDE_DIFFUSION": False,
+    "INCLUDE_FIBRE_NETWORK": False, "INCLUDE_FOCAL_ADHESIONS": False,
+    "INCLUDE_NETWORK_REMODELING": False, "INCLUDE_CELL_FNODE_REPULSION": False,
+    "INCLUDE_VASCULARIZATION": False, "INCLUDE_VASCULAR_CELL_RECRUITMENT": False,
+    "INCLUDE_LUMEN": False, "ORGANOID_ASSAY": False, "MONOLAYER_ASSAY": False,
+    "VISUALISATION": False, "SHOW_PLOTS": False,
+    "SAVE_PICKLE": True, "SAVE_DATA_TO_FILE": True, "SAVE_EVERY_N_STEPS": 1,
 }
 
 
 def validate_config(config):
-    import math
-    for name in PARAM_DEFAULTS:
+    if not config["INCLUDE_CELLS"]:
+        raise ValueError("cell_markers requires INCLUDE_CELLS=True")
+    for name in ("INCLUDE_CELL_CYCLE", "INCLUDE_VASCULAR_CELL_RECRUITMENT"):
+        if config[name]:
+            raise ValueError(f"cell_markers requires {name}=False: this example uses a fixed CELL population")
+    for name in ("MARKER_CAPACITY", "MARKER_LIFETIME_STEPS"):
         value = config[name]
-        if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
-            raise ValueError(f"{name} must be finite and non-negative")
+        if isinstance(value, bool) or not isinstance(value, Integral) or not 1 <= value < 2**31 - 1:
+            raise ValueError(f"{name} must be a positive Int")
+    if config["MARKER_CAPACITY"] < config["N_CELLS"]:
+        raise ValueError("MARKER_CAPACITY must be at least N_CELLS: each CELL emits one marker")
+    radius = config["MARKER_DETECTION_RADIUS"]
+    if isinstance(radius, bool) or not isinstance(radius, (int, float)) or not math.isfinite(radius) or radius <= 0:
+        raise ValueError("MARKER_DETECTION_RADIUS must be finite and positive")
 
 
 def declare_model(ctx):
-    for name in PARAM_DEFAULTS:
-        ctx.env.newPropertyFloat(name, ctx.config[name])
+    cell = ctx.agents["CELL"]
+    cell.newVariableInt("marker_emitted", 0)
+    cell.newVariableInt("own_marker_count", 0)
+    ecm = ctx.agents["ECM"]
+    ecm.newVariableInt("marker_count", 0)
+    ecm.newVariableFloat("marker_exposure", 0.0)  # accumulated marker-seconds
+
+    marker = ctx.model.newAgent("MARKER")
+    marker.newState("active")
+    marker.newVariableInt("id")
+    marker.newVariableInt("owner_cell_id", -1)
+    for coordinate in ("x", "y", "z"):
+        marker.newVariableFloat(coordinate)
+    marker.newVariableInt("age_steps", 0)
+    ctx.agents["MARKER"] = marker
+    ctx.add_population("MARKER", count=0, capacity=ctx.config["MARKER_CAPACITY"], state="active")
+
+    # Four markers by default: brute force makes the interaction easy to inspect.
+    # One publisher feeds two consumers; no existing message schema is changed.
+    message = ctx.model.newMessageBruteForce("marker_report")
+    message.newVariableInt("id")
+    message.newVariableInt("owner_cell_id")
+    for coordinate in ("x", "y", "z"):
+        message.newVariableFloat(coordinate)
+    ctx.messages["marker_report"] = message
+    ctx.env.newPropertyInt("MARKER_LIFETIME_STEPS", ctx.config["MARKER_LIFETIME_STEPS"])
+    ctx.env.newPropertyFloat("MARKER_DETECTION_RADIUS", ctx.config["MARKER_DETECTION_RADIUS"])
+
+
+def register_functions(ctx):
+    directory = ctx.root / "variants" / ctx.name
+    # Prefix the absolute shared-header path so RTC does not depend on cwd.
+    source = '#include "' + (ctx.root / "variant_ids.cuh").as_posix() + '"\n'
+    source += (directory / "cell_emit_marker.cpp").read_text(encoding="utf-8")
+    birth = ctx.agents["CELL"].newRTCFunction("cell_emit_marker", source)
+    birth.setAgentOutput("MARKER", "active")
+
+    publish = ctx.agents["MARKER"].newRTCFunctionFile("marker_publish", str(directory / "marker_publish.cpp"))
+    publish.setInitialState("active")
+    publish.setEndState("active")
+    publish.setMessageOutput("marker_report")
+
+    for agent_name, function_name in (("CELL", "cell_read_markers"), ("ECM", "ecm_read_markers")):
+        function = ctx.agents[agent_name].newRTCFunctionFile(function_name, str(directory / (function_name + ".cpp")))
+        function.setMessageInput("marker_report")
+
+    age = ctx.agents["MARKER"].newRTCFunctionFile("marker_age", str(directory / "marker_age.cpp"))
+    age.setInitialState("active")
+    age.setEndState("active")
+    age.setAllowAgentDeath(True)
+
+
+def register_runtime(ctx):
+    from .runtime import initialize_cell, Metrics
+    ctx.add_agent_initializer("CELL", initialize_cell)
+    ctx.cell_vtk_scalars.extend([
+        ("marker_emitted", "marker_emitted", "int"),
+        ("own_marker_count", "own_marker_count", "int"),
+    ])
+    if ctx.config["SAVE_PICKLE"]:
+        metrics = Metrics(ctx)
+        ctx.add_init_function(metrics.initialize)
+        ctx.add_step_function(metrics.step)
+        ctx.add_exit_function(metrics.finish)
 
 
 def configure_layers(ctx):
-    """Complete organoid schedule, including explicitly enabled optional features."""
+    """Complete generic schedule, followed by the entire marker lifecycle."""
     model, config = ctx.model, ctx.config
     HETEROGENEOUS_DIFFUSION = config["HETEROGENEOUS_DIFFUSION"]
     INCLUDE_CELLS = config["INCLUDE_CELLS"]
@@ -263,3 +253,10 @@ def configure_layers(ctx):
             model.newLayer("L8_ECM_Locations_Post_Move").addAgentFunction(
                 "ECM", "multiscale_ecm_velocity_output" if MULTISCALE_DIFFUSION else "ecm_grid_location_data")
             model.newLayer("L8_VASC_Movement").addAgentFunction("VASC", "vasc_move")
+
+    # The custom sequence uses post-move positions and is fully visible here.
+    model.newLayer("M1_CELL_Emit").addAgentFunction("CELL", "cell_emit_marker")
+    model.newLayer("M2_MARKER_Publish").addAgentFunction("MARKER", "marker_publish")
+    model.newLayer("M3_Read_Markers").addAgentFunction("CELL", "cell_read_markers")
+    model.Layer("M3_Read_Markers").addAgentFunction("ECM", "ecm_read_markers")
+    model.newLayer("M4_MARKER_Age").addAgentFunction("MARKER", "marker_age")

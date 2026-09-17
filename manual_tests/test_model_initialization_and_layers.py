@@ -3,6 +3,7 @@
 import ast
 from pathlib import Path
 import unittest
+from types import SimpleNamespace
 
 
 MODEL_PATH = Path(__file__).resolve().parents[1] / "model.py"
@@ -89,7 +90,7 @@ def _run_default_layer_builder(**overrides):
 
 
 def _run_radial_glia_layer_builder(**overrides):
-    """Extract and execute the radial-glia variant's copied layer builder."""
+    """Execute the variant-owned full schedule with an explicit context."""
     tree = ast.parse(RADIAL_GLIA_VARIANT_PATH.read_text(encoding="utf-8"))
     function = next(
         node
@@ -126,7 +127,10 @@ def _run_radial_glia_layer_builder(**overrides):
         "_register_rg_env_properties": lambda _env, _globals: None,
     }
     exec(compile(isolated_module, str(RADIAL_GLIA_VARIANT_PATH), "exec"), namespace)
-    namespace["configure_layers"](fake_model, variant_globals)
+    namespace["configure_layers"](SimpleNamespace(
+        model=fake_model, config=variant_globals,
+        add_multiscale_diffusion_layers=variant_globals["_add_multiscale_diffusion_layers"],
+    ))
     return fake_model.events
 
 

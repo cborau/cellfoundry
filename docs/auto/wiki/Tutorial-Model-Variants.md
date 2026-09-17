@@ -1,734 +1,534 @@
-# Tutorial: Model Variants
+# Tutorial: Model variants
 
-This tutorial explains how to use the **variant system** to simulate different biological scenarios within the same Cellfoundry codebase, without branching the repository or duplicating files.
+A variant is a Python package under `variants/<name>/`. It owns model-specific parameters, additions to agents and messages, custom kernels, initialization, analysis, and its **complete execution schedule**. `model.py` supplies the generic CellFoundry model and invokes a small set of construction hooks from `variant_api.py`.
 
----
+There are three starting points:
 
-## Motivation
+| Starting point | Use it for |
+| --- | --- |
+| [`variant_template`](../../../variants/variant_template/__init__.py) | Copyable scaffold containing every recognized hook, explanations, commented examples and the full generic schedule. |
+| [`simple_signal`](../../../variants/simple_signal/__init__.py) | First exercise: two CELL variables and two functions, with an answer calculable by hand. |
+| [`cell_markers`](Tutorial-Variant-Cell-Markers.md) | Complete worked example: extend CELL and ECM, create a new agent type from CELL, communicate, expire agents, collect results and retain the full generic schedule. |
 
-CellFoundry is a general-purpose agent-based simulation platform.  Different biological problems (organoid growth, tumour invasion, fibre remodelling, wound healing, …) share most of the simulation infrastructure but differ in:
+Run an existing variant with:
 
-- Parameter values (cell speed, adhesion strength, domain size, etc.)
-- Agent function logic (e.g. a custom `cell_cycle.cpp` with asymmetric division)
-- Layer execution order (e.g. insert a differentiation step between L3 and L7)
-- Variant-specific environment properties registered on the FLAMEGPU2 model
-
-The variant system lets you encode all of these differences in a single Python package (`variants/<name>/`) plus any modified `.cpp` files, leaving `model.py` untouched.
-
----
-
-## Directory layout
-
-```
-cellfoundry/
-├── model.py                          ← base model (never edited per-variant)
-├── cell_cycle.cpp                    ← base agent functions
-├── cell_move.cpp
-│   ...
-├── variants/
-│   └── organoid/
-│       ├── __init__.py               ← organoid variant module
-│       └── cell_cycle.cpp            ← organoid-specific override
-└── optimizer/
-    ├── optuna_config_organoid_variant.yaml
-    └── ...
-```
-
-Each variant lives in its own subfolder `variants/<name>/`.  The entry point is `variants/<name>/__init__.py`.  The same folder holds only the `.cpp` files that differ from the base model.
-
-> **Path note**: `.cpp` file paths in the `FILES` dict are always relative to the project root (the folder containing `model.py`), e.g. `"variants/organoid/cell_cycle.cpp"`.  
-
----
-
-## Anatomy of a variant module
-
-A variant module (`__init__.py`) exports up to four objects.  All are optional.
-
-```python
-# variants/my_variant/__init__.py
-
-PARAMS: dict        # parameter overrides  (applied before JSON --overrides)
-FILES:  dict        # *_file variable redirections (applied after all parameters)
-
-def configure_globals(g: dict) -> None: ...   # inject new global flags
-def configure_layers(model, g: dict) -> None: # full layer sequence for this variant
-```
-
-### `PARAMS`
-
-A plain dict mapping parameter names to values.  Any key that exists as a global variable in `model.py` can be overridden.  Scalars are broadcast to lists automatically (same behaviour as `--overrides` JSON).
-
-```python
-PARAMS = {
-    "ORGANOID_ASSAY": True,
-    "N_CELLS": 13,
-    "CELL_RADIUS": [20.0, 20.0, 20.0],     # explicit list
-    "CELL_SPEED_REF": 0.006,                # scalar → broadcast to all types
-    "CYCLE_PHASE_G1_DURATION": [12000.0, 24000.0, 36000.0],
-}
-```
-
-**Priority**: `--overrides` JSON always wins over `PARAMS`.  This means the optimizer can tune any variant parameter without editing the variant file.
-
-### `FILES`
-
-A dict mapping the `*_file` variable names in `model.py` to variant-specific `.cpp` paths (relative to the project root).
-
-```python
-FILES = {
-    "cell_cycle_file": "variants/organoid/cell_cycle.cpp",
-    "cell_move_file":  "variants/organoid/cell_move.cpp",
-}
-```
-
-Only list files that actually differ from the base model.  Unmentioned functions use the base `.cpp` as usual.
-
-### `configure_globals(g)`
-
-Called after `PARAMS` and `FILES` are applied but **before** `model.py` builds the FLAMEGPU2 `ModelDescription`.  Use it to inject global flags that don't exist in the base model and therefore cannot go into `PARAMS`.
-
-```python
-def configure_globals(g: dict) -> None:
-    # Inject a new flag that the custom cell_cycle.cpp relies on.
-    g["CONTACT_INHIBIT_SIGMA"] = 1.5   # [kPa]
-    g["CONTACT_INHIBIT_FACTOR"] = 3.0
-```
-
-Values set here are available as `g["KEY"]` inside `configure_layers`.
-
-### `configure_layers(model, g)`
-
-**This function owns the complete layer sequence** when defined.  If it is present in the variant, `model.py` does *not* call `_build_default_layers()` itself — the variant is responsible for the full L0-L8 stack plus any additions.
-
-Call `g['_build_default_layers']()` to include the standard sequence, then add any variant-specific layers after it.  To insert layers *between* default layers, copy the relevant portion of `_build_default_layers` inline and add your layers at the correct position.
-
-```python
-def configure_layers(model, g: dict) -> None:
-    # --- Register variant-specific environment properties ---
-    _env = g.get("env")
-    if _env is not None:
-        try:
-            _env.newPropertyFloat("CONTACT_INHIBIT_SIGMA",
-                                  g.get("CONTACT_INHIBIT_SIGMA", 1.5))
-            _env.newPropertyFloat("CONTACT_INHIBIT_FACTOR",
-                                  g.get("CONTACT_INHIBIT_FACTOR", 3.0))
-        except Exception:
-            pass  # already registered (safe guard for re-runs)
-
-    # --- Build the full layer sequence ---
-    # Option A: use defaults unchanged (append-style — layers added after L8
-    # are visible to model.py's L7 result only from the next step).
-    g['_build_default_layers']()
-
-    # Option B: insert a layer between L3 and L4 (see section below).
-```
-
-If `configure_layers` is **not** defined, `model.py` runs `_build_default_layers()` automatically.
-
----
-
-## Running a variant
-
-```bash
-# Basic run
+```sh
 python model.py --variant organoid
-
-# With additional parameter overrides (JSON wins over variant PARAMS)
-python model.py --variant organoid --overrides configs/organoid_paper.json
-
-# Specify result directory
-python model.py --variant organoid --result-dir result_files/organoid_run_01
+python model.py --variant radial_glia --overrides configs/my_overrides.json
 ```
 
-If the variant name is not found in `variants/`, the model exits with a clear error listing available variants.
+Use a Python environment with CellFoundry's dependencies and a compatible FLAMEGPU/CUDA installation (`flamegpu_py310` in the supplied installation). The optimizer selects variants through the same `--variant`, `--overrides`, and `--result-dir` interfaces.
 
----
+## Ownership
 
-## Using variants with the optimizer
+- Core agents such as CELL belong to the central FLAMEGPU `ModelDescription`. Their extensions can be declared in a variant using the same native description.
+- An entirely variant-specific agent can be created with `ctx.model.newAgent(...)`. Declare its variables/states/messages, reserve its initial population with `ctx.add_population(...)`, bind its functions, schedule it, and provide any specialized output inside the variant.
+- Generic mechanics, diffusion, assay initialization, and output infrastructure remain in the core.
 
-Add `model.variant: <name>` to any Optuna YAML config.  The optimizer forwards `--variant <name>` to every trial subprocess automatically.
+## Structural parameters remain core-controlled
+
+This API does **not** make structural overrides safe. Grid dimensions, species/cell type counts, connectivity and array extents must remain consistent with compiled RTC constants, macro arrays, message dimensions, search radii, and domain bounds. **Configure those deliberately in the core (model.py)** and synchronize the corresponding kernels using the existing checker (check_hard_coded_values.py using the --scan-root arg to point to the corresponding variant folder). E.g. A variant can still define `BOUNDARY_COORDS` or `N` in their __init__.py file, but must make sure that their values are compatible with the hard-coded fixed array sizes.
+
+The checker reads literal structural values from `model.py`; ordinary parameter recomputation does not rebuild `ECM_AGENTS_PER_DIR` or `ECM_POPULATION_SIZE`. Setting `N` in a variant does not rebuild that grid. Boundary-only overrides retain the fixed grid and recompute the existing derived geometry quantities. They still require model-specific consistency checks; this is not an assurance that arbitrary domain changes are supported.
+
+Do not use `PARAM_DEFAULTS` to redeclare core parameters such as `N_SPECIES`. It introduces only genuinely new variant parameters. The registration hooks do not provide automatic resizing or rewriting of kernels.
+
+## Variant interface and construction order
+
+**Only `configure_layers(ctx)` is mandatory.** Loading a variant without it fails. Every other entry below may be omitted entirely; a no-op implementation is useful in a template but is not a requirement.
+
+These names are the interface recognized by CellFoundry. They are not arbitrary function names discovered by FLAMEGPU. The loader reads the dictionaries, and `model.py` explicitly calls the named hooks at the appropriate construction stages.
+
+| Export | Required? | Purpose and time of execution |
+| --- | --- | --- |
+| `PARAM_DEFAULTS` | No | Dictionary introducing new parameter names before overrides. It does not declare GPU environment properties. |
+| `PARAMS` | No | Dictionary assigning variant defaults to existing core/new parameters. User JSON overrides these values. |
+| `FILES` | No | Dictionary selecting replacement files for existing core RTC functions, before core function registration. |
+| `validate_config(config)` | No; recommended | Called once with effective configuration to reject incompatible features/values. Raise a clear error; do not mutate configuration. |
+| `declare_model(ctx)` | No; needed for schema additions | Called once after core descriptions exist. Add variables, states, agents, messages and GPU properties; reserve new populations. Descriptions are being built, not live agents. |
+| `register_functions(ctx)` | No; needed for extra kernels | Called once after declarations. Register RTC functions, message bindings, states, death permission and birth targets. This does not execute or schedule them. |
+| `register_runtime(ctx)` | No; needed for custom host work | Called once during construction to register per-agent initializers, Python callbacks and output fields. The registered callbacks execute later. |
+| `configure_layers(ctx)` | **Yes** | Called once to build the **entire** GPU execution order. The resulting layers are executed each simulation step. No automatic merge with a core schedule occurs. |
+
+For example, a parameter-only variant can omit the optional function hooks, but must still supply its complete schedule. A variant adding a constant-default variable needs `declare_model()` but no per-agent initializer. A variant adding an RTC kernel also needs its registration and a layer that executes it. Optional hooks become necessary when their responsibilities are needed, not because every variant must contain boilerplate.
+
+Core functions are registered alongside core descriptions. Variant declarations extend those shared descriptions before the simulation is constructed and RTC executes. Select existing core function replacements through `FILES`; do not register a second function with an existing name. Additional functions use `register_functions()`. Either choice still requires the relevant function in the selected schedule.
+
+The lifecycle is:
+
+```text
+Construction, once:
+  import package -> read defaults/overrides -> validate_config
+  -> build core descriptions/functions using FILES
+  -> declare_model -> seal population reservations -> register_functions
+  -> register_runtime -> configure_layers -> construct simulation
+
+At simulation initialization:
+  core population loops call registered per-agent initializers
+  -> managed variant populations and their initializers
+  -> core macro initialization -> registered variant init callbacks
+
+At each step:
+  execute the selected variant's GPU layers in order
+  -> capacity/error checks and registered end-of-step host callbacks
+
+At normal completion:
+  registered exit callbacks -> final result collection/pickle writing
+```
+
+`initialize_cell`, `initialize_probe`, `Metrics.step` and similar names are ordinary Python functions/methods. Their names have no special meaning to the loader. They run only because a recognized hook registers them, for example `ctx.add_agent_initializer("CELL", initialize_cell)`. You may write other helper functions such as `declare_my_agents(ctx)`, but must call them from a recognized hook yourself.
+
+### Why radial glia has a runtime.py
+
+`runtime.py` is an **optional organization choice**, not another framework hook or a second model. Radial glia has enough CPU initialization and analysis code to benefit from a separate file: initial polarity/anchors, VTK field definitions, rosette metrics and diagnostic output. Its `__init__.py` keeps declarations, registration and the full schedule together.
+
+The connection is an ordinary Python import and explicit registration:
+
+```python
+def register_runtime(ctx):
+    from .runtime import initialize_cell, Metrics
+    ctx.add_agent_initializer("CELL", initialize_cell)
+    metrics = Metrics(ctx)
+    ctx.add_init_function(metrics.initialize)
+    ctx.add_step_function(metrics.run)
+```
+
+The leading dot means “this variant package.” `model.py` does not search for `runtime.py`. Keeping the same definitions in `__init__.py` would work; renaming the file requires updating its imports. `simple_signal` keeps its small callbacks in `__init__.py`; `cell_markers` demonstrates a small separate module. The registration hook runs once; the callback registered with `add_step_function()` runs every step.
+
+### Start from variant_template
+
+Copy the entire `variants/variant_template/` folder to a new folder such as `variants/my_model/`. It contains all five function hooks, all three configuration dictionaries, an optional `runtime.py`, and the complete generic `configure_layers()` implementation. The optional hook bodies are documented no-ops with commented examples; the generic schedule is active code, so the unchanged template runs the generic model using core defaults.
+
+1. Edit `PARAMS` and introduce any new names through `PARAM_DEFAULTS`.
+2. Add validation for your supported feature combinations and parameter ranges.
+3. Add declarations in `declare_model()`. Constants can use declaration defaults. Reserve custom-ID populations here if needed.
+4. Write the corresponding C++ files, register them and bind messages/states/birth targets. Use `FILES` only when replacing a core function; update any literal variant path after renaming the folder.
+5. Enable only the initialization/output callbacks you need in `register_runtime()`. The supplied `runtime.py` has no effect until imported and registered.
+6. Edit the full `configure_layers()` explicitly. Include each enabled process and put producers before consumers. Uncommenting a declaration alone does not supply a kernel or schedule it.
+7. Run a small case and verify an expected result before adding another mechanism.
+
+```sh
+python model.py --variant my_model --result-dir results/my_model
+```
+
+Paths built from `ctx.root / "variants" / ctx.name` follow the copied folder's name. Keep the full schedule in the variant; the template does not delegate it to another variant or patch it invisibly. The runnable `cell_markers` example shows these steps assembled into a working model.
+
+## Walkthrough: create a small signal variant
+
+The runnable example is in `variants/simple_signal/`. It adds two CELL variables and two GPU functions. Cells remain stationary: a dimensionless signal increases at a constant rate, and an integer flag switches on when the signal reaches a threshold. This is a programming example, not a biological model. No mechanics, diffusion or division are scheduled. Core agents still exist and receive their normal initialization.
+
+**Its two layers are the whole schedule for this minimal model. No additional core layers run implicitly.** The example deliberately disables physical processes to isolate the registration mechanism. Use `variant_template` or the [cell-markers walkthrough](Tutorial-Variant-Cell-Markers.md) when you want the full generic schedule as a starting point.
+
+### Step 1: create the package and files
+
+From the repository root, create this structure (the supplied example already has these files):
+
+```text
+variants/
+  simple_signal/
+    __init__.py
+    signal_accumulate.cpp
+    signal_switch.cpp
+```
+
+The folder name is the `--variant` name. To create your own copy, copy this folder to `variants/my_signal/`; the function paths below use `ctx.name`, so the folder can be renamed without modifying `model.py`. Start `__init__.py` with `import math` and the following dictionaries.
+
+### Step 2: choose the parameters and supported features
+
+```python
+PARAM_DEFAULTS = {"SIGNAL_RATE": 0.1, "SIGNAL_THRESHOLD": 0.25}
+PARAMS = {
+    "N_CELLS": 4, "STEPS": 4, "TIME_STEP": 1.0,
+    "INCLUDE_CELLS": True,
+    "INCLUDE_CELL_CELL_INTERACTION": False, "INCLUDE_CELL_CYCLE": False,
+    "INCLUDE_DIFFUSION": False, "INCLUDE_FIBRE_NETWORK": False,
+    "INCLUDE_FOCAL_ADHESIONS": False, "INCLUDE_NETWORK_REMODELING": False,
+    "INCLUDE_CELL_FNODE_REPULSION": False, "INCLUDE_VASCULARIZATION": False,
+    "INCLUDE_VASCULAR_CELL_RECRUITMENT": False, "INCLUDE_LUMEN": False,
+    "ORGANOID_ASSAY": False, "MONOLAYER_ASSAY": False,
+    "MOVING_BOUNDARIES": False,
+    "VISUALISATION": False, "SHOW_PLOTS": False,
+    "SAVE_PICKLE": True, "SAVE_DATA_TO_FILE": True, "SAVE_EVERY_N_STEPS": 1,
+}
+
+
+def validate_config(config):
+    if not config["INCLUDE_CELLS"]:
+        raise ValueError("simple_signal requires INCLUDE_CELLS=True")
+    for name, value in PARAMS.items():
+        if value is False and (name.startswith("INCLUDE_") or
+                               name in ("MOVING_BOUNDARIES", "ORGANOID_ASSAY", "MONOLAYER_ASSAY")):
+            if config[name]:
+                raise ValueError(f"simple_signal does not schedule {name}; keep it False")
+    for name in PARAM_DEFAULTS:
+        value = config[name]
+        if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            raise ValueError(f"{name} must be finite and non-negative")
+```
+
+`SIGNAL_RATE` has units of signal per second; `SIGNAL_THRESHOLD` has signal units. The validator prevents someone enabling a feature for which this deliberately small schedule has no functions. `N_CELLS` is the initial CELL count, distinct from the structural ECM grid parameter `N`. The example leaves grid dimensions, species counts, domain size and compiled arrays alone.
+
+### Step 3: declare the additional variables and environment properties
+
+Append this to `__init__.py`:
+
+```python
+def declare_model(ctx):
+    cell = ctx.agents["CELL"]
+    cell.newVariableFloat("signal", 0.0)
+    cell.newVariableInt("signal_on", 0)
+    for name in PARAM_DEFAULTS:
+        ctx.env.newPropertyFloat(name, ctx.config[name])
+```
+
+The native CELL description is extended before simulation construction. Parameters in a Python dictionary do not automatically become GPU environment properties: the two `newPropertyFloat` calls make them available to the kernels. `TIME_STEP` is already a core environment property.
+
+### Step 4: implement two GPU functions
+
+Put this in `signal_accumulate.cpp`:
+
+```cpp
+FLAMEGPU_AGENT_FUNCTION(signal_accumulate, flamegpu::MessageNone, flamegpu::MessageNone) {
+    const float rate = FLAMEGPU->environment.getProperty<float>("SIGNAL_RATE");
+    const float dt = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
+    const float signal = FLAMEGPU->getVariable<float>("signal");
+    FLAMEGPU->setVariable<float>("signal", signal + rate * dt);
+    return flamegpu::ALIVE;
+}
+```
+
+Put this in `signal_switch.cpp`:
+
+```cpp
+FLAMEGPU_AGENT_FUNCTION(signal_switch, flamegpu::MessageNone, flamegpu::MessageNone) {
+    const float threshold = FLAMEGPU->environment.getProperty<float>("SIGNAL_THRESHOLD");
+    const float signal = FLAMEGPU->getVariable<float>("signal");
+    FLAMEGPU->setVariable<int>("signal_on", signal >= threshold ? 1 : 0);
+    return flamegpu::ALIVE;
+}
+```
+
+Both functions operate on one CELL at a time, need no messages and return `ALIVE`. Python declarations and C++ accesses must agree on names and types.
+
+### Step 5: register the functions
+
+Append to `__init__.py`:
+
+```python
+def register_functions(ctx):
+    directory = ctx.root / "variants" / ctx.name
+    cell = ctx.agents["CELL"]
+    cell.newRTCFunctionFile("signal_accumulate", str(directory / "signal_accumulate.cpp"))
+    cell.newRTCFunctionFile("signal_switch", str(directory / "signal_switch.cpp"))
+```
+
+Registration makes functions available; it does not schedule them. `FILES` is unnecessary because neither function replaces a core function.
+
+### Step 6: initialize the variables and collect results
+
+Append to `__init__.py`:
+
+```python
+def initialize_cell(instance, rng):
+    instance.setVariableFloat("signal", 0.0)
+    instance.setVariableInt("signal_on", 0)
+
+
+def register_runtime(ctx):
+    ctx.add_agent_initializer("CELL", initialize_cell)
+    ctx.cell_vtk_scalars.extend([
+        ("signal", "signal", "float"), ("signal_on", "signal_on", "int"),
+    ])
+
+    def initialize_results(host):
+        ctx.runtime_results(host)["SIGNAL_OVER_TIME"] = []
+
+    def record_signal(host):
+        cells = host.agent("CELL").getPopulationData()
+        ctx.runtime_results(host)["SIGNAL_OVER_TIME"].append({
+            "step": host.getStepCounter() + 1,
+            "cells": [{"id": cell.getVariableInt("id"),
+                       "signal": cell.getVariableFloat("signal"),
+                       "signal_on": cell.getVariableInt("signal_on")} for cell in cells],
+        })
+
+    ctx.add_init_function(initialize_results)
+    ctx.add_step_function(record_signal)
+```
+
+The explicit initializer illustrates the hook even though the declaration defaults are also zero. `rng` can be used for randomized initialization, but this example is deterministic. A step callback copies a tiny population to the host for teaching purposes; for a large model, sample less often or use reductions instead of exporting every agent every step. Each run has its own result list.
+
+### Step 7: write the complete schedule
+
+Append to `__init__.py`:
+
+```python
+def configure_layers(ctx):
+    ctx.model.newLayer("Signal_Accumulate").addAgentFunction("CELL", "signal_accumulate")
+    ctx.model.newLayer("Signal_Switch").addAgentFunction("CELL", "signal_switch")
+```
+
+This is the entire GPU schedule for this stationary teaching model. Switching uses the signal computed in the same step because it is in the next layer. Keep these functions in separate layers: both access the same CELL population. Host initialization and the registered end-of-step/output callbacks run through the core host-function infrastructure.
+
+### Step 8: run and check the numerical result
+
+From the repository root in the configured environment:
+
+```sh
+python model.py --variant simple_signal --result-dir results/simple_signal
+```
+
+All four cells should follow this trajectory (allow floating-point tolerance):
+
+| Completed step | signal | signal_on |
+| --- | --- | --- |
+| 1 | 0.1 | 0 |
+| 2 | 0.2 | 0 |
+| 3 | 0.3 | 1 |
+| 4 | 0.4 | 1 |
+
+Inspect `SIGNAL_OVER_TIME` in `output_data_0.pickle`; the CELL VTK files also contain `signal` and `signal_on`. For a parameter experiment, create `signal_overrides.json` containing `{"SIGNAL_RATE": 0.2}` and run:
+
+```sh
+python model.py --variant simple_signal --overrides signal_overrides.json --result-dir results/simple_signal_fast
+```
+
+The flag should now turn on at step 2. This verifies declarations, parameter overrides, RTC registration, initialization, ordering and output with an independently calculable answer. The GPU regression script also runs both parameter cases. If you subsequently add division, implement daughter initialization in the birth kernel and add the cycle layers explicitly; enabling its flag alone is rejected.
+
+## Parameters and optimizer overrides
+
+```python
+PARAM_DEFAULTS = {
+    "MY_RESPONSE_RATE": 0.02,
+}
+
+PARAMS = {
+    "CELL_SPEED_REF": 0.005,
+    "SAVE_PICKLE": True,
+}
+
+FILES = {
+    "cell_cycle_file": "variants/my_variant/cell_cycle.cpp",
+}
+```
+
+Precedence is core/default declarations, then `PARAMS`, then user JSON. Indexed overrides and scalar-to-list broadcasting retain the existing `apply_param_overrides()` semantics. New parameters exist before JSON is applied, so optimizer values are not overwritten by a later registration hook.
+
+`validate_config(config)` should reject incompatible combinations rather than allow a schedule to omit required behaviour silently. For example, the current radial-glia schedule does not implement fibre-network, focal-adhesion, lumen, or vascular dynamics and rejects those enabled flags. Its kernels require three species and three cell types.
+
+The results pickle's `MODEL_CONFIG` records `VARIANT_NAME` and the resolved `VARIANT_PARAMETERS` introduced by `PARAM_DEFAULTS`, in addition to the existing core configuration.
+
+An optimizer configuration uses:
 
 ```yaml
-# optimizer/optuna_config_organoid_variant.yaml
-
 model:
-  variant: organoid          # ← loads variants/organoid/__init__.py for every trial
+  variant: radial_glia
   extra_overrides:
-    DEBUG_PRINTING: false
-  timeout: 0
-  cleanup_trials: false
-
+    SAVE_PICKLE: true
 parameters:
-  CELL_SPEED_REF:
+  RG_COMMIT_RATE:
     type: float
-    low: 0.0001
-    high: 0.02
-    log: true
-  # ...
+    low: 0.000001
+    high: 0.00001
 ```
 
-The `parameters:` block is the search space; it overrides only the specific values being tuned while the variant provides all other calibrated defaults.
+See the existing optimizer YAML files for complete study definitions and their fixed-override format.
 
-```bash
-python -m optimizer.optimize --config optimizer/optuna_config_organoid_variant.yaml
-```
+## Context and native declarations
 
----
+`ctx.config` is a detached effective-configuration snapshot with a read-only top-level mapping. Treat nested lists as read-only as well. It contains values, not access to the `model.py` namespace.
 
-## Inserting layers between default layers — worked example
-
-**Motivation:** A radial-glia variant needs to run `cell_rg_differentiation` between L3 (metabolism) and L7 (cell–cell interaction) so that updated `epithelialization_level` values are visible to the adhesion function within the same step.
-
-Because FLAMEGPU2 layers are executed in registration order, the only way to insert between existing layers is to register the default layers yourself, with your new layers added at the right positions.  Copy the relevant portion of `_build_default_layers` and expand it:
+`ctx.model`, `ctx.env`, `ctx.agents`, and `ctx.messages` expose native FLAMEGPU objects. Agent and message dictionaries use their actual FLAMEGPU names. `ctx.root` is the project directory. `ctx.functions` can retain additional function handles; existing core functions are also accessible through the native agent description.
 
 ```python
-# variants/radial_glia/__init__.py
+def declare_model(ctx):
+    cell = ctx.agents["CELL"]
+    cell.newVariableFloat("response", 0.0)
 
-def configure_layers(model, g: dict) -> None:
-    # Register variant env properties first.
-    _env = g.get("env")
-    if _env is not None:
-        try:
-            _env.newPropertyFloat("RG_COMMIT_THRESHOLD", g.get("RG_COMMIT_THRESHOLD", 0.5))
-            # ... other RG properties ...
-        except Exception:
-            pass
+    message = ctx.messages["cell_spatial_location_message"]
+    message.newVariableFloat("response")
+    ctx.env.newPropertyFloat("MY_RESPONSE_RATE", ctx.config["MY_RESPONSE_RATE"])
 
-    # --- Replicate _build_default_layers with RG layers inserted ---
-    # L0 (VASC) — unchanged, call the default block up to here or copy it:
-    # (copy the L0 block from _build_default_layers as-is)
 
-    # L1: Agent Locations
-    model.newLayer("L1_Agent_Locations").addAgentFunction("BCORNER", "bcorner_output_location_data")
-    if g["INCLUDE_DIFFUSION"]:
-        model.Layer("L1_Agent_Locations").addAgentFunction("ECM", "ecm_grid_location_data")
-    if g["INCLUDE_CELLS"]:
-        model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_spatial_location_data")
-    # ... (copy remaining L1 lines) ...
-
-    # L2 — copy from _build_default_layers unchanged
-
-    # L3: Metabolism & Cell Cycle — copy from _build_default_layers unchanged
-
-    # *** INSERT: RG differentiation reads L1 spatial message, updates
-    #             epithelialization_level before L7 cell–cell interaction. ***
-    if g["INCLUDE_CELLS"]:
-        model.newLayer("L3b_RG_Differentiation").addAgentFunction("CELL", "cell_rg_differentiation")
-
-    # L4-L6: Diffusion — copy from _build_default_layers unchanged
-
-    # *** INSERT: RG polarity update reads updated diffusion field. ***
-    if g["INCLUDE_CELLS"]:
-        model.newLayer("L6b_RG_Polarity_Update").addAgentFunction("CELL", "cell_rg_polarity_update")
-
-    # L7-L8: Mechanics and Movement — copy from _build_default_layers unchanged
+def register_functions(ctx):
+    function = ctx.agents["CELL"].newRTCFunctionFile(
+        "cell_response", str(ctx.root / "variants/my_variant/cell_response.cpp"))
+    function.setMessageInput("cell_spatial_location_message")
+    ctx.functions["CELL.cell_response"] = function
 ```
 
-The complete `_build_default_layers` source is in `model.py` (search for `def _build_default_layers`).  Copy only the portions you need to replicate; omit subsystems your variant disables.
+Adding a message field also requires updating its publisher. Declaring a field does not automatically write it. Each spatial message must cover every consumer's required radius, with kernels applying their own distance cutoffs. For example, radial glia extends the CELL message and supplies its publisher through `FILES`.
 
-> **Maintenance note**: if `_build_default_layers` in `model.py` ever gains a new layer, variants that replicate it manually will not pick up the change automatically.  
+Adding agent states also requires ensuring that the applicable generic and variant functions cover those states.
 
----
+## Full schedule ownership
 
-## Adding variant-specific environment properties
+Variants must contain their full `configure_layers(ctx)` implementation. There is no schedule patcher, insertion registry, or automatic merge with the core schedule. A run with no selected variant uses `_build_default_layers()` in `model.py`.
 
-Register them inside `configure_layers` using the live `env` object from globals:
+“Full” means all processes intended for **that model**, not every optional CellFoundry feature. `simple_signal` intentionally defines only accumulation and switching. `variant_template` contains all generic conditional branches. `cell_markers` contains those same branches plus its marker sequence. A disabled branch does not create a layer for that run. Enabling a flag can create agents/functions in the core, but those functions execute only if the chosen variant schedules them; flags are not an implicit schedule.
+
+Inside a variant:
 
 ```python
-def configure_layers(model, g: dict) -> None:
-    _env = g.get("env")
-    if _env is not None:
-        try:
-            _env.newPropertyFloat("MY_PARAM", g.get("MY_PARAM", 1.0))
-        except Exception:
-            pass  # already registered (safe guard for re-runs)
-    g['_build_default_layers']()
+def configure_layers(ctx):
+    model, config = ctx.model, ctx.config
+    # Define every layer required by this variant here, in execution order.
+    # See organoid/__init__.py for a complete generic-feature schedule,
+    # or radial_glia/__init__.py for the full RG-specific sequence.
 ```
 
-The `try/except` guard prevents errors if the model is restarted or called multiple times in the same process.
+Copy a complete existing schedule as a starting point and then edit it explicitly. Register functions in `register_functions()`.
 
----
+For multiscale diffusion, explicitly call `ctx.add_multiscale_diffusion_layers()` at the appropriate point after cellular exchange and C_sp/D_sp preparation. This shared helper owns the solver's internal substeps and commit. The parent schedule still owns broadcasts, boundary handling, mechanics, and movement. Follow the complete examples for the L0 boundary/L1 publication ordering.
 
-## Variant-gated agent variables
+For example, the radial glia variant schedules division before metabolism, then differentiation before polarity and movement. Organoid defines the generic sequence explicitly in its own module. When generic scheduling changes, review variant schedules explicitly; the schedule regression tests help identify divergence.
 
-Some variants introduce per-cell biological state (e.g. RG differentiation progress, apical polarity vector) that is irrelevant — and wastes GPU register pressure, shared memory, and VTK file size — for every unrelated assay running on the same codebase.
+## Initialization, birth and runtime callbacks
 
-The solution is to guard the new variables behind a boolean flag that is `True` only when the appropriate variant is loaded.
-
-### Pattern
-
-**Step 1 — model.py: define the gate flag**
-
-Add one list of variant names and one derived boolean near the other `INCLUDE_*` flags:
+Register a per-agent initializer in `register_runtime()`. The same API accepts any declared agent name:
 
 ```python
-# model.py  (~line 235, near other INCLUDE_* flags)
-VARIANTS_WITH_RG_VARIABLES = ["radial_glia"]        # extend if another variant reuses them
-INCLUDE_RG_VARIABLES = (_VARIANT_NAME in VARIANTS_WITH_RG_VARIABLES)
+def initialize_cell(instance, rng):
+    instance.setVariableFloat("response", rng.uniform(0.0, 1.0))
+
+
+def register_runtime(ctx):
+    ctx.add_agent_initializer("CELL", initialize_cell)
+    ctx.cell_vtk_scalars.append(("response", "response", "float"))
 ```
 
-`_VARIANT_NAME` is the string passed via `--variant` (empty string / `None` when no variant is active), so `INCLUDE_RG_VARIABLES` is `False` for all base runs and all non-RG variants at zero cost.
+Callbacks receive `(instance, rng)` and run in registration order. They initialize additional variables; they must not change the allocated `id` (checked by the API). The RNG is the core NumPy random source. Core loops dispatch callbacks for BCORNER, FNODE, CELL, FOCAD, ECM and VASC when their initial populations are created. CELL callbacks run after position/type/basic state are set, before anchor and stress initialization. Other core-agent callbacks run after their core fields are set. For example, radial glia initializes substrate anchors from the CELL position. Avoid modifying generic geometry or consuming random numbers unless the variant intends that change.
 
-**Step 2 — model.py: gate CELL agent variable declarations**
+For new types, the managed population initializer sets `id`, then calls the same per-agent callbacks. There is no core initial LUMEN population: registering a LUMEN initializer alone does not create droplets. These callbacks do not run for GPU-born agents. Initialize or inherit every extended variable explicitly in their birth kernels, as in radial glia's `cell_cycle.cpp`.
 
-Wrap the new `newVariable*` calls behind the flag.  FLAMEGPU2 allocates GPU memory per-variable per-agent at compile time, so any variable registered here occupies memory for every cell in every run:
+Use `ctx.add_init_function(callback)`, `ctx.add_step_function(callback)`, and `ctx.add_exit_function(callback)` for Python callbacks accepting one native FLAMEGPU HostAPI argument. Init callbacks run after the core population/macro initialization; step callbacks run after the GPU layers. The context wraps these in native HostFunctions and retains the wrappers for their required lifetime. Mid-step host work belongs in an explicit layer in `configure_layers()`.
+
+Use `add_population()` for initial custom-ID populations, rather than calling `newAgent()` in an arbitrary init callback. The managed path reserves bounds before simulation construction and updates initialization counters in the correct order. Ordinary init callbacks are appropriate for analysis buffers and post-initialization work; all managed populations exist by then. Per-instance initializers must not assume another pending population is already visible through HostAPI. Loading a saved population or adding host-side births during a run requires an explicit policy for restoring/allocating counters; the initial-population helper does not implement either workflow.
+
+## New agent populations, identifiers and bucket messages
+
+### Keep identity, bucket keys and array indices distinct
+
+| Quantity | Meaning and ownership |
+| --- | --- |
+| FLAMEGPU internal ID (`getID()`) | Assigned by FLAMEGPU; not the user-defined `id` variable. Do not assume it is dense or matches core offsets. |
+| Custom Int `id` | Used by CellFoundry kernels and outputs. Initial core populations have fixed consecutive ranges. Runtime CELL/FNODE/LUMEN counters are independent, so a reference must identify the target **agent type as well as its id**. |
+| `CURRENT_ID` | Initial-population/reservation high-water mark. It is not a live count and does not track GPU births. |
+| Bucket key | Chosen by the publisher. Its bounds belong to that message, not to the whole model. FNODE buckets use FNODE `id`; FOCAD buckets use the owning `cell_id`. |
+| Dense array index | A bounded index into a specific allocation. For a managed range it can be `id - range.begin`; ECM uses its own `grid_lin_id` for `C_SP_MACRO`. Never index a macro array directly with a global-looking custom id. |
+
+The core initialization prefix is fixed: BCORNER, FNODE (when enabled), CELL, FOCAD (when enabled), ECM, then VASC (when enabled). Absent populations contribute zero to the offsets. New managed variant populations are appended **after this complete prefix**; they cannot insert themselves between core populations. `ctx.initial_ids["CELL"]`, for example, exposes `.begin`, `.count` and `.end` for the **initial** CELL range. It is not a bound on later CELL births; core bucket capacities account for those separately.
+
+At construction time, `add_population()` reserves an explicit custom-ID range and declares its environment bounds and birth counter. At initialization time, the core verifies its cursor against the planned prefix, creates all managed populations in declaration order, assigns IDs, runs their per-agent initializers, seeds their counters and advances `CURRENT_ID` past **all reserved slots**. The LUMEN counter is seeded afterward, including for the monolayer assay when lumen is enabled. Core CELL/FNODE counters retain their own population endpoints.
+
+For example, if the last core initial id is 100, a new population with `count=2, capacity=5` receives initial IDs 101 and 102, reserves `[101, 106)`, and advances `CURRENT_ID` to 105. Its last-issued-ID counter starts at 102; its next birth receives 103. A second managed population starts at 106. Empty populations use `count=0` and a positive capacity; their counters start at `begin - 1`.
+
+These reservations protect initial offsets and separate the new populations' allocated ranges. They do **not** turn the existing core birth counters into one globally unique allocator. A later CELL/FNODE birth can have the same numeric custom id as another type. Store typed references and use type-specific messages/arrays. A model requiring globally unique custom IDs across every type would need a coordinated core migration of birth kernels, links, bucket bounds and exports; changing `CURRENT_ID` alone cannot provide that guarantee.
+
+### Declare a new type and reserve its population
+
+For a small additional `PROBE` agent, add the following inside your variant's hooks. Extend your existing hook bodies; a Python module must have only one definition of each hook.
 
 ```python
-# model.py — in the CELL agent variable section
-if INCLUDE_RG_VARIABLES:
-    CELL_agent.newVariableFloat("rg_commit_level",         0.0)  # [-] logistic commit state
-    CELL_agent.newVariableFloat("epithelialization_level", 0.0)  # [-] junction coverage
-    CELL_agent.newVariableFloat("rosette_maturity",        0.0)  # [-] rosette formation index
-    CELL_agent.newVariableFloat("apx", 0.0)  # apical vector x
-    CELL_agent.newVariableFloat("apy", 0.0)  # apical vector y
-    CELL_agent.newVariableFloat("apz", 0.0)  # apical vector z
-    CELL_agent.newVariableFloat("rg_neighbour_density", 0.0)  # local RG count (normalised)
-    CELL_agent.newVariableFloat("ecm_macro_sp2",        0.0)  # cached ECM morphogen sample
-    CELL_agent.newVariableInt("rg_committed", 0)              # 0/1 irreversible commit flag
+# In declare_model(ctx), after any CELL extensions:
+probe = ctx.model.newAgent("PROBE")
+probe.newVariableInt("id")
+probe.newVariableFloat("value", 0.0)
+ctx.agents["PROBE"] = probe
+ids = ctx.add_population("PROBE", count=2, capacity=5)
+
+message = ctx.model.newMessageBucket("probe_values")
+message.setBounds(ids.begin, ids.end)  # lower inclusive, upper exclusive
+message.newVariableFloat("value")
+ctx.messages["probe_values"] = message
 ```
 
-**Step 3 — model.py: gate spatial-message variable declarations**
+The reservation requires an existing agent with a scalar Int `id`. Registering the agent in `ctx.agents` makes it available to generic initialization. A completely new agent with only a native FLAMEGPU ID can still use `initialize_agent()` explicitly, but it is outside the managed custom-ID population allocator. The minimal managed path above covers normal CellFoundry custom-ID agents.
 
-Spatial messages are broadcast to every cell within the search radius on every step.  Each extra float adds 4 bytes to every message packet:
+`capacity` counts **all IDs that may be issued during the run**, including agents which subsequently die. Slots are not recycled. Choose it deliberately: oversized bucket ranges/macro arrays consume memory, while undersized ranges prevent further births. Use `capacity=count` when there are no births. A zero initial count needs an explicit positive capacity. Counts and capacities must be integers and fit the signed Int ID space. Reservations must be made in `declare_model()`; bounds are sealed before function/runtime registration.
+
+Register its initializer in `register_runtime(ctx)`:
 
 ```python
-# model.py — in the cell_spatial_location_message variable block
-if INCLUDE_RG_VARIABLES:
-    CELL_spatial_location_message.newVariableFloat("rg_commit_level")
-    CELL_spatial_location_message.newVariableFloat("epithelialization_level")
-    CELL_spatial_location_message.newVariableFloat("apx")
-    CELL_spatial_location_message.newVariableFloat("apy")
-    CELL_spatial_location_message.newVariableFloat("apz")
+def initialize_probe(instance, rng):
+    instance.setVariableFloat("value", rng.uniform(0.0, 1.0))
+
+# In register_runtime(ctx):
+ctx.add_agent_initializer("PROBE", initialize_probe)
 ```
 
-**Step 4 — model.py: gate host-init values**
+Do not manually advance `CURRENT_ID` or manually create the initial PROBE population. The core does both through the reservation. For additional states, declare them natively first, then pass the desired initial state, for example `state="growing"`, to `add_population()`. One reservation and counter cover that agent type across its states; the helper creates its initial population in one state. State transitions, appropriate function bindings and outputs remain explicit variant code.
 
-Inside the CELL host-init loop, set the extra variables only when the flag is active:
+A publisher in `probe_publish.cpp` could be:
 
-```python
-# model.py — inside the "for i in range(N_CELLS):" loop
-if INCLUDE_RG_VARIABLES:
-    _ap_angle = np.random.uniform(0.0, 2.0 * np.pi)  # random in-plane apical direction
-    instance.setVariableFloat("apx", float(np.cos(_ap_angle)))
-    instance.setVariableFloat("apy", float(np.sin(_ap_angle)))
-    instance.setVariableFloat("apz", 0.0)
-    instance.setVariableFloat("rg_commit_level",         0.0)
-    instance.setVariableFloat("epithelialization_level", 0.0)
-    instance.setVariableFloat("rosette_maturity",        0.0)
-    instance.setVariableFloat("rg_neighbour_density",    0.0)
-    instance.setVariableFloat("ecm_macro_sp2",           0.0)
-    instance.setVariableInt("rg_committed", 0)
-```
-
-**Step 5 — model.py: build the extra-VTK lists**
-
-Define two lists in `model.py` (where `SaveDataToFile.run` can pick them up via globals) that describe which extra per-cell scalars and vectors to write:
-
-```python
-# model.py — near the SaveDataToFile class or just before the simulation run
-CELL_VTK_EXTRA_SCALARS = []   # list of (vtk_name, agent_variable_name, dtype_str)
-CELL_VTK_EXTRA_VECTORS = []   # list of (vtk_name, vx_var, vy_var, vz_var)
-if INCLUDE_RG_VARIABLES:
-    CELL_VTK_EXTRA_SCALARS = [
-        ("rg_commit_level",         "rg_commit_level",         "float"),
-        ("epithelialization_level", "epithelialization_level", "float"),
-        ("rosette_maturity",        "rosette_maturity",        "float"),
-        ("rg_neighbour_density",    "rg_neighbour_density",    "float"),
-        ("ecm_macro_sp2",           "ecm_macro_sp2",           "float"),
-        ("rg_committed",            "rg_committed",            "int"),
-    ]
-    CELL_VTK_EXTRA_VECTORS = [
-        ("apical_vector", "apx", "apy", "apz"),
-    ]
-```
-
-Pass them through the config dict in `SaveDataToFile.run()`:
-```python
-config={
-    # ... existing keys ...
-    "CELL_VTK_EXTRA_SCALARS": CELL_VTK_EXTRA_SCALARS,
-    "CELL_VTK_EXTRA_VECTORS": CELL_VTK_EXTRA_VECTORS,
+```cpp
+FLAMEGPU_AGENT_FUNCTION(probe_publish, flamegpu::MessageNone, flamegpu::MessageBucket) {
+    FLAMEGPU->message_out.setKey(FLAMEGPU->getVariable<int>("id"));
+    FLAMEGPU->message_out.setVariable<float>("value", FLAMEGPU->getVariable<float>("value"));
+    return flamegpu::ALIVE;
 }
 ```
 
-**Step 6 — helper_module.py: write the extra fields**
-
-In `save_data_to_file_step`, after the fixed orientation VECTORS block and still inside the `with open(...)` block, add:
+Register and bind it in `register_functions(ctx)`:
 
 ```python
-# Extra per-cell scalars injected by variants
-for vtk_name, var_name, dtype in config.get("CELL_VTK_EXTRA_SCALARS", []):
-    fmt = "{:.4f} \n" if dtype == "float" else "{} \n"
-    file.write(f"SCALARS {vtk_name} {dtype} 1\n")
-    file.write("LOOKUP_TABLE default\n")
-    extra_data = []
-    for ai in av:
-        val = ai.getVariableFloat(var_name) if dtype == "float" else ai.getVariableInt(var_name)
-        extra_data.append(val)
-    for val in extra_data:
-        file.write(fmt.format(val))
-    for i in range(num_cells):
-        for _ in range(num_anchor_points):
-            file.write(fmt.format(extra_data[i]))
-
-# Extra per-cell vectors injected by variants
-for vtk_name, vx_var, vy_var, vz_var in config.get("CELL_VTK_EXTRA_VECTORS", []):
-    file.write(f"VECTORS {vtk_name} float\n")
-    for ai in av:
-        vx = ai.getVariableFloat(vx_var)
-        vy = ai.getVariableFloat(vy_var)
-        vz = ai.getVariableFloat(vz_var)
-        file.write(f"{vx:.4f} {vy:.4f} {vz:.4f} \n")
-    for _ in range(num_total_anchor_points):
-        file.write("0.0 0.0 0.0 \n")
+function = ctx.agents["PROBE"].newRTCFunctionFile(
+    "probe_publish", str(ctx.root / "variants" / ctx.name / "probe_publish.cpp"))
+function.setMessageOutput("probe_values")
 ```
 
-### Why this pattern works
-
-| Scenario | `INCLUDE_RG_VARIABLES` | GPU memory | VTK output |
-|---|---|---|---|
-| Base run / any non-RG variant | `False` | no extra | no extra |
-| `--variant radial_glia` | `True` | +9 floats + 1 int per cell | RG fields appended |
-
-The lists `CELL_VTK_EXTRA_SCALARS` / `CELL_VTK_EXTRA_VECTORS` are the only coupling point between `model.py` and `helper_module.py`; no other changes to `helper_module.py` are needed when new variables are added.
-
-### Generalising to other variants
-
-Follow the same naming convention for any variant group that adds biologically-specific per-agent state:
+In your full `configure_layers(ctx)`, add a publication layer and place any consuming functions in subsequent layers:
 
 ```python
-VARIANTS_WITH_INVASION_VARIABLES = ["tumour_invasion", "wound_healing"]
-INCLUDE_INVASION_VARIABLES = (_VARIANT_NAME in VARIANTS_WITH_INVASION_VARIABLES)
+ctx.model.newLayer("Probe_Publication").addAgentFunction("PROBE", "probe_publish")
 ```
 
----
+A consumer must use `MessageBucket` as its input type and bind `setMessageInput("probe_values")`. Query a PROBE's custom id, not a CELL id or a dense slot. Bounds apply even when that bucket is empty. For arrays of capacity 5, calculate `slot = probe_id - VARIANT_PROBE_ID_BEGIN`, check `0 <= slot < 5`, then use the slot. A macro property's C++ template extent must match its Python declaration; changing a capacity does not automatically update a hard-coded template argument.
 
-## Creating a new variant — step-by-step checklist
+### Allocate IDs for GPU births without overrunning the reservation
 
-1. **Create `variants/<name>/`** with an `__init__.py` containing `PARAMS`, `FILES`, and (optionally) `configure_globals` / `configure_layers`.
-2. **Add only the `.cpp` files that differ** from the base model to the same folder.  Copy the relevant base `.cpp`, apply your changes, and document the diff clearly.
-3. **Test the direct run**:
-   ```bash
-   python model.py --variant <name>
-   ```
-4. If optimizing, **create `optimizer/optuna_config_<name>_variant.yaml`** with `model.variant: <name>` and the search space.
-5. **Do not edit `model.py`** unless you need a new feature flag pre-defined with a sensible default (add it near the other `INCLUDE_*` flags and override it via `PARAMS`).  For new agent variables or message variables there is no alternative — add them to `model.py` behind an `INCLUDE_*` guard.
+`add_population("PROBE", ...)` declares four native environment entries:
 
----
+- Int `VARIANT_PROBE_ID_BEGIN`: first reserved id.
+- Int `VARIANT_PROBE_ID_END`: exclusive upper bound.
+- Int macro `VARIANT_PROBE_LAST_ID`, dimension 1: last issued id for this type.
+- Int macro `VARIANT_PROBE_ID_EXHAUSTED`, dimension 1: sticky error flag, initially zero.
 
-## What variants cannot do (and what to do instead)
+The names are also available as `ids.begin_property`, `ids.end_property`, `ids.counter` and `ids.exhaustion_flag`. Use the counter and error flag with `variant_ids.cuh` in a birth kernel:
 
-| Need | Solution |
-|---|---|
-| Add a brand-new agent type with its own message list | Add it to `model.py` behind an `INCLUDE_*` flag; enable it via `PARAMS` |
-| Add new agent variables or message variables | Add them to `model.py`; they default to zero and are harmless in unrelated assays |
-| Override a parameter that doesn't yet exist in `model.py` | Add it to `model.py` with a sensible default, then override in `PARAMS` |
+```cpp
+#include "variant_ids.cuh"
 
-The principle is: **variants encode biological deltas; structural additions go into the main model**.  This keeps `model.py` as the single source of truth for what the simulator is capable of.
-
----
-
-## Reference: execution flow with a variant loaded
-
-```
-python model.py --variant organoid --overrides configs/extra.json
-
-  1. model.py default parameters defined
-  2. --variant organoid parsed from _ORIGINAL_ARGV
-  3. variants/organoid/__init__.py loaded via importlib
-  4. variant.PARAMS applied  →  organoid baseline set
-  5. --overrides extra.json parsed and applied  →  JSON wins over PARAMS
-  6. _file variables assigned (e.g. cell_cycle_file = "cell_cycle.cpp")
-  7. variant.FILES applied   →  cell_cycle_file = "variants/organoid/cell_cycle.cpp"
-  8. variant.configure_globals(globals()) called  →  new flags injected
-  9. FLAMEGPU2 ModelDescription built (agents, messages, env properties)
- 10. variant.configure_layers(model, globals()) called
-       → variant calls g['_build_default_layers']() for the standard L0-L8 stack
-       → variant registers extra env properties
-       (if configure_layers is absent, model.py calls _build_default_layers() directly)
- 11. Logging, simulation run, output saved
-```
-
----
-
-## Directory layout
-
-```
-cellfoundry/
-├── model.py                          ← base model (never edited per-variant)
-├── cell_cycle.cpp                    ← base agent functions
-├── cell_move.cpp
-│   ...
-├── variants/
-│   ├── organoid.py                   ← organoid variant module
-│   └── organoid/
-│       └── cell_cycle.cpp            ← organoid-specific override
-└── optimizer/
-    ├── optuna_config_organoid_variant.yaml
-    └── ...
-```
-
-Each variant is a **single Python file** in `variants/`.  The subfolder `variants/<name>/` holds only the `.cpp` files that differ from the base model.
-
----
-
-## Anatomy of a variant module
-
-A variant module exports up to four objects.  All are optional.
-
-```python
-# variants/my_variant.py
-
-PARAMS: dict        # parameter overrides  (applied before JSON --overrides)
-FILES:  dict        # *_file variable redirections (applied after all parameters)
-
-def configure_globals(g: dict) -> None: ...   # inject new global flags
-def configure_layers(model, g: dict) -> None: # inject / reorder layers
-```
-
-### `PARAMS`
-
-A plain dict mapping parameter names to values.  Any key that exists as a global variable in `model.py` can be overridden.  Scalars are broadcast to lists automatically (same behaviour as `--overrides` JSON).
-
-```python
-PARAMS = {
-    "ORGANOID_ASSAY": True,
-    "N_CELLS": 13,
-    "CELL_RADIUS": [20.0, 20.0, 20.0],     # explicit list
-    "CELL_SPEED_REF": 0.006,                # scalar → broadcast to all types
-    "CYCLE_PHASE_G1_DURATION": [12000.0, 24000.0, 36000.0],
+FLAMEGPU_AGENT_FUNCTION(probe_birth, flamegpu::MessageNone, flamegpu::MessageNone) {
+    auto counter = FLAMEGPU->environment.getMacroProperty<int, 1>("VARIANT_PROBE_LAST_ID");
+    auto exhausted = FLAMEGPU->environment.getMacroProperty<int, 1>("VARIANT_PROBE_ID_EXHAUSTED");
+    const int end = FLAMEGPU->environment.getProperty<int>("VARIANT_PROBE_ID_END");
+    const int id = cellfoundry_claim_variant_id(counter, end, exhausted);
+    if (id < 0) {
+        // Error flag is set; the host will reject this run after the GPU layers.
+        // Do not write agent_out or index a message/array with this invalid id.
+        return flamegpu::ALIVE;
+    }
+    FLAMEGPU->agent_out.setVariable<int>("id", id);
+    FLAMEGPU->agent_out.setVariable<float>("value", 0.0);
+    return flamegpu::ALIVE;
 }
 ```
 
-**Priority**: `--overrides` JSON always wins over `PARAMS`.  This means the optimizer can tune any variant parameter without editing the variant file.
+Register the function on its parent agent, bind `setAgentOutput("PROBE")`, and schedule it explicitly. This illustrative function attempts one birth per caller per step; the biological eligibility rule belongs before allocation. Allocate only when the birth will be committed and initialize every required daughter field. The helper returns `-1` on exhaustion, sets the error flag atomically, and never moves the counter outside its reservation. It does not read or update `CURRENT_ID`. Normal (non-atomic) counter reads must be in a separate layer from GPU writes. Make the shared header visible to RTC compilation; CellFoundry runs from the project root, or an RTC string can include the absolute path constructed from `ctx.root`.
 
-### `FILES`
+**Why the allocation is atomic:** FLAMEGPU's `addAtomic(1)` uses CUDA's `atomicAdd()` and returns the incremented value. The helper uses FLAMEGPU's `CAS(expected, replacement)`, backed by CUDA's atomic compare-and-swap. That operation changes the counter only if it still equals `expected`, and returns the old value. If two threads both observe 44, only one can successfully replace 44 with 45. The other receives the updated value and retries for 46. Each successful CAS is an atomic allocation; the surrounding retry loop is not one indivisible GPU instruction. The helper performs the same unique increment while capacity is available, with an additional bound. A separate ordinary check followed by `addAtomic(1)` would let several threads pass the check when only one slot remains. See FLAMEGPU's [macro-property operations](https://docs.flamegpu.com/guide/agent-functions/interacting-with-environment.html).
 
-A dict mapping the `*_file` variable names in `model.py` to variant-specific `.cpp` paths (relative to the project root, i.e. the directory containing `model.py`).
+**Exhaustion is an error, not a model rule suppressing births.** The framework installs a host check when it seals the reservations, before normal core end-of-step output callbacks. After the GPU layers, any exhaustion flag raises an error naming the affected agent, step, capacity and ID range. The simulation fails instead of continuing with missing agents. Earlier output files may remain and are partial results, not a completed run. Increase the reservation, synchronize any explicit bucket/macro-array bounds, and rerun. The last valid allocation succeeds without an error; only an additional request triggers failure. No extra check registration is needed in the variant. This works independently of FLAMEGPU's optional device seatbelts.
 
-```python
-FILES = {
-    "cell_cycle_file": "variants/organoid/cell_cycle.cpp",
-    "cell_move_file":  "variants/organoid/cell_move.cpp",
-}
-```
+Returning `ALIVE` in the kernel above keeps the **parent** alive until the host reports the allocation failure. The `-1` is only an internal invalid-ID sentinel; it must never be assigned to a daughter or used as an index. The helper cannot resize a bucket message or compiled macro array while the simulation runs.
 
-Only list files that actually differ from the base model.  Unmentioned functions use the base `.cpp` as usual.
+The executable native test `tools/validate_variant_populations.py` covers two new types, a non-default state, an empty starting population, concurrent births, the first/last valid bucket keys, dense macro indexing and repeated simulations. It also compares 1,024 concurrent allocations against `addAtomic(1)` and verifies that insufficient capacities (37 and 1) produce unique bounded IDs and a visible error before normal output. FLAMEGPU's [message documentation](https://docs.flamegpu.com/guide/defining-messages-communication/index.html) and [agent-ID documentation](https://docs.flamegpu.com/guide/agent-functions/modifying-agent-variables.html) describe the native mechanisms underlying this API.
 
-### `configure_globals(g)`
+## Metrics and output
 
-Called after `PARAMS` and `FILES` are applied but **before** `model.py` builds the FLAMEGPU2 `ModelDescription`.  Use it to inject global flags that don't exist in the base model and therefore cannot go into `PARAMS`.
+Additional CELL VTK scalars use `(vtk_name, variable_name, "float" or "int")`. Vectors use `(vtk_name, x_variable, y_variable, z_variable)`. Register them through `ctx.cell_vtk_scalars` and `ctx.cell_vtk_vectors`. Existing output and anchor-removal code handles these fields.
 
-```python
-def configure_globals(g: dict) -> None:
-    # Register a new feature flag that the custom cell_cycle.cpp relies on.
-    g["MY_CUSTOM_FLAG"] = True
-    g["CONTACT_INHIBIT_SIGMA"] = 1.5   # [kPa]
-```
+For pickle results, use `ctx.runtime_results(FLAMEGPU)` from a host callback. It returns a dictionary for that simulation/ensemble run. Initialize each owned result key in an init callback, then collect data in step/exit callbacks. Avoid module-level mutable result buffers.
 
-The layer section in `model.py` can then check `globals().get("MY_CUSTOM_FLAG", False)` safely even when no variant is loaded.
-
-### `configure_layers(model, g)`
-
-Called after **all default layers** have been added.  Use it to:
-
-1. **Append entirely new layers** (the most common use case).
-2. **Register variant-specific environment properties** on `g["env"]`.
-
-Layer reordering (moving an existing layer to a different position) is the one case that requires a small surgical change to `model.py` — see the section below.
-
-```python
-def configure_layers(model, g: dict) -> None:
-    # Append a new statistics layer (requires a matching RTC function
-    # "cell_organoid_stats" registered on the CELL agent in model.py).
-    if g.get("INCLUDE_ORGANOID_STATS", False):
-        model.newLayer("L9_Organoid_Stats").addAgentFunction("CELL", "cell_organoid_stats")
-```
-
----
-
-## Running a variant
-
-```bash
-# Basic run
-python model.py --variant organoid
-
-# With additional parameter overrides (JSON wins over variant PARAMS)
-python model.py --variant organoid --overrides configs/organoid_paper.json
-
-# Specify result directory
-python model.py --variant organoid --result-dir result_files/organoid_run_01
-```
-
-If the variant name is not found in `variants/`, the model exits with a clear error listing available variants.
-
----
-
-## Using variants with the optimizer
-
-Add `model.variant: <name>` to any Optuna YAML config.  The optimizer forwards `--variant <name>` to every trial subprocess automatically.
-
-```yaml
-# optimizer/optuna_config_organoid_variant.yaml
-
-model:
-  variant: organoid          # ← loads variants/organoid.py for every trial
-  extra_overrides:
-    DEBUG_PRINTING: false
-  timeout: 0
-  cleanup_trials: false
-
-parameters:
-  CELL_SPEED_REF:
-    type: float
-    low: 0.0001
-    high: 0.02
-    log: true
-  # ...
-```
-
-The `parameters:` block is the search space; it overrides only the specific values being tuned while the variant provides all other calibrated defaults.
-
-```bash
-python -m optimizer.optimize --config optimizer/optuna_config_organoid_variant.yaml
-```
-
----
-
-## Layer reordering — complete worked example
-
-This is the **only case where you need to touch `model.py`**.  Layer reordering cannot be done purely from a variant module because the default layers are registered with sequential imperative calls; the only way to skip one is to add a guard at that specific call-site.
-
-The change is small and backward-compatible: non-variant runs are unaffected because the guard condition will always be False when no variant is loaded.
-
-**Motivation:** In a dense organoid, the cell-cycle block runs at **L3** (before movement).  A newborn daughter is placed inside its parent and sits there for one full step before repulsion can push it away.  Moving the block to **L9** (after movement) means daughters are placed at the very end of the step; repulsion resolves on the next full step with no stiff-overlap transient.
-
-### Step 1 — Add a guard in model.py
-
-Add a new boolean flag to your variant's `PARAMS` (any name you choose):
-
-```python
-# variants/organoid.py
-PARAMS = {
-    # ... other params ...
-    "ORGANOID_LATE_CYCLE": True,   # move cell-cycle to after movement
-}
-```
-
-This flag must first be pre-defined in `model.py` so that `apply_param_overrides` can find it:
-
-```python
-# model.py — add once, near the other feature flags (e.g. line ~450)
-ORGANOID_LATE_CYCLE: bool = False
-```
-
-Then wrap the L3 cell-cycle block with the guard:
-
-```python
-# model.py — layer section (excerpt)
-if INCLUDE_CELLS and INCLUDE_CELL_CYCLE and not ORGANOID_LATE_CYCLE:
-    model.newLayer("L3_Cell_MaxID_Update").addAgentFunction("CELL", "cell_MaxID_update")
-    model.newLayer("L3_Cell_Cycle").addAgentFunction("CELL", "cell_cycle")
-    if INCLUDE_FOCAL_ADHESIONS:
-        model.newLayer("L3_Cell_Bucket_PostCycle").addAgentFunction("CELL", "cell_bucket_location_data")
-        model.newLayer("L3_FOCAD_PostCycle_Update").addAgentFunction("FOCAD", "focad_post_cycle_update")
-```
-
-### Step 2 — Re-add the block at the new position via configure_layers
-
-```python
-# variants/organoid.py
-def configure_layers(model, g: dict) -> None:
-    if (g.get("ORGANOID_LATE_CYCLE", False)
-            and g.get("INCLUDE_CELLS", False)
-            and g.get("INCLUDE_CELL_CYCLE", False)):
-        # Appended after L8 — daughters are placed at end of each step.
-        model.newLayer("L9_ORGANOID_Cell_MaxID_Update").addAgentFunction("CELL", "cell_MaxID_update")
-        model.newLayer("L9_ORGANOID_Cell_Cycle").addAgentFunction("CELL", "cell_cycle")
-        if g.get("INCLUDE_FOCAL_ADHESIONS", False):
-            model.newLayer("L9_ORGANOID_Cell_Bucket_PostCycle").addAgentFunction("CELL", "cell_bucket_location_data")
-            model.newLayer("L9_ORGANOID_FOCAD_PostCycle_Update").addAgentFunction("FOCAD", "focad_post_cycle_update")
-```
-
-### Step 3 — Resulting execution order
-
-| Layer | Function | Notes |
-|---|---|---|
-| L1_Agent_Locations | BCORNER, ECM, CELL | spatial broadcast |
-| L7_CELL_Cell_Interaction | CELL | repulsion / adhesion |
-| **L8_CELL_Movement** | CELL | cells move |
-| *(L3_Cell_Cycle skipped)* | — | guarded by `ORGANOID_LATE_CYCLE` |
-| **L9_ORGANOID_Cell_Cycle** | CELL | divide / die *after* movement |
-
-### Design note
-
-This is the deliberate trade-off of the variant system: `model.py` remains the single source of truth for **what the simulator is capable of**, while variant modules encode only the **biological delta**.  A layer reorder is an architectural capability decision — it belongs in `model.py`, documented with a clear flag name and default value.  A reader of `model.py` who has never heard of variants will still understand the guard: `if INCLUDE_CELL_CYCLE and not ORGANOID_LATE_CYCLE:`.
-
----
-
-## Adding variant-specific environment properties
-
-If your custom `.cpp` reads environment properties that don't exist in the base model, register them in `configure_layers` using the live `env` object from globals:
-
-```python
-def configure_layers(model, g: dict) -> None:
-    _env = g.get("env")
-    if _env is not None:
-        try:
-            _env.newPropertyFloat("CONTACT_INHIBIT_SIGMA", 1.5)   # [kPa]
-            _env.newPropertyFloat("CONTACT_INHIBIT_FACTOR", 3.0)
-        except Exception:
-            pass  # already registered (safe guard for re-runs)
-```
-
-The `try/except` guard prevents errors if the model is restarted or called multiple times in the same process.
-
-> **Important**: The environment must be fully configured *before* `model.py` registers the agent populations and runs the simulation.  Since `configure_layers` is called right before the logging / simulation setup section, this timing is correct.
-
----
-
-## Creating a new variant — step-by-step checklist
-
-1. **Create `variants/<name>.py`** with `PARAMS`, `FILES`, and (optionally) `configure_globals` / `configure_layers`.
-2. **Create `variants/<name>/`** with only the `.cpp` files that differ.  Copy the relevant base `.cpp` and apply your changes; document the diff clearly.
-3. **Test the direct run**:
-   ```bash
-   python model.py --variant <name>
-   ```
-4. If optimizing, **create `optimizer/optuna_config_<name>_variant.yaml`** with `model.variant: <name>` and the search space.
-5. **Do not edit `model.py`** unless you need a layer reorder (add a boolean flag + guard, see section above) or a new feature flag pre-defined with a sensible default.  Both are small, backward-compatible changes.
-
----
-
-## What variants cannot do (and what to do instead)
-
-| Need | Solution |
-|---|---|
-| Add a brand-new agent type with its own message list | Add it to the base `model.py` behind an `INCLUDE_*` flag; enable it via `PARAMS` |
-| Change agent variable definitions | Add the variable to the base `model.py` agent definition (no variant needed); initialize it conditionally |
-| Structural reorder of more than 2–3 layers | Consider a feature-branch if the delta is large enough to justify it |
-| Override a parameter that doesn't yet exist in `model.py` | Add it to `model.py` with a sensible default, then override in `PARAMS` |
-
-The principle is: **variants encode biological deltas; structural additions go into the main model**.  This keeps `model.py` as the single source of truth for what the simulator is capable of.
-
----
-
-## Reference: execution flow with a variant loaded
-
-```
-python model.py --variant organoid --overrides configs/extra.json
-
-  1. model.py default parameters defined (lines ~35–446)
-  2. --variant organoid parsed from _ORIGINAL_ARGV
-  4. variants/organoid.py loaded via importlib
-  3. variants/organoid.py loaded via importlib
-  4. variant.PARAMS applied  →  organoid baseline set
-  5. --overrides extra.json parsed and applied  →  JSON wins over PARAMS
-  6. _file variables assigned (e.g. cell_cycle_file = "cell_cycle.cpp")
-  7. variant.FILES applied   →  cell_cycle_file = "variants/organoid/cell_cycle.cpp"
-  8. variant.configure_globals(globals()) called  →  new flags injected
-  9. FLAMEGPU2 ModelDescription built (agents, messages, env properties)
- 10. Default layers added (layer-reorder guards in model.py honoured if present)
- 11. variant.configure_layers(model, globals()) called  →  new layers appended
- 12. Logging, simulation run, output saved
-```
+The core merges these entries into its pickle payload and rejects collisions with core result keys. For example, radial glia emits `RG_FINAL_METRICS` and `RG_ROSETTE_METRICS_OVER_TIME`, with column names consumed by the optimizer and diagnostics. Specialized output for new agent types belongs in the variant; the CELL VTK extension lists do not automatically export other agents.

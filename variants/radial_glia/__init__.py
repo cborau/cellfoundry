@@ -41,6 +41,9 @@ _HERE = Path(__file__).parent
 # ---------------------------------------------------------------------------
 PARAMS = {
     # --- Domain ---
+    # This calibrated geometry requires a matching core ECM lattice and RTC
+    # constants in model.py. PARAMS alone does not rebuild that lattice;
+    # see the structural-parameter constraint in Tutorial-Model-Variants.md.
     # 1000×1000×50 µm domain. Z is only 50 µm (monolayer: cells never stack more than
     # 2-3 diameters). With N=6 the shortest side gives dx=10 µm (2.5× finer than
     # default 25 µm) at 101×101×6 = 61,206 ECM agents — similar to the default count.
@@ -75,7 +78,6 @@ PARAMS = {
     "DIVISION_RATE_MULTIPLIER":   [1.0, 1.0, 0.7],               # [-]  per cell type
     # Fraction of RG divisions that are symmetric (both daughters stay RG).
     # The remaining fraction are asymmetric (one RG + one NEP progenitor).
-    "RG_SYMMETRIC_DIVISION_PROB": 0.25,                          # [-]  probability of symmetric RG division
     "INCLUDE_DIFFUSION":          True,
     "INCLUDE_VASCULARIZATION":    False,
     "INCLUDE_FIBRE_NETWORK":      False,
@@ -83,7 +85,6 @@ PARAMS = {
     "INCLUDE_LUMEN":              False,
 
     # --- Cell geometry ---
-    "MIN_ROSETTE_SIZE":           12,                        # minimum RG cells per cluster to count as a genuine rosette
     "N_CELLS":                    300,
     "CELL_RADIUS":                [10.0, 10.0, 10.0],       # [µm]
 
@@ -91,7 +92,7 @@ PARAMS = {
     "CELL_SPEED_REF":             [5e-4, 3e-4, 1e-4],       # [µm/s]
     "ROTATIONAL_DIFFUSION_RATE":  [2e-3, 1e-3, 2e-4],       # [rad²/s]
 
-    # --- Cell-cell mechanics — scalars disabled; matrices override in configure_layers ---
+    # --- Cell-cell mechanics — scalars disabled; matrices registered in declare_model ---
     "CELL_CELL_ADHESION_K":       [0.0, 0.0, 0.0],          # [nN/µm] (replaced by matrix)
     "CELL_CELL_REPULSION_K":      [4.0, 4.0, 4.0],          # [nN/µm] (fallback; matrix used)
     # DV_MAX caps the cell-cell velocity contribution.  Default = 0.5×CELL_SPEED_REF = 2.5e-4 µm/s,
@@ -166,57 +167,52 @@ FILES = {
     "cell_move_file":                  str(_HERE / "cell_move.cpp"),
     "cell_cycle_file":                 str(_HERE / "cell_cycle.cpp"),
     # cell_rg_differentiation and cell_rg_polarity_update are new functions
-    # registered programmatically in configure_layers below.
+    # registered in register_functions(ctx) below.
 }
 
 
 # ---------------------------------------------------------------------------
-# configure_globals — inject global scalars needed before env build
+# PARAM_DEFAULTS — new variant parameters, declared before user overrides
 # ---------------------------------------------------------------------------
-def configure_globals(g: dict) -> None:
-    """Inject RG-specific scalars into model.py globals before the model build.
-
-    These values are read back in configure_layers to register env properties.
-    They are set as globals so downstream code (e.g. logging) can reference them.
-    """
-    g["RG_COMMIT_RATE"]                = 5e-6    # [1/s]  basal commit rate (iPSC only; community-gated).
+PARAM_DEFAULTS = {
+    "RG_COMMIT_RATE": 5e-6,    # [1/s]  basal commit rate (iPSC only; community-gated).
                                                           #        This encodes the "community effect": a
                                                           #        minimum local cell density is required before
                                                           #        isolated cells can initiate differentiation.
                                                           #        tau = 1/(5e-6+2.5e-6) = 37h; first NEP at ~28h.
                                                           #        x_eq_basal = 5e-6/7.5e-6 = 0.667 < RG threshold;
                                                           #        sp2 autocrine required to cross into RG territory.
-    g["RG_COMMIT_AUTOCRINE_RATE"]      = 3.95e-5    # [1/(s·µM)]  morphogen-driven amplification.
+    "RG_COMMIT_AUTOCRINE_RATE": 3.95e-5,    # [1/(s·µM)]  morphogen-driven amplification.
                                                           #        x_eq = drive/(drive+k_decay); drive=k_auto*sp2
                                                           #        τ = 1/(k_auto*sp2 + k_decay);
                                                           #          at sp2=0.14µM: τ = 1/(8.4e-6+1e-6) = 29h  (was 62h at 2.5e-5)
                                                           #          at sp2=0.30µM: τ = 1/(18e-6+1e-6) = 14.6h
                                                           #        x_eq at sp2=0.14: 8.4e-6/9.4e-6 = 0.89 >> 0.67
                                                           #        First RG expected ~65h (NEP at ~22h + 43h drive at rising sp2).
-    g["RG_COMMIT_INHIBIT_RATE"]        = 2e-5    # [1/s]  Notch-Delta lateral inhibition rate.
+    "RG_COMMIT_INHIBIT_RATE": 2e-5,    # [1/s]  Notch-Delta lateral inhibition rate.
                                                           #        x_eq = drive/(drive+k_decay+k_inhibit*delta)
                                                           #        1 RG neighbor (delta~0.08), sp2=0.22: x_eq=0.679 -> borderline
                                                           #        2 RG neighbors (delta~0.16), sp2=0.22: x_eq=0.567 -> inhibited ✓
                                                           #        Boundary at ~2 RG neighbors -> small 7-cell rosettes.
-    g["RG_COMMIT_THRESHOLD_NEP"]       = 0.35    # [-]
-    g["RG_COMMIT_THRESHOLD_RG"]        = 0.67    # [-]
-    g["RG_EPITHELIAL_RATE"]            = 2e-6    # [1/s]  τ ≈ 140 h → polarity develops
+    "RG_COMMIT_THRESHOLD_NEP": 0.35,    # [-]
+    "RG_COMMIT_THRESHOLD_RG": 0.67,    # [-]
+    "RG_EPITHELIAL_RATE": 2e-6,    # [1/s]  τ ≈ 140 h → polarity develops
                                                           #        only for fully committed RG in 7 days;
                                                           #        also gated on cell_type==2 so NEP
                                                           #        cells never accumulate epi>0
-    g["RG_POLARITY_SP2_THRESHOLD"]     = 0.1     # [uM]  sp2 gate for z-bias; at L=50 um: C(75 um)~0.09 < threshold
-    g["RG_SUBSTRATE_K"]                = 1e-4    # [nN/µm / (nN·s/µm)] → effective 1/s
+    "RG_POLARITY_SP2_THRESHOLD": 0.1,     # [uM]  sp2 gate for z-bias; at L=50 um: C(75 um)~0.09 < threshold
+    "RG_SUBSTRATE_K": 1e-4,    # [nN/µm / (nN·s/µm)] → effective 1/s
                                                           #        stability: λ = K/D·dt = 1e-4/0.4×60 ≈ 0.015 (< 1, stable)
                                                           #        equilibrium height: z_eq = bias·D/K
                                                           #          RG  (bias=8e-4): z_eq ≈  8 µm (rosette elevation)
                                                           #          NEP (bias=5e-4): z_eq ≈  5 µm
                                                           #          iPSC (bias=0):   z_eq =  0 µm (stays on substrate)
-    g["RG_SUBSTRATE_Z0"]               = 0.0    # [µm above COORD_BOUNDARY_Z_NEG]
+    "RG_SUBSTRATE_Z0": 0.0,    # [µm above COORD_BOUNDARY_Z_NEG]
                                                           #        z_rest = COORD_BOUNDARY_Z_NEG + RG_SUBSTRATE_Z0
                                                           #        = -75 + 75 = 0 µm (domain centre),
                                                           #        consistent with MONOLAYER_Z = 0.0
-    g["RG_APICAL_BIAS_RG"]             = 8e-4    # [µm/s] for RG type; prevents rapid z-detachment
-    g["RG_APICAL_BIAS_NEP"]            = 5e-4    # [µm/s] for NEP (neuroepithelial progenitor) type
+    "RG_APICAL_BIAS_RG": 8e-4,    # [µm/s] for RG type; prevents rapid z-detachment
+    "RG_APICAL_BIAS_NEP": 5e-4,    # [µm/s] for NEP (neuroepithelial progenitor) type
     # Adhesion matrix: 3×3 flattened row-major, indexed as [self_type * 3 + nb_type]  [nN/µm]
     # Rows = self cell type; columns = neighbour cell type.
     # Biological rationale:
@@ -229,36 +225,40 @@ def configure_globals(g: dict) -> None:
     #         NEP   [  0.4,  0.8,  0.6 ]
     #         RG    [  0.2,  0.6,  1.5 ]   <- max with boost = 1.5 × 2.5 = 3.75 < repulsion 4.0
     #                                         gap maintained at all epithelialization levels
-    g["RG_ADHESION_MATRIX"]  = [0.4, 0.4, 0.2,
+    "RG_ADHESION_MATRIX": [0.4, 0.4, 0.2,
                                  0.4, 0.8, 0.6,
-                                 0.2, 0.6, 1.5]
-    g["RG_REPULSION_MATRIX"] = [4.0, 4.0, 4.0,
+                                 0.2, 0.6, 1.5],
+    "RG_REPULSION_MATRIX": [4.0, 4.0, 4.0,
                                4.0, 4.0, 4.0,
-                               4.0, 4.0, 4.0]  # [nN/µm] RG-RG repulsion = same as others
-    g["RG_EPITHELIAL_ADHESION_BOOST"] = 2.5     # [-]  max RG-RG = 1.2×2.5=3.0
-    g["RG_COMMIT_NOISE"]     = 7e-5    # [1/s / sqrt(s)]  Ito noise on commitment ODE
+                               4.0, 4.0, 4.0],  # [nN/µm] RG-RG repulsion = same as others
+    "RG_EPITHELIAL_ADHESION_BOOST": 2.5,     # [-]  max RG-RG = 1.2×2.5=3.0
+    "RG_COMMIT_NOISE": 7e-5,    # [1/s / sqrt(s)]  Ito noise on commitment ODE
                                        # sigma_total(24h) = 1e-4 * sqrt(86400) ~ 0.029
                                        # NPC timing spread ~ +/-0.029 / (5e-6 * 0.65) ~ +/-2.5h
-    g["RG_INTRINSIC_APICAL_Z"] = 2e-3  # [-/step]  blend alpha toward (0,0,1) per step
+    "RG_INTRINSIC_APICAL_Z": 2e-3,  # [-/step]  blend alpha toward (0,0,1) per step
                                        # For RG cells alpha = 2e-3 * commit (~1.4e-3 at commit=0.7)
                                        # -> half-life ~8h: aligns quickly after RG commitment.
                                        # For NPC cells alpha = 2e-3 * epi * commit (much slower;
                                        # at epi=0.1, commit=0.5: half-life ~115h)
-    g["RG_LUMEN_BIAS_STRENGTH"] = 4e-3  # [-/step]  XY blend toward local RG-centroid lumen cue
-    g["RG_LUMEN_SEARCH_RADIUS"] = 84.0  # [um]       neighbour radius for local lumen centroid (scaled 2× for r=10 µm)
-    g["RG_LUMEN_MIN_NEIGHBOURS"] = 2.0  # [-]        minimum alive RG neighbours to enable lumen cue
-    g["RG_APICAL_NOISE_AMP"]   = 1e-3  # [-/step]  xy noise std dev for cells outside the morphogen gate
-    g["RG_XY_SPRING_K"]    = 5e-6    # [1/s]  xy substrate spring stiffness for NPC/RG;
+    "RG_LUMEN_BIAS_STRENGTH": 4e-3,  # [-/step]  XY blend toward local RG-centroid lumen cue
+    "RG_LUMEN_SEARCH_RADIUS": 84.0,  # [um]       neighbour radius for local lumen centroid (scaled 2× for r=10 µm)
+    "RG_LUMEN_MIN_NEIGHBOURS": 2.0,  # [-]        minimum alive RG neighbours to enable lumen cue
+    "RG_APICAL_NOISE_AMP": 1e-3,  # [-/step]  xy noise std dev for cells outside the morphogen gate
+    "RG_XY_SPRING_K": 5e-6,    # [1/s]  xy substrate spring stiffness for NPC/RG;
                                        #        anchor slips at 20 µm so cells can aggregate
-    g["RG_XY_BOND_BREAK"]  = 40.0   # [µm]   bond-rupture distance: anchor slips to current
+    "RG_XY_BOND_BREAK": 40.0,   # [µm]   bond-rupture distance: anchor slips to current
                                        #        position when cell has moved >40 µm from it
-    g["RG_COMMIT_DECAY_RATE"] = 1.0e-6  # [1/s]  first-order decay of rg_commit_level.
+    "RG_COMMIT_DECAY_RATE": 1.0e-6,  # [1/s]  first-order decay of rg_commit_level.
                                        #          effective_decay = 2.5e-6 + 0.96e-6 = 3.46e-6
                                        #          No sp2:        x_eq = 5e-6/8.46e-6 = 0.591 -> fence holds
                                        #          sp2=0.14uM:    x_eq = 7.8e-6/11.26e-6 = 0.693 -> NPC
                                        #          sp2=0.17uM:    x_eq = 8.4e-6/11.86e-6 = 0.708 -> RG
                                        #        Fence holds at mean sp2; rosette grows where sp2 peaks.
-    g["RG_COMMUNITY_MIN_DENSITY"]  = 4.0   # [-]  minimum live spatial neighbours to fully gate
+    "RG_COMMUNITY_MIN_DENSITY": 4.0,   # [-]  minimum live spatial neighbours to fully gate
+    "RG_SYMMETRIC_DIVISION_PROB": 0.25,
+    "MIN_ROSETTE_SIZE": 12,
+}
+
                                        #        the basal commit drive (community effect).
                                        #        community_gate = min(1, n_nbrs / RG_COMMUNITY_MIN_DENSITY)
                                        #        Isolated cells (< 4 neighbours within the
@@ -270,50 +270,28 @@ def configure_globals(g: dict) -> None:
 # ---------------------------------------------------------------------------
 # configure_layers — full layer sequence with two inserted layers
 # ---------------------------------------------------------------------------
-def configure_layers(model, g: dict) -> None:
-    """Build the full simulation layer sequence for the RG variant.
-
-    This variant CANNOT call g['_build_default_layers']() because it must
-    insert two new layers (L3b, L6b) between default layers.  The relevant
-    portions of the default sequence are replicated inline here.
-
-    Any booleans from PARAMS that affect which default layers are created are
-    read from g (which contains the merged model.py globals).
-    """
-    _env = g.get("env")
-
-    # --- Register new RG env properties -------------------------------------------
-    if _env is not None:
-        _register_rg_env_properties(_env, g)
-
-    # --- Register new RTC agent functions on the CELL agent -----------------------
-    CELL_agent = model.Agent("CELL")
-
-    rg_diff_fn = CELL_agent.newRTCFunctionFile("cell_rg_differentiation", str(_HERE / "cell_rg_differentiation.cpp"))
-    rg_diff_fn.setMessageInput("cell_spatial_location_message")
-
-    rg_polarity_fn = CELL_agent.newRTCFunctionFile("cell_rg_polarity_update", str(_HERE / "cell_rg_polarity_update.cpp"))
-    rg_polarity_fn.setMessageInput("cell_spatial_location_message")
-
-    # --- Convenience flags (read from merged globals) -----------------------------
-    INCLUDE_DIFFUSION           = g.get("INCLUDE_DIFFUSION",          True)
-    INCLUDE_CELLS               = g.get("INCLUDE_CELLS",              True)
-    INCLUDE_CELL_CELL_INTERACTION = g.get("INCLUDE_CELL_CELL_INTERACTION", True)
-    INCLUDE_CELL_CYCLE          = g.get("INCLUDE_CELL_CYCLE",         False)
-    INCLUDE_VASCULARIZATION     = g.get("INCLUDE_VASCULARIZATION",    False)
-    INCLUDE_FIBRE_NETWORK       = g.get("INCLUDE_FIBRE_NETWORK",      False)
-    INCLUDE_FOCAL_ADHESIONS     = g.get("INCLUDE_FOCAL_ADHESIONS",    False)
-    INCLUDE_LUMEN               = g.get("INCLUDE_LUMEN",              False)
-    ORGANOID_ASSAY              = g.get("ORGANOID_ASSAY",             False)
-    MOVING_BOUNDARIES           = g.get("MOVING_BOUNDARIES",          False)
-    INCLUDE_VASCULAR_CELL_RECRUITMENT = g.get("INCLUDE_VASCULAR_CELL_RECRUITMENT", False)
-    INCLUDE_CELL_FNODE_REPULSION = g.get("INCLUDE_CELL_FNODE_REPULSION", False)
-    INCLUDE_NETWORK_REMODELING  = g.get("INCLUDE_NETWORK_REMODELING", False)
-    HETEROGENEOUS_DIFFUSION     = g.get("HETEROGENEOUS_DIFFUSION",    False)
+def configure_layers(ctx):
+    """Full RG schedule; division intentionally precedes metabolism."""
+    model, config = ctx.model, ctx.config
+    # --- Convenience flags (effective configuration) -----------------------------
+    INCLUDE_DIFFUSION           = config.get("INCLUDE_DIFFUSION",          True)
+    INCLUDE_CELLS               = config.get("INCLUDE_CELLS",              True)
+    INCLUDE_CELL_CELL_INTERACTION = config.get("INCLUDE_CELL_CELL_INTERACTION", True)
+    INCLUDE_CELL_CYCLE          = config.get("INCLUDE_CELL_CYCLE",         False)
+    INCLUDE_VASCULARIZATION     = config.get("INCLUDE_VASCULARIZATION",    False)
+    INCLUDE_FIBRE_NETWORK       = config.get("INCLUDE_FIBRE_NETWORK",      False)
+    INCLUDE_FOCAL_ADHESIONS     = config.get("INCLUDE_FOCAL_ADHESIONS",    False)
+    INCLUDE_LUMEN               = config.get("INCLUDE_LUMEN",              False)
+    ORGANOID_ASSAY              = config.get("ORGANOID_ASSAY",             False)
+    MOVING_BOUNDARIES           = config.get("MOVING_BOUNDARIES",          False)
+    INCLUDE_VASCULAR_CELL_RECRUITMENT = config.get("INCLUDE_VASCULAR_CELL_RECRUITMENT", False)
+    INCLUDE_CELL_FNODE_REPULSION = config.get("INCLUDE_CELL_FNODE_REPULSION", False)
+    INCLUDE_NETWORK_REMODELING  = config.get("INCLUDE_NETWORK_REMODELING", False)
+    HETEROGENEOUS_DIFFUSION     = config.get("HETEROGENEOUS_DIFFUSION",    False)
 
     # --- L0: VASC (skipped — INCLUDE_VASCULARIZATION = False) ---
 
-    if g.get("MULTISCALE_DIFFUSION"):
+    if config.get("MULTISCALE_DIFFUSION"):
         model.newLayer("L0_ECM_Diffusion_Boundary").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
 
     # --- L1: Agent locations ---
@@ -325,7 +303,7 @@ def configure_layers(model, g: dict) -> None:
         model.Layer("L1_Agent_Locations").addAgentFunction("CELL", "cell_spatial_location_data")
 
     # --- L2: Boundary interactions ---
-    if INCLUDE_DIFFUSION and not g.get("MULTISCALE_DIFFUSION"):
+    if INCLUDE_DIFFUSION and not config.get("MULTISCALE_DIFFUSION"):
         model.newLayer("L2_ECM_Boundary_Interactions").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
 
     # --- L2b: Cell cycle (override enabled; runs before metabolism so newly born
@@ -348,8 +326,8 @@ def configure_layers(model, g: dict) -> None:
             model.newLayer("L4_ECM_Dsp_Update").addAgentFunction("ECM", "ecm_Dsp_update")
     if INCLUDE_DIFFUSION or MOVING_BOUNDARIES:
         model.newLayer("L5_Diffusion").addAgentFunction("ECM", "ecm_ecm_interaction")
-    if g.get("MULTISCALE_DIFFUSION"):
-        g["_add_multiscale_diffusion_layers"]()
+    if config.get("MULTISCALE_DIFFUSION"):
+        ctx.add_multiscale_diffusion_layers()
     if INCLUDE_DIFFUSION:
         model.newLayer("L6_Diffusion_Boundary").addAgentFunction("ECM", "ecm_boundary_concentration_conditions")
 
@@ -371,72 +349,105 @@ def configure_layers(model, g: dict) -> None:
         model.newLayer("L8_ECM_Movement").addAgentFunction("ECM", "ecm_move")
 
 
-# ---------------------------------------------------------------------------
-# Internal helper — register RG-specific env properties
-# ---------------------------------------------------------------------------
-def _register_rg_env_properties(env, g: dict) -> None:
-    """Register all RG-specific environment properties.
 
-    Guards each registration with a try/except so re-running the same Python
-    process (e.g. during interactive testing) is safe.
-    """
-    def _safe(register_fn):
-        try:
-            register_fn()
-        except Exception:
-            pass  # property already registered
+def validate_config(config):
+    """Reject combinations the RG kernels and explicit schedule do not support."""
+    import math
+    if not config["INCLUDE_CELLS"] or not config["INCLUDE_DIFFUSION"]:
+        raise ValueError("radial_glia requires INCLUDE_CELLS and INCLUDE_DIFFUSION")
+    if config["N_CELL_TYPES"] != 3 or config["N_SPECIES"] != 3:
+        raise ValueError("radial_glia kernels require three cell types and three species")
+    unsupported = [name for name in ("INCLUDE_FIBRE_NETWORK", "INCLUDE_FOCAL_ADHESIONS",
+                   "INCLUDE_LUMEN", "INCLUDE_VASCULARIZATION") if config[name]]
+    if unsupported:
+        raise ValueError(f"radial_glia configure_layers does not schedule: {unsupported}")
+    for name, default in PARAM_DEFAULTS.items():
+        value = config[name]
+        values = value if isinstance(value, (list, tuple)) else [value]
+        if isinstance(default, list) and len(values) != len(default):
+            raise ValueError(f"{name} must contain {len(default)} values")
+        if any(not isinstance(v, (int, float)) or not math.isfinite(v) for v in values):
+            raise ValueError(f"{name} must contain finite numeric values")
+        if name != "RG_SUBSTRATE_Z0" and any(v < 0 for v in values):
+            raise ValueError(f"{name} must be non-negative")
+    if not 0 <= config["RG_SYMMETRIC_DIVISION_PROB"] <= 1:
+        raise ValueError("RG_SYMMETRIC_DIVISION_PROB must be between zero and one")
+    if not 0 <= config["RG_COMMIT_THRESHOLD_NEP"] <= config["RG_COMMIT_THRESHOLD_RG"] <= 1:
+        raise ValueError("RG commitment thresholds must satisfy 0 <= NEP <= RG <= 1")
+    if config["MIN_ROSETTE_SIZE"] < 1 or int(config["MIN_ROSETTE_SIZE"]) != config["MIN_ROSETTE_SIZE"]:
+        raise ValueError("MIN_ROSETTE_SIZE must be a positive integer")
 
-    _safe(lambda: env.newPropertyFloat("RG_COMMIT_RATE",
-                                        g.get("RG_COMMIT_RATE", 5e-6)))
-    _safe(lambda: env.newPropertyFloat("RG_COMMIT_AUTOCRINE_RATE",
-                                        g.get("RG_COMMIT_AUTOCRINE_RATE", 2.5e-5)))
-    _safe(lambda: env.newPropertyFloat("RG_COMMIT_INHIBIT_RATE",
-                                        g.get("RG_COMMIT_INHIBIT_RATE", 2e-5)))
-    _safe(lambda: env.newPropertyFloat("RG_COMMIT_THRESHOLD_NEP",
-                                        g.get("RG_COMMIT_THRESHOLD_NEP", 0.35)))
-    _safe(lambda: env.newPropertyFloat("RG_COMMIT_THRESHOLD_RG",
-                                        g.get("RG_COMMIT_THRESHOLD_RG", 0.67)))
-    _safe(lambda: env.newPropertyFloat("RG_EPITHELIAL_RATE",
-                                        g.get("RG_EPITHELIAL_RATE", 1e-5)))
-    _safe(lambda: env.newPropertyFloat("RG_POLARITY_SP2_THRESHOLD",
-                                        g.get("RG_POLARITY_SP2_THRESHOLD", 0.0)))
-    _safe(lambda: env.newPropertyFloat("RG_SUBSTRATE_K",
-                                        g.get("RG_SUBSTRATE_K", 1e-4)))
-    _safe(lambda: env.newPropertyFloat("RG_SUBSTRATE_Z0",
-                                        g.get("RG_SUBSTRATE_Z0", 0.0)))
-    _safe(lambda: env.newPropertyFloat("RG_APICAL_BIAS_RG",
-                                        g.get("RG_APICAL_BIAS_RG", 2e-3)))
-    _safe(lambda: env.newPropertyFloat("RG_APICAL_BIAS_NEP",
-                                        g.get("RG_APICAL_BIAS_NEP", 5e-4)))
-    _safe(lambda: env.newPropertyArrayFloat("RG_ADHESION_MATRIX",
-                                             g.get("RG_ADHESION_MATRIX",
-                                                   [0.4, 0.4, 0.2,
-                                                    0.4, 0.8, 0.6,
-                                                    0.2, 0.6, 1.5])))
-    _safe(lambda: env.newPropertyArrayFloat("RG_REPULSION_MATRIX",
-                                             g.get("RG_REPULSION_MATRIX",
-                                                   [4.0] * 9)))
-    _safe(lambda: env.newPropertyFloat("RG_EPITHELIAL_ADHESION_BOOST",
-                                        g.get("RG_EPITHELIAL_ADHESION_BOOST", 2.5)))
-    _safe(lambda: env.newPropertyFloat("RG_COMMIT_NOISE",
-                                        g.get("RG_COMMIT_NOISE", 7e-5)))
-    _safe(lambda: env.newPropertyFloat("RG_INTRINSIC_APICAL_Z",
-                                        g.get("RG_INTRINSIC_APICAL_Z", 0.5)))
-    _safe(lambda: env.newPropertyFloat("RG_LUMEN_BIAS_STRENGTH",
-                                        g.get("RG_LUMEN_BIAS_STRENGTH", 4e-3)))
-    _safe(lambda: env.newPropertyFloat("RG_LUMEN_SEARCH_RADIUS",
-                                        g.get("RG_LUMEN_SEARCH_RADIUS", 84.0)))
-    _safe(lambda: env.newPropertyFloat("RG_LUMEN_MIN_NEIGHBOURS",
-                                        g.get("RG_LUMEN_MIN_NEIGHBOURS", 2.0)))
-    _safe(lambda: env.newPropertyFloat("RG_APICAL_NOISE_AMP",
-                                        g.get("RG_APICAL_NOISE_AMP", 0.0)))
-    _safe(lambda: env.newPropertyFloat("RG_XY_SPRING_K",
-                                        g.get("RG_XY_SPRING_K", 1e-5)))
-    _safe(lambda: env.newPropertyFloat("RG_XY_BOND_BREAK",
-                                        g.get("RG_XY_BOND_BREAK", 40.0)))
-    _safe(lambda: env.newPropertyFloat("RG_COMMIT_DECAY_RATE",
-                                        g.get("RG_COMMIT_DECAY_RATE", 1.0e-6)))
-    _safe(lambda: env.newPropertyFloat("RG_SYMMETRIC_DIVISION_PROB",
-                                        g.get("RG_SYMMETRIC_DIVISION_PROB", 0.25)))
-    _safe(lambda: env.newPropertyFloat("RG_COMMUNITY_MIN_DENSITY",
-                                        g.get("RG_COMMUNITY_MIN_DENSITY", 4.0)))
+
+def declare_model(ctx):
+    """Extend the existing CELL and its spatial message using native FLAMEGPU."""
+    cell = ctx.agents["CELL"]
+    cell.newVariableFloat("rg_commit_level",         0.0)  # [-] logistic commit state (0=iPSC, 1=RG)
+    cell.newVariableFloat("epithelialization_level", 0.0)  # [-] junction coverage (0=unpolarised, 1=epithelial)
+    cell.newVariableFloat("rosette_maturity",        0.0)  # [-] rosette formation index
+    cell.newVariableFloat("apx", 0.0)  # apical polarity vector x
+    cell.newVariableFloat("apy", 0.0)  # apical polarity vector y
+    cell.newVariableFloat("apz", 0.0)  # apical polarity vector z
+    cell.newVariableFloat("rg_neighbour_density", 0.0)  # normalised local RG-cell count
+    cell.newVariableFloat("morphogen_local",      0.0)  # cached ECM morphogen concentration sample (sp2) at cell location
+    cell.newVariableInt("rg_committed", 0)              # 0/1 irreversible commit flag
+    cell.newVariableFloat("substrate_anchor_x", 0.0)   # xy substrate anchor position for bond-spring (NEP/RG)
+    cell.newVariableFloat("substrate_anchor_y", 0.0)
+    message = ctx.messages["cell_spatial_location_message"]
+    message.newVariableFloat("rg_commit_level")
+    message.newVariableFloat("epithelialization_level")
+    message.newVariableFloat("apx")
+    message.newVariableFloat("apy")
+    message.newVariableFloat("apz")
+
+    # All consumers must be covered; each kernel still applies its own cutoff.
+    message.setRadius(max(ctx.config["MAX_SEARCH_RADIUS_CELL_CELL_INTERACTION"],
+                          ctx.config["RG_LUMEN_SEARCH_RADIUS"]))
+    env, config = ctx.env, ctx.config
+    env.newPropertyFloat("RG_COMMIT_RATE", config["RG_COMMIT_RATE"])
+    env.newPropertyFloat("RG_COMMIT_AUTOCRINE_RATE", config["RG_COMMIT_AUTOCRINE_RATE"])
+    env.newPropertyFloat("RG_COMMIT_INHIBIT_RATE", config["RG_COMMIT_INHIBIT_RATE"])
+    env.newPropertyFloat("RG_COMMIT_THRESHOLD_NEP", config["RG_COMMIT_THRESHOLD_NEP"])
+    env.newPropertyFloat("RG_COMMIT_THRESHOLD_RG", config["RG_COMMIT_THRESHOLD_RG"])
+    env.newPropertyFloat("RG_EPITHELIAL_RATE", config["RG_EPITHELIAL_RATE"])
+    env.newPropertyFloat("RG_POLARITY_SP2_THRESHOLD", config["RG_POLARITY_SP2_THRESHOLD"])
+    env.newPropertyFloat("RG_SUBSTRATE_K", config["RG_SUBSTRATE_K"])
+    env.newPropertyFloat("RG_SUBSTRATE_Z0", config["RG_SUBSTRATE_Z0"])
+    env.newPropertyFloat("RG_APICAL_BIAS_RG", config["RG_APICAL_BIAS_RG"])
+    env.newPropertyFloat("RG_APICAL_BIAS_NEP", config["RG_APICAL_BIAS_NEP"])
+    env.newPropertyFloat("RG_EPITHELIAL_ADHESION_BOOST", config["RG_EPITHELIAL_ADHESION_BOOST"])
+    env.newPropertyFloat("RG_COMMIT_NOISE", config["RG_COMMIT_NOISE"])
+    env.newPropertyFloat("RG_INTRINSIC_APICAL_Z", config["RG_INTRINSIC_APICAL_Z"])
+    env.newPropertyFloat("RG_LUMEN_BIAS_STRENGTH", config["RG_LUMEN_BIAS_STRENGTH"])
+    env.newPropertyFloat("RG_LUMEN_SEARCH_RADIUS", config["RG_LUMEN_SEARCH_RADIUS"])
+    env.newPropertyFloat("RG_LUMEN_MIN_NEIGHBOURS", config["RG_LUMEN_MIN_NEIGHBOURS"])
+    env.newPropertyFloat("RG_APICAL_NOISE_AMP", config["RG_APICAL_NOISE_AMP"])
+    env.newPropertyFloat("RG_XY_SPRING_K", config["RG_XY_SPRING_K"])
+    env.newPropertyFloat("RG_XY_BOND_BREAK", config["RG_XY_BOND_BREAK"])
+    env.newPropertyFloat("RG_COMMIT_DECAY_RATE", config["RG_COMMIT_DECAY_RATE"])
+    env.newPropertyFloat("RG_COMMUNITY_MIN_DENSITY", config["RG_COMMUNITY_MIN_DENSITY"])
+    env.newPropertyFloat("RG_SYMMETRIC_DIVISION_PROB", config["RG_SYMMETRIC_DIVISION_PROB"])
+    env.newPropertyArrayFloat("RG_ADHESION_MATRIX", config["RG_ADHESION_MATRIX"])
+    env.newPropertyArrayFloat("RG_REPULSION_MATRIX", config["RG_REPULSION_MATRIX"])
+
+
+def register_functions(ctx):
+    cell = ctx.agents["CELL"]
+    for name in ("cell_rg_differentiation", "cell_rg_polarity_update"):
+        function = cell.newRTCFunctionFile(name, str(_HERE / f"{name}.cpp"))
+        function.setMessageInput("cell_spatial_location_message")
+        ctx.functions[f"CELL.{name}"] = function
+
+
+def register_runtime(ctx):
+    from .runtime import initialize_cell, CELL_VTK_EXTRA_SCALARS, CELL_VTK_EXTRA_VECTORS
+    from .runtime import Metrics, DebugStats
+
+    ctx.add_agent_initializer("CELL", initialize_cell)
+    ctx.cell_vtk_scalars.extend(CELL_VTK_EXTRA_SCALARS)
+    ctx.cell_vtk_vectors.extend(CELL_VTK_EXTRA_VECTORS)
+    metrics = Metrics(ctx)
+    ctx.add_init_function(metrics.initialize)
+    if ctx.config["DEBUG_PRINT_INTERVAL"] > 0:
+        ctx.add_step_function(DebugStats(ctx).run)
+    if ctx.config["SAVE_PICKLE"]:
+        ctx.add_step_function(metrics.run)

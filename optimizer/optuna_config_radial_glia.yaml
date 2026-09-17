@@ -53,7 +53,7 @@ model:
     SAVE_PICKLE: true
     DEBUG_PRINTING: false
     SAVE_NO_ANCHOR_CELL_FILES: false
-    # INCLUDE_RG_VARIABLES is set automatically when variant=radial_glia
+    # The radial_glia variant registers its CELL fields and metrics automatically.
 
   timeout: 0      # wall-clock seconds per trial (0 = unlimited)
   cleanup_trials: false

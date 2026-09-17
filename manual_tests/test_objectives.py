@@ -277,6 +277,7 @@ def _make_mock_results(n_steps: int = 50) -> dict:
                 "radius_of_gyration": np.linspace(20.0, 80.0, n_steps),
                 "equivalent_sphere_radius": np.linspace(20.0, 80.0, n_steps) * np.sqrt(5.0 / 3.0),
                 "max_span": np.linspace(50.0, 200.0, n_steps),
+                "mean_nn_distance": np.linspace(10.0, 20.0, n_steps),
                 "sphericity": np.linspace(1.0, 0.8, n_steps),
                 "centroid_x": np.zeros(n_steps),
                 "centroid_y": np.zeros(n_steps),

@@ -6,7 +6,7 @@
 # the variant system to load the organoid-specific parameter baseline and
 # custom cell_cycle.cpp override.  Only the parameters being *searched* need
 # to appear in the `parameters:` block below — everything else is set by
-# variants/organoid.py.
+# variants/organoid/__init__.py.
 #
 # Usage:
 #    python -m optimizer.optimize \
@@ -15,7 +15,7 @@
 # Key differences from optuna_config_organoid.yaml
 # -------------------------------------------------
 #   model.variant: organoid
-#       Loads variants/organoid.py before each trial subprocess.
+#       Loads variants/organoid/__init__.py before each trial subprocess.
 #       Provides the calibrated baseline (STEPS, TIME_STEP, ORGANOID_ASSAY,
 #       N_CELLS, CELL_RADIUS, etc.) so this YAML stays minimal.
 #
