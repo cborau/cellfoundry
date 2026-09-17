@@ -3940,7 +3940,7 @@ def apply_param_overrides(
     return accumulated_pins
 
 
-def load_param_overrides_from_cli(argv=None):
+def load_param_overrides_from_cli(argv=None, *, parsed_args=None):
     """Parse --overrides and --result-dir from command-line arguments.
 
     Parameters
@@ -3949,6 +3949,9 @@ def load_param_overrides_from_cli(argv=None):
         Argument list to parse (pass a saved copy of sys.argv captured
         *before* pyflamegpu imports, since FLAMEGPU may strip or modify
         sys.argv).  Falls back to ``sys.argv`` if *None*.
+    parsed_args : argparse.Namespace or None
+        Already parsed arguments from model_cli.parse_model_args. When supplied,
+        these are used instead of parsing argv again.
 
     Returns
     -------
@@ -3958,19 +3961,12 @@ def load_param_overrides_from_cli(argv=None):
         Override for the result output directory.
     """
     import json
-    if argv is None:
-        import sys
-        argv = sys.argv
+    if parsed_args is None:
+        from model_cli import parse_model_args
+        parsed_args = parse_model_args(None if argv is None else argv[1:])
 
-    def _get_flag(flag):
-        """Return the value after *flag* in *argv*, or None."""
-        for i, arg in enumerate(argv):
-            if arg == flag and i + 1 < len(argv):
-                return argv[i + 1]
-        return None
-
-    overrides_path = _get_flag("--overrides")
-    result_dir = _get_flag("--result-dir")
+    overrides_path = parsed_args.overrides
+    result_dir = parsed_args.result_dir
 
     overrides = {}
     if overrides_path:
@@ -3978,8 +3974,10 @@ def load_param_overrides_from_cli(argv=None):
             raise FileNotFoundError(
                 f"[ERROR] --overrides path does not exist or is not a file: {overrides_path!r}"
             )
-        with open(overrides_path, "r") as f:
+        with open(overrides_path, "r", encoding="utf-8") as f:
             overrides = json.load(f)
+        if not isinstance(overrides, dict):
+            raise ValueError("[ERROR] --overrides JSON must contain an object mapping parameter names to values")
     return overrides, result_dir
 
 

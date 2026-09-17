@@ -181,5 +181,37 @@ class RadiusDerivedParameterTests(unittest.TestCase):
         self.assertEqual(namespace["MAX_FOCAD_ARM_LENGTH"], 60.0)
 
 
+class DomainDerivedParameterTests(unittest.TestCase):
+    def test_variant_bounds_change_geometry_but_n_does_not_resize_core_grid(self):
+        namespace = {"N": 11, "BOUNDARY_COORDS": [50., -50.] * 3,
+                     "ECM_AGENTS_PER_DIR": [11, 11, 11], "ECM_POPULATION_SIZE": 1331}
+        bounds = [500., -500., 500., -500., 25., -25.]
+        pins = apply_param_overrides(namespace, {"N": 6, "BOUNDARY_COORDS": bounds})
+        self.assertEqual(namespace["BOUNDARY_COORDS"], bounds)
+        self.assertEqual([namespace[key] for key in ("L0_x", "L0_y", "L0_z")],
+                         [1000., 1000., 50.])
+        self.assertEqual(namespace["ECM_AGENTS_PER_DIR"], [11, 11, 11])
+        self.assertEqual(namespace["ECM_POPULATION_SIZE"], 1331)
+        self.assertEqual(namespace["ECM_VOXEL_VOLUME"], 100. * 100. * 5.)
+        self.assertEqual(namespace["ECM_ECM_EQUILIBRIUM_DISTANCE"], 100.)
+        self.assertEqual(namespace["MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION"], 100.)
+
+        # A later JSON layer has final precedence, still using the same grid.
+        apply_param_overrides(namespace, {"BOUNDARY_COORDS": [100., -100.] * 3}, pinned=pins)
+        self.assertEqual(namespace["ECM_AGENTS_PER_DIR"], [11, 11, 11])
+        self.assertEqual(namespace["ECM_POPULATION_SIZE"], 1331)
+        self.assertEqual(namespace["ECM_ECM_EQUILIBRIUM_DISTANCE"], 20.)
+        self.assertEqual(namespace["MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION"], 20.)
+
+    def test_geometry_changes_preserve_explicit_search_radius(self):
+        namespace = {"BOUNDARY_COORDS": [50., -50.] * 3,
+                     "ECM_AGENTS_PER_DIR": [11, 11, 11], "ECM_POPULATION_SIZE": 1331,
+                     "MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION": 10.}
+        pins = apply_param_overrides(namespace, {"MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION": 42.})
+        apply_param_overrides(namespace, {"BOUNDARY_COORDS": [100., -100.] * 3}, pinned=pins)
+        self.assertEqual(namespace["ECM_ECM_EQUILIBRIUM_DISTANCE"], 20.)
+        self.assertEqual(namespace["MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION"], 42.)
+
+
 if __name__ == "__main__":
     unittest.main()

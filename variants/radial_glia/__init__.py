@@ -41,12 +41,13 @@ _HERE = Path(__file__).parent
 # ---------------------------------------------------------------------------
 PARAMS = {
     # --- Domain ---
-    # This calibrated geometry requires a matching core ECM lattice and RTC
-    # constants in model.py. PARAMS alone does not rebuild that lattice;
-    # see the structural-parameter constraint in Tutorial-Model-Variants.md.
-    # 1000×1000×50 µm domain. Z is only 50 µm (monolayer: cells never stack more than
-    # 2-3 diameters). With N=6 the shortest side gives dx=10 µm (2.5× finer than
-    # default 25 µm) at 101×101×6 = 61,206 ECM agents — similar to the default count.
+    # BOUNDARY_COORDS applies the 1000×1000×50 µm physical domain, but PARAMS
+    # does not rebuild the core ECM lattice. With a core 11×11×11 grid this
+    # produces spacings of 100, 100, 5 µm; N=6 here does not change that grid.
+    # The intended uniform 10 µm lattice (101×101×6 = 61,206 agents) requires
+    # setting BOTH this geometry and N=6 in model.py, then synchronizing core
+    # and variant RTC constants. See Tutorial-Model-Variants.md. Z is 50 µm
+    # for the monolayer (approximately 2-3 cell diameters).
     "BOUNDARY_COORDS":            [500.0, -500.0, 500.0, -500.0, 25.0, -25.0],
     "N":                          6,
 
@@ -155,6 +156,7 @@ PARAMS = {
     "TIME_STEP":                  60.0,                      # [s]
     "STEPS":                      7200,                      # 5 days: 120 h × 3600 s/h ÷ 60 s/step
     "SAVE_EVERY_N_STEPS":         60,                        # save every 1h; fine enough to capture type transitions
+    "DEBUG_PRINTING": False,                                 # FLAMEGPU2 debug printing is very verbose; disable for production runs
     "DEBUG_PRINT_INTERVAL":       60,                        # print live stats every 1h of sim time
 }
 

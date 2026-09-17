@@ -11,6 +11,8 @@ import sys as _sys
 import sys                                     # keep 'sys' available for existing usage
 import pathlib
 _ORIGINAL_ARGV = list(_sys.argv)          # snapshot BEFORE pyflamegpu touches sys.argv
+from model_cli import parse_model_args
+_CLI_ARGS = parse_model_args(_ORIGINAL_ARGV[1:])  # --help exits before simulation imports/setup
 from pyflamegpu import *
 import subprocess
 import time, math
@@ -63,7 +65,7 @@ print("Executing in ", CURR_PATH)
 # If domain is not cubical, N is asigned to the shorter dimension and more agents are added to the longer ones
 # NOTE: ECM agents are always present (mandatory) eventhough they are only used when INCLUDE_DIFFUSION is True. If there is no diffusion, set N to a small value to reduce computational cost.
 # ----------------------------------------------------------------------
-N = 11
+N = 6
 
 # Time simulation parameters
 # ----------------------------------------------------------------------
@@ -81,7 +83,7 @@ ECM_D_DUMPING = 0.04  # [nN·s/um]
 ECM_ETA = 0.15  # [nN·s/µm] Effective drag for overdamped FNODE motion (calibration parameter)
 
 #BOUNDARY_COORDS = [0.5, -0.5, 0.5, -0.5, 0.5, -0.5]  # +X,-X,+Y,-Y,+Z,-Z
-BOUNDARY_COORDS = [50.0, -50.0, 50.0, -50.0, 50.0, -50.0]  # microdevice dimensions in um
+BOUNDARY_COORDS = [500.0, -500.0, 500.0, -500.0, 25.0, -25.0]  # microdevice dimensions in um
 #BOUNDARY_COORDS = [coord / 1000.0 for coord in BOUNDARY_COORDS] # in mm
 BOUNDARY_DISP_RATES = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# perpendicular to each surface (+X,-X,+Y,-Y,+Z,-Z) [um/s]
 BOUNDARY_DISP_RATES_PARALLEL = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]# parallel to each surface (+X_y,+X_z,-X_y,-X_z,+Y_x,+Y_z,-Y_x,-Y_z,+Z_x,+Z_y,-Z_x,-Z_y)[um/s]
@@ -483,12 +485,9 @@ DUROTAXIS_USE_STRESS = True   # True: use stress eigenpair, False: use strain ei
 # Variant FILES and construction/runtime hooks are
 # applied later in this file at the appropriate execution points.
 _ACTIVE_VARIANT = None
-_VARIANT_NAME = None
+_CORE_ECM_N = N  # The fixed lattice above was built before any overrides.
+_VARIANT_NAME = _CLI_ARGS.variant
 _PARAM_OVERRIDE_PINS = set()
-for _vi, _varg in enumerate(_ORIGINAL_ARGV):
-    if _varg == "--variant" and _vi + 1 < len(_ORIGINAL_ARGV):
-        _VARIANT_NAME = _ORIGINAL_ARGV[_vi + 1]
-        break
 _ACTIVE_VARIANT = load_variant(CURR_PATH, _VARIANT_NAME)
 _VARIANT_PARAMETER_NAMES = register_parameter_defaults(globals(), _ACTIVE_VARIANT)
 if _ACTIVE_VARIANT is not None:
@@ -506,7 +505,7 @@ if _ACTIVE_VARIANT is not None:
 # e.g. python model.py --overrides ./optimizer/optuna_results/best_params.json
 # This must run AFTER all defaults above so that derived values can be
 # recomputed from the (possibly overridden) base parameters.
-_PARAM_OVERRIDES, _RESULT_DIR_OVERRIDE = load_param_overrides_from_cli(_ORIGINAL_ARGV)
+_PARAM_OVERRIDES, _RESULT_DIR_OVERRIDE = load_param_overrides_from_cli(parsed_args=_CLI_ARGS)
 print(f"[DIAG] _ORIGINAL_ARGV = {_ORIGINAL_ARGV}")
 print(f"[DIAG] _PARAM_OVERRIDES keys = {list(_PARAM_OVERRIDES.keys()) if _PARAM_OVERRIDES else '(none)'}")
 print(f"[DIAG] _RESULT_DIR_OVERRIDE = {_RESULT_DIR_OVERRIDE}")
@@ -560,6 +559,15 @@ ORGANOID_METRICS_OVER_TIME = pd.DataFrame()
 
 # Checking for incompatible conditions
 # ----------------------------------------------------------------------
+print(f"[GEOMETRY] Effective BOUNDARY_COORDS (+X,-X,+Y,-Y,+Z,-Z): {BOUNDARY_COORDS}")
+print(f"[GEOMETRY] Domain lengths (um): {[L0_x, L0_y, L0_z]}")
+print(f"[GEOMETRY] Fixed ECM grid: {ECM_AGENTS_PER_DIR} ({ECM_POPULATION_SIZE} agents); "
+      f"nominal spacing (um): {[length / (count - 1) for length, count in zip((L0_x, L0_y, L0_z), ECM_AGENTS_PER_DIR)]}")
+if N != _CORE_ECM_N:
+    print(f"[WARNING] N={N} was overridden, but the ECM grid was constructed using core N={_CORE_ECM_N}. "
+          "Changing N in variant PARAMS or JSON does not resize the grid. "
+          "See docs/auto/wiki/Tutorial-Model-Variants.md.")
+
 critical_error = False
 try:
     # Check the model directory and the active variant, including Optuna runs.
@@ -576,6 +584,8 @@ try:
     if _OPTUNA_QUIET:
         hard_coded_check_args.append("--fail-on-mismatch")
 
+    print("[KERNEL CHECK] The following reference values come from model.py literals; "
+          "effective runtime geometry is reported above.")
     hard_coded_check_exit_code = check_hard_coded_values.main(hard_coded_check_args)
     if hard_coded_check_exit_code != 0:
         print("ERROR: hard-coded value consistency check found mismatches or failed")

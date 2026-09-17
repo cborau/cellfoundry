@@ -15,9 +15,23 @@ Run an existing variant with:
 ```sh
 python model.py --variant organoid
 python model.py --variant radial_glia --overrides configs/my_overrides.json
+python model.py --variant radial_glia --result-dir "results/radial_glia_test"
 ```
 
 Use a Python environment with CellFoundry's dependencies and a compatible FLAMEGPU/CUDA installation (`flamegpu_py310` in the supplied installation). The optimizer selects variants through the same `--variant`, `--overrides`, and `--result-dir` interfaces.
+
+### Command-line arguments
+
+Run `python model.py --help` (or `-h`) for the complete list. Help exits before importing FLAMEGPU, constructing the model, checking kernels or creating output directories; it does not require CUDA.
+
+| Argument | Purpose |
+| --- | --- |
+| `-h`, `--help` | Print usage and exit. |
+| `--variant NAME` | Select a package under `variants/<NAME>/`. Omit it to use the generic core model. |
+| `--overrides FILE.json` | Read a JSON object containing parameter overrides. Precedence is JSON > variant `PARAMS` > core defaults. |
+| `--result-dir DIR` | Set the results directory. Quote paths containing spaces. Relative paths are relative to the working directory from which Python was launched. The default is `result_files` beside `model.py`. This option takes precedence over a parameter override of `RES_PATH`. |
+
+These are the model's command-line options. Parameters such as `STEPS`, `N_CELLS` and `SAVE_EVERY_N_STEPS` belong in `PARAMS` or an overrides JSON object, for example `{"STEPS": 10, "N_CELLS": 4}`; they are not separate command-line flags. Use a different result directory for each run whose output you want to retain. A variant may provide its own output settings through `PARAMS`.
 
 ## Ownership
 
@@ -27,9 +41,27 @@ Use a Python environment with CellFoundry's dependencies and a compatible FLAMEG
 
 ## Structural parameters remain core-controlled
 
-This API does **not** make structural overrides safe. Grid dimensions, species/cell type counts, connectivity and array extents must remain consistent with compiled RTC constants, macro arrays, message dimensions, search radii, and domain bounds. **Configure those deliberately in the core (model.py)** and synchronize the corresponding kernels using the existing checker (check_hard_coded_values.py using the --scan-root arg to point to the corresponding variant folder). E.g. A variant can still define `BOUNDARY_COORDS` or `N` in their __init__.py file, but must make sure that their values are compatible with the hard-coded fixed array sizes.
+**`BOUNDARY_COORDS` in variant `PARAMS` does change the physical domain. It does not change how many ECM nodes are used.** Bounds use the order `[+X, -X, +Y, -Y, +Z, -Z]`, in micrometres. JSON overrides can replace them again. The effective bounds are passed to the GPU environment (`COORDS_BOUNDARIES`), initialization and spatial-message domain calculations.
 
-The checker reads literal structural values from `model.py`; ordinary parameter recomputation does not rebuild `ECM_AGENTS_PER_DIR` or `ECM_POPULATION_SIZE`. Setting `N` in a variant does not rebuild that grid. Boundary-only overrides retain the fixed grid and recompute the existing derived geometry quantities. They still require model-specific consistency checks; this is not an assurance that arbitrary domain changes are supported.
+The ECM grid is constructed from the core `N` and `BOUNDARY_COORDS` **before** variant/JSON overrides are applied. Parameter recomputation deliberately preserves `ECM_AGENTS_PER_DIR` and `ECM_POPULATION_SIZE`, because those dimensions also occur in hard-coded RTC constants, message arrays and macro arrays.
+
+| Setting in variant `PARAMS` or overrides JSON | Effect / constraint |
+| --- | --- |
+| `BOUNDARY_COORDS` | Changes physical bounds on the existing grid. Recomputes lengths, voxel volume, scalar ECM equilibrium spacing and dependent search radii, unless those derived parameters were explicitly overridden. |
+| `N` | Changes the Python parameter value but **does not rebuild the grid**. A differing value produces a startup warning. Set `N` in the core when changing resolution. |
+| `ECM_AGENTS_PER_DIR`, `ECM_POPULATION_SIZE`, `N_SPECIES`, `N_CELL_TYPES`, connectivity and array extents | Structural settings: configure these consistently in the core and kernels. Putting them in `PARAMS`/JSON does not resize all dependent structures or synchronize RTC constants. Such overrides are not a supported shortcut to a new grid/schema. |
+
+For example, with core `N=11` and core bounds `±50` on all axes, the fixed grid is `11 × 11 × 11` (1,331 nodes). Radial glia's `BOUNDARY_COORDS=[500,-500,500,-500,25,-25]` changes the physical domain to `1000 × 1000 × 50 µm`. The node count stays fixed, so its nominal spacings become `100, 100, 5 µm`. Its `N=6` entry does **not** create a `101 × 101 × 6` grid.
+
+To obtain that uniform `10 µm` grid deliberately:
+
+1. Set both `BOUNDARY_COORDS=[500,-500,500,-500,25,-25]` and `N=6` in `model.py`. Keep the variant's values consistent with them. The core construction then derives `ECM_AGENTS_PER_DIR=[101,101,6]` and `ECM_POPULATION_SIZE=61206`.
+2. Synchronize constants in both the core and active variant kernels, for example from the repository root: `python check_hard_coded_values.py --model-file model.py --scan-root . --scan-root variants/radial_glia --no-recursive`. The checker reads core literals and prompts before updating mismatching constants; inspect its proposed values and changes. Despite its name, the current `--fail-on-mismatch` option **automatically applies fixes without prompting**; model startup supplies it for nonempty JSON override runs, including optimizer trials.
+3. Recheck spatial-message bounds/radii, fixed arrays, diffusion stability and initialization geometry, then validate with a short run before a long experiment. A different node count changes resolution and memory use. Do not vary structural settings independently in optimizer trials.
+
+At startup, the `[GEOMETRY]` lines show the **effective** bounds, lengths, fixed grid counts and nominal spacings before the checker can prompt to update kernels. `[KERNEL CHECK]` then labels the checker's **core reference values**. Its `The domain is cubical` message describes the reference geometry used to derive constants, not necessarily the active variant's physical domain. Saved `MODEL_CONFIG.BOUNDARY_COORDS` and the first row of `BPOS_OVER_TIME` also record the effective starting bounds.
+
+Boundary-only overrides still require model-specific consistency checks. A changed aspect ratio can produce an anisotropic grid; the scalar `ECM_ECM_EQUILIBRIUM_DISTANCE` follows the x spacing, while voxel volume uses all three spacings. Dependent defaults are recomputed, but explicitly pinned radii remain as supplied, and external fibre/vascular coordinates are not rescaled automatically. Successful initialization is not evidence that a geometry is biologically calibrated or numerically suitable.
 
 Do not use `PARAM_DEFAULTS` to redeclare core parameters such as `N_SPECIES`. It introduces only genuinely new variant parameters. The registration hooks do not provide automatic resizing or rewriting of kernels.
 
@@ -78,7 +110,7 @@ At normal completion:
 
 `initialize_cell`, `initialize_probe`, `Metrics.step` and similar names are ordinary Python functions/methods. Their names have no special meaning to the loader. They run only because a recognized hook registers them, for example `ctx.add_agent_initializer("CELL", initialize_cell)`. You may write other helper functions such as `declare_my_agents(ctx)`, but must call them from a recognized hook yourself.
 
-### Why radial glia has a runtime.py
+### Why radial glia variant example has a runtime.py
 
 `runtime.py` is an **optional organization choice**, not another framework hook or a second model. Radial glia has enough CPU initialization and analysis code to benefit from a separate file: initial polarity/anchors, VTK field definitions, rosette metrics and diagnostic output. Its `__init__.py` keeps declarations, registration and the full schedule together.
 
@@ -365,7 +397,7 @@ Adding agent states also requires ensuring that the applicable generic and varia
 
 Variants must contain their full `configure_layers(ctx)` implementation. There is no schedule patcher, insertion registry, or automatic merge with the core schedule. A run with no selected variant uses `_build_default_layers()` in `model.py`.
 
-“Full” means all processes intended for **that model**, not every optional CellFoundry feature. `simple_signal` intentionally defines only accumulation and switching. `variant_template` contains all generic conditional branches. `cell_markers` contains those same branches plus its marker sequence. A disabled branch does not create a layer for that run. Enabling a flag can create agents/functions in the core, but those functions execute only if the chosen variant schedules them; flags are not an implicit schedule.
+“Full” means all processes intended for **that model**, not every optional CellFoundry feature. For example, `simple_signal` variant intentionally defines only accumulation and switching. `variant_template` contains all generic conditional branches. `cell_markers` contains those same branches plus its marker sequence. A disabled branch does not create a layer for that run. Enabling a flag can create agents/functions in the core, but those functions execute only if the chosen variant schedules them; flags are not an implicit schedule.
 
 Inside a variant:
 
@@ -417,7 +449,7 @@ Use `add_population()` for initial custom-ID populations, rather than calling `n
 | Bucket key | Chosen by the publisher. Its bounds belong to that message, not to the whole model. FNODE buckets use FNODE `id`; FOCAD buckets use the owning `cell_id`. |
 | Dense array index | A bounded index into a specific allocation. For a managed range it can be `id - range.begin`; ECM uses its own `grid_lin_id` for `C_SP_MACRO`. Never index a macro array directly with a global-looking custom id. |
 
-The core initialization prefix is fixed: BCORNER, FNODE (when enabled), CELL, FOCAD (when enabled), ECM, then VASC (when enabled). Absent populations contribute zero to the offsets. New managed variant populations are appended **after this complete prefix**; they cannot insert themselves between core populations. `ctx.initial_ids["CELL"]`, for example, exposes `.begin`, `.count` and `.end` for the **initial** CELL range. It is not a bound on later CELL births; core bucket capacities account for those separately.
+The core initialization prefix is fixed: BCORNER, FNODE (when enabled), CELL, FOCAD (when enabled), ECM, then VASC (when enabled). Absent populations contribute zero to the offsets. Variant populations are appended **after this complete prefix**; they cannot insert themselves between core populations. `ctx.initial_ids["CELL"]`, for example, exposes `.begin`, `.count` and `.end` for the **initial** CELL range. It is not a bound on later CELL births; core bucket capacities account for those separately.
 
 At construction time, `add_population()` reserves an explicit custom-ID range and declares its environment bounds and birth counter. At initialization time, the core verifies its cursor against the planned prefix, creates all managed populations in declaration order, assigns IDs, runs their per-agent initializers, seeds their counters and advances `CURRENT_ID` past **all reserved slots**. The LUMEN counter is seeded afterward, including for the monolayer assay when lumen is enabled. Core CELL/FNODE counters retain their own population endpoints.
 

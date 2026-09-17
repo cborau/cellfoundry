@@ -17,7 +17,7 @@
 FLAMEGPU_AGENT_FUNCTION(multiscale_ecm_diffusion_commit, flamegpu::MessageNone, flamegpu::MessageNone) {
   // Agent array variables and macro-property dimensions
   const uint8_t N_SPECIES = 3; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
-  const uint32_t ECM_POPULATION_SIZE = 1331; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
+  const uint32_t ECM_POPULATION_SIZE = 61206; // WARNING: this variable must be hard coded to have the same value as the one defined in the main python function.
 
   const int agent_grid_lin_id = FLAMEGPU->getVariable<int>("grid_lin_id");
   auto C_SP_MACRO = FLAMEGPU->environment.getMacroProperty<float, N_SPECIES, ECM_POPULATION_SIZE>("C_SP_MACRO");
