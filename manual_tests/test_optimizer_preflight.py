@@ -169,6 +169,17 @@ class OptimizerPreflightTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(optimize.OptimizationError, "new programming error"):
             optimize.run_trial_subprocess({}, str(self.model), str(run))
 
+    def test_caught_instability_never_scores_partial_results(self):
+        shutil.copy2(ROOT / "simulation_errors.py", self.root)
+        self.write_runner("from simulation_errors import reject_trial, TrialRejected\n"
+                          "try: reject_trial('invalid partial output')\n"
+                          "except TrialRejected: pass\n"
+                          "pickle.dump({'score': 2.}, open(output / 'output_data_0.pickle', 'wb'))\n")
+        study = optuna.create_study()
+        with contextlib.redirect_stdout(io.StringIO()):
+            study.optimize(self.objective(), n_trials=2)
+        self.assertEqual([t.state for t in study.trials], [optuna.trial.TrialState.PRUNED] * 2)
+
     def test_objective_can_explicitly_reject_a_parameter_combination(self):
         self.write_runner("pickle.dump({'score': 2.}, open(output / 'output_data_0.pickle', 'wb'))\n")
         def reject(results, reference, **kwargs):

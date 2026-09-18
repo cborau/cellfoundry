@@ -16,7 +16,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from tools.validate_variant_refactor import prepare_workspace
-from optimizer.optimize import run_trial_subprocess
+from optimizer.optimize import run_trial_subprocess, OptimizationError
 
 
 # Appended only to the copied variants. Production schedules stay intact.
@@ -31,7 +31,8 @@ def register_runtime(ctx):
     assert all(ctx.agents["CELL"].hasVariable(name) == enabled for name in arrays)
     def initialize(cell, rng):
         rng.seed(cell.getVariableInt("id"))
-        ct = cell.getVariableInt("cell_type")
+        ct = 0
+        cell.setVariableInt("cell_type", ct)
         cell.setVariableFloat("clock", ctx.config["CELL_CYCLE_DURATION"][ct] - ctx.config["TIME_STEP"])
         # Two overlapping cells exercise nucleus deformation; division moves
         # parent/daughter apart. Fix their geometry to keep the fixture stable.
@@ -63,6 +64,7 @@ def register_runtime(ctx):
             assert all(math.isfinite(v) for v in row.values())
             assert row["nucleus_radius"] > 0
             row["id"] = cell.getVariableInt("id")
+            row["mother_id"] = cell.getVariableInt("mother_id")
             if enabled:
                 for name in arrays:
                     values = list(cell.getVariableArrayFloat(name))
@@ -73,6 +75,15 @@ def register_runtime(ctx):
             if ctx.agents["CELL"].hasVariable("substrate_anchor_x"):
                 assert math.isfinite(cell.getVariableFloat("substrate_anchor_x"))
             rows.append(row)
+        assert any(abs(row["eps_xx"]) > 1e-8 for row in rows), "Nucleus deformation was not exercised"
+        daughters = [row for row in rows if row["mother_id"] != -1]
+        assert len(daughters) == 2
+        if enabled:
+            by_id = {row["id"]: row for row in rows}
+            for daughter in daughters:
+                for axis in "xyz":
+                    key = "u_ref_" + axis + "_i"
+                    assert daughter[key] == by_id[daughter["mother_id"]][key]
         ctx.runtime_results(host)["ANCHOR_TEST"] = {"enabled": enabled, "cells": sorted(rows, key=lambda r: r["id"])}
     ctx.add_exit_function(verify)
 '''
@@ -107,7 +118,7 @@ def validate(output):
     network = workspace / "anchor_test_network.pkl"
     with network.open("wb") as file:
         pickle.dump({"node_coords": np.array([[-5., 2., 0.], [5., 2., 0.]]),
-                     "connectivity": {0: [1], 1: [0]}}, file)
+                     "connectivity": {0: [1] + [-1] * 7, 1: [0] + [-1] * 7}}, file)
     common = dict(STEPS=2, TIME_STEP=1., N_CELLS=2, INCLUDE_CELLS=True,
                   INCLUDE_CELL_CELL_INTERACTION=True, INCLUDE_CELL_CYCLE=True,
                   INCLUDE_DIFFUSION=False, HETEROGENEOUS_DIFFUSION=False,
@@ -119,7 +130,7 @@ def validate(output):
                   SAVE_PICKLE=True, SAVE_DATA_TO_FILE=True, SAVE_EVERY_N_STEPS=1,
                   SAVE_NO_ANCHOR_CELL_FILES=True, CELL_RADIUS=[3.] * 3,
                   ORGANOID_INIT_RADIUS=12., MONOLAYER_CLUSTER_RADIUS=20., MONOLAYER_Z=0.,
-                  CELL_TYPE_PROPORTIONS=[1., 0., 0.], DIVISION_RATE_MULTIPLIER=[1.] * 3,
+                  MONOLAYER_CELL_TYPE_RATIOS=[1., 0., 0.], DIVISION_RATE_MULTIPLIER=[1.] * 3,
                   CELL_HYPOXIA_DAMAGE_RATE=[0.] * 3, CELL_NUTRIENT_DAMAGE_RATE=[0.] * 3,
                   CELL_STRESS_DAMAGE_RATE=[0.] * 3, NETWORK_FILE=str(network),
                   ALLOW_IRREGULAR_NETWORK=True, FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE=10.,
@@ -134,7 +145,21 @@ def validate(output):
                 run = output / name
                 run.mkdir(exist_ok=True)
                 params = dict(common, INCLUDE_FOCAL_ADHESIONS=enabled, INCLUDE_FIBRE_NETWORK=enabled,
-                              PERIODIC_BOUNDARIES_FOR_CELLS=not enabled)
+                              PERIODIC_BOUNDARIES_FOR_CELLS=not enabled,
+                              INCLUDE_DIFFUSION=variant == "radial_glia")
+                if variant == "radial_glia" and enabled:
+                    # RG intentionally does not schedule FNODE/FOCAD. Preserve
+                    # that constraint; testing anchors must not bypass it.
+                    try:
+                        run_trial_subprocess(params, str(workspace / "model.py"), str(run), timeout=300, variant=variant)
+                    except OptimizationError as error:
+                        assert "radial_glia configure_layers does not schedule" in str(error)
+                    else:
+                        raise AssertionError("Unsupported RG focal-adhesion setup was accepted")
+                    report[name] = {"unsupported_configuration_rejected": True}
+                    (output / "report.json").write_text(json.dumps(report, indent=2))
+                    print(f"PASS: {name} rejected before simulation", flush=True)
+                    continue
                 result = run_trial_subprocess(params, str(workspace / "model.py"), str(run), timeout=300, variant=variant)
                 data = result["ANCHOR_TEST"]
                 for path in run.glob("cells_t*.vtk"):

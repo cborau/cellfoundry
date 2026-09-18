@@ -49,7 +49,24 @@ This prompts before changing files. Append `--fail-on-mismatch` to check without
 
 Do not put `BOUNDARY_COORDS`, `N`, `N_SPECIES`, `N_CELL_TYPES`, `MAX_CONNECTIVITY`, `N_ANCHOR_POINTS`, `MAX_VASC_CONNECTIVITY`, `ECM_AGENTS_PER_DIR`, or `ECM_POPULATION_SIZE` in the search space. Configure initial bounds and dimensions in the core and synchronize the kernels before starting optimization. Fixed variant/JSON overrides must agree with the core values, including indexed boundary changes. Bounds cannot safely change after the initial grid and assay setup; domain/resolution studies require separately prepared core builds. Unknown JSON parameter names and invalid array indices are errors, so a misspelling cannot silently disable a trial's intended override.
 
-Detected configuration errors, any nonzero model exit, missing output pickle, and objective evaluation exceptions **stop the whole study**. A failure during a trial is recorded as `FAIL`, retains its output directory, and no subsequent trials are launched. The terminal reports the cause and paths to `stdout.log` and `stderr.log`; earlier successful trials remain in the study. This conservative policy avoids guessing whether a failed model is caused by shared configuration or sampled parameters. An explicitly configured timeout remains a trial-level `PRUNED` result and allows the study to continue. Optimization requires `SAVE_PICKLE=True`.
+Configuration/checker errors, unexpected model exceptions, missing or unreadable output pickles, and unexpected objective exceptions **stop the whole study**. A failure during a trial is recorded as `FAIL`, retains its output directory, and no subsequent trials are launched. Earlier successful trials remain in the study. Optimization requires `SAVE_PICKLE=True`.
+
+An explicitly detected infeasible parameter combination **prunes only that trial**, so optimization continues. This includes the FNODE displacement check when `ABORT_ON_UNSTABLE_FNODE_MOVE=True`, runtime multiscale diffusion data/CFL failures, and the configured subprocess timeout. Setting `ABORT_ON_UNSTABLE_FNODE_MOVE=False` retains the simulation's existing behavior: that guard does not abort or prune. Initial diffusion configuration validation still stops the study; a runtime rejection is not an automatic timestep adjustment or permission to evaluate partial output.
+
+For a variant-specific numerical/biological rejection, use a host check at the appropriate point in the variant schedule:
+
+```python
+from simulation_errors import reject_trial
+
+def check_growth(host):
+    count = host.agent("CELL").count()
+    if count > MAX_VALID_POPULATION:  # A defined validity limit for this model.
+        reject_trial(f"Population {count} exceeds this assay's validity limit")
+```
+
+`reject_trial()` aborts the simulation. Outside optimization it raises a clear exception; under optimization it also writes a per-invocation `trial_rejection.json` signal because FLAMEGPU can wrap Python host exceptions. The optimizer records `prune_reason` and retains logs/partial files for diagnosis, without evaluating their objective. Use this only for understood infeasible states. An unclassified crash (including an arbitrary CUDA error) remains fatal: the runner cannot reliably infer whether it came from sampled parameters or a programming defect. Place guards before unsafe operations when a known parameter-dependent failure is possible. For GPU checks, publish an error flag and inspect it in a following host layer.
+
+An objective can explicitly reject otherwise readable results with `raise TrialRejected(reason)` (imported from `simulation_errors`). Other objective exceptions remain fatal. Standard output and error are saved in `stdout.log` and `stderr.log`; rejection messages identify both paths. A fresh invocation token prevents an old rejection file from masking a new unrelated error when reusing a result directory.
 
 The constants check covers the named literal assignments, not every possible model constraint. Variant validation and model startup check the effective configuration; numerical and biological validity still need suitable tests for the chosen model.
 

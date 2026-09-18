@@ -230,11 +230,13 @@ def run_trial_subprocess(
     elapsed = time.time() - t0
     print(f"  [trial] Finished in {elapsed:.1f}s (exit code {proc.returncode})")
 
+    # Never score explicitly rejected partial output, even if a model wrapper
+    # catches the exception (e.g. an ensemble runner) and exits successfully.
+    if rejection_path.is_file():
+        rejection = json.loads(rejection_path.read_text(encoding="utf-8"))
+        if rejection.get("token") == token:
+            raise TrialRejected(f"{rejection['reason']}\nFull logs: {stdout_log} and {stderr_log}")
     if proc.returncode != 0:
-        if rejection_path.is_file():
-            rejection = json.loads(rejection_path.read_text(encoding="utf-8"))
-            if rejection.get("token") == token:
-                raise TrialRejected(f"{rejection['reason']}\nFull logs: {stdout_log} and {stderr_log}")
         stderr_tail = _read_log_tail(stderr_log, 3000)
         stdout_tail = _read_log_tail(stdout_log, 3000)
         raise OptimizationError(

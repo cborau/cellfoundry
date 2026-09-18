@@ -559,7 +559,37 @@ The executable native test `tools/validate_variant_populations.py` covers two ne
 
 ## Metrics and output
 
-Additional CELL VTK scalars use `(vtk_name, variable_name, "float" or "int")`. Vectors use `(vtk_name, x_variable, y_variable, z_variable)`. Register them through `ctx.cell_vtk_scalars` and `ctx.cell_vtk_vectors`. Existing output and anchor-removal code handles these fields.
+Additional CELL VTK scalars use `(vtk_name, variable_name, "float" or "int")`. Vectors use `(vtk_name, x_variable, y_variable, z_variable)`. Register them through `ctx.cell_vtk_scalars` and `ctx.cell_vtk_vectors`. The output writer handles these fields with or without focal-adhesion anchors.
+
+### Optional focal-adhesion anchors
+
+`INCLUDE_FOCAL_ADHESIONS` determines the CELL schema when the model is constructed. When false, CELL has no `x_i`, `y_i`, `z_i`, `u_ref_x_i`, `u_ref_y_i` or `u_ref_z_i` arrays. Initialization, movement, growth and division skip anchor work. `N_ANCHOR_POINTS` remains a positive core-controlled structural constant; do not set it to zero or tune it as a workaround. With 50 anchors, omitting the six float arrays saves 1,200 bytes of raw state per cell, before FLAMEGPU buffering overhead.
+
+Nucleus radius, stress/strain and cell mechanics remain available independently of focal adhesions. Radial-glia `substrate_anchor_x/y` describe a separate biological constraint and remain present in that variant.
+
+Core registration of `cell_move`, `cell_cycle` and `cell_stress_state_update`, including their `FILES` replacements, uses `cell_anchors.register_cell_rtc()`. This prefixes the RTC source with `CELLFOUNDRY_CELL_ANCHORS=0` or `1`, derived from the resolved feature flag. In a replacement kernel, enclose **every** anchor-array declaration and access, including `agent_out` initialization, in:
+
+```cpp
+#if CELLFOUNDRY_CELL_ANCHORS
+// Access the optional anchor arrays here.
+#endif
+```
+
+A runtime `if` alone is insufficient for absent variables. For an additional anchor-aware function registered by the variant, use the same helper explicitly:
+
+```python
+from cell_anchors import register_cell_rtc
+from pathlib import Path
+
+fn = register_cell_rtc(ctx.agents["CELL"], "my_anchor_function",
+                       Path(__file__).with_name("my_anchor_function.cpp"),
+                       ctx.config["INCLUDE_FOCAL_ADHESIONS"])
+# Bind messages/output and add fn in the variant's configure_layers().
+```
+
+When focal adhesions are off, `cells_t*.vtk` contains one point per cell and `SAVE_NO_ANCHOR_CELL_FILES` requires no additional action. When on, the original CELL files include anchors and that option can generate the extra centre-only files. Nucleus VTK output remains enabled whenever a supported deformation mechanism is active. Removing unnecessary anchor initialization also removes its random draws; stochastic trajectories should not be expected to match older anchor-disabled runs exactly.
+
+For parameter-dependent instability checks, see [optimizer failure handling](Tutorial-Parameter-Optimization.md#configuration-checks-and-stopping-on-errors). Use `simulation_errors.reject_trial()` for an explicitly detected infeasible sample; ordinary validation/programming errors stop the study.
 
 For pickle results, use `ctx.runtime_results(FLAMEGPU)` from a host callback. It returns a dictionary for that simulation/ensemble run. Initialize each owned result key in an init callback, then collect data in step/exit callbacks. Avoid module-level mutable result buffers.
 
