@@ -1,3 +1,7 @@
+#ifndef CELLFOUNDRY_CELL_ANCHORS
+#error "Load this kernel with cell_anchors.register_cell_rtc()"
+#endif
+
 // -----------------------------------------------------------------------------
 // Device helper functions 
 // -----------------------------------------------------------------------------
@@ -109,6 +113,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   const float agent_cl_dvy = FLAMEGPU->getVariable<float>("cl_dvy");
   const float agent_cl_dvz = FLAMEGPU->getVariable<float>("cl_dvz");
 
+#if CELLFOUNDRY_CELL_ANCHORS
   const uint8_t N_ANCHOR_POINTS = 50; // WARNING: must match main python
   float agent_x_i[N_ANCHOR_POINTS] = {};
   for (int i = 0; i < N_ANCHOR_POINTS; i++) {
@@ -122,6 +127,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   for (int i = 0; i < N_ANCHOR_POINTS; i++) {
     agent_z_i[i] = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("z_i", i);
   }
+#endif
+
 
   // Orientation
   float agent_orx = FLAMEGPU->getVariable<float>("orx");
@@ -641,11 +648,13 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
     const float raw_dx   = agent_vx * TIME_STEP;
     const float raw_dy   = agent_vy * TIME_STEP;
     const float dz_actual = agent_z - agent_z_prev;  // real z displacement after floor+clamp
+#if CELLFOUNDRY_CELL_ANCHORS
     for (int i = 0; i < N_ANCHOR_POINTS; i++) {
       agent_x_i[i] = wrapf(agent_x_i[i] + raw_dx, COORD_BOUNDARY_X_NEG, COORD_BOUNDARY_X_POS);
       agent_y_i[i] = wrapf(agent_y_i[i] + raw_dy, COORD_BOUNDARY_Y_NEG, COORD_BOUNDARY_Y_POS);
       agent_z_i[i] += dz_actual;  // rigid translation; no domain clamp on anchor points
     }
+#endif
   } else {
     // Simple clamp to domain
     agent_x = clampf(agent_x, COORD_BOUNDARY_X_NEG, COORD_BOUNDARY_X_POS);
@@ -656,11 +665,13 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
     const float dx_cell = agent_x - agent_x_prev;
     const float dy_cell = agent_y - agent_y_prev;
     const float dz_cell = agent_z - agent_z_prev;
+#if CELLFOUNDRY_CELL_ANCHORS
     for (int i = 0; i < N_ANCHOR_POINTS; i++) {
       agent_x_i[i] += dx_cell;
       agent_y_i[i] += dy_cell;
       agent_z_i[i] += dz_cell;
     }
+#endif
   }
 
   // RG xy-anchor: slip anchor to current cell position when bond-break distance is exceeded.
@@ -701,11 +712,13 @@ FLAMEGPU_AGENT_FUNCTION(cell_move, flamegpu::MessageNone, flamegpu::MessageNone)
   FLAMEGPU->setVariable<float>("x", agent_x);
   FLAMEGPU->setVariable<float>("y", agent_y);
   FLAMEGPU->setVariable<float>("z", agent_z);
+#if CELLFOUNDRY_CELL_ANCHORS
   for (int i = 0; i < N_ANCHOR_POINTS; i++) {
     FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("x_i", i, agent_x_i[i]);
     FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("y_i", i, agent_y_i[i]);
     FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("z_i", i, agent_z_i[i]);
   }
+#endif
   FLAMEGPU->setVariable<float>("vx", agent_vx);
   FLAMEGPU->setVariable<float>("vy", agent_vy);
   FLAMEGPU->setVariable<float>("vz", agent_vz);

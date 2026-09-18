@@ -1,3 +1,7 @@
+#ifndef CELLFOUNDRY_CELL_ANCHORS
+#error "Load this kernel with cell_anchors.register_cell_rtc()"
+#endif
+
 /**
  * variants/organoid/cell_cycle.cpp
  * =================================
@@ -82,7 +86,9 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
   int agent_completed_cycles = FLAMEGPU->getVariable<int>("completed_cycles");
 
   const uint8_t N_SPECIES = 3;
+#if CELLFOUNDRY_CELL_ANCHORS
   const uint8_t N_ANCHOR_POINTS = 50;
+#endif
 
   float agent_k_consumption[N_SPECIES] = {};
   float agent_k_production[N_SPECIES] = {};
@@ -97,20 +103,16 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
     agent_M_sp[i] = FLAMEGPU->getVariable<float, N_SPECIES>("M_sp", i);
   }
 
-  float agent_x_i[N_ANCHOR_POINTS] = {};
-  float agent_y_i[N_ANCHOR_POINTS] = {};
-  float agent_z_i[N_ANCHOR_POINTS] = {};
+#if CELLFOUNDRY_CELL_ANCHORS
   float agent_u_ref_x_i[N_ANCHOR_POINTS] = {};
   float agent_u_ref_y_i[N_ANCHOR_POINTS] = {};
   float agent_u_ref_z_i[N_ANCHOR_POINTS] = {};
   for (int i = 0; i < N_ANCHOR_POINTS; i++) {
-    agent_x_i[i] = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("x_i", i);
-    agent_y_i[i] = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("y_i", i);
-    agent_z_i[i] = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("z_i", i);
     agent_u_ref_x_i[i] = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("u_ref_x_i", i);
     agent_u_ref_y_i[i] = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("u_ref_y_i", i);
     agent_u_ref_z_i[i] = FLAMEGPU->getVariable<float, N_ANCHOR_POINTS>("u_ref_z_i", i);
   }
+#endif
 
   const float TIME_STEP = FLAMEGPU->environment.getProperty<float>("TIME_STEP");
 
@@ -310,12 +312,14 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
         FLAMEGPU->setVariable<float, N_SPECIES>("C_sp", i, agent_C_sp[i]);
       }
 
+#if CELLFOUNDRY_CELL_ANCHORS
       const float new_nucleus_radius = CELL_NUCLEUS_RADIUS / 2;
       for (int i = 0; i < N_ANCHOR_POINTS; i++) {
         FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("x_i", i, parent_new_x + new_nucleus_radius * agent_u_ref_x_i[i]);
         FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("y_i", i, parent_new_y + new_nucleus_radius * agent_u_ref_y_i[i]);
         FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("z_i", i, parent_new_z + new_nucleus_radius * agent_u_ref_z_i[i]);
       }
+#endif
 
       agent_completed_cycles += 1;
       FLAMEGPU->setVariable<int>("completed_cycles", agent_completed_cycles);
@@ -417,6 +421,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
       FLAMEGPU->agent_out.setVariable<float>("focad_birth_cooldown", fmaxf(0.0f, agent_focad_birth_cooldown));
       FLAMEGPU->agent_out.setVariable<float>("damage", damage_share);
 
+#if CELLFOUNDRY_CELL_ANCHORS
       const float daughter_nucleus_radius = CELL_NUCLEUS_RADIUS / 2;
       for (int i = 0; i < N_ANCHOR_POINTS; i++) {
         FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("x_i", i, daughter_x + daughter_nucleus_radius * agent_u_ref_x_i[i]);
@@ -426,6 +431,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
         FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("u_ref_y_i", i, agent_u_ref_y_i[i]);
         FLAMEGPU->agent_out.setVariable<float, N_ANCHOR_POINTS>("u_ref_z_i", i, agent_u_ref_z_i[i]);
       }
+#endif
 
       FLAMEGPU->agent_out.setVariable<float>("eps_xx", 0.0f);
       FLAMEGPU->agent_out.setVariable<float>("eps_yy", 0.0f);
@@ -475,6 +481,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
     FLAMEGPU->setVariable<float>("nucleus_radius", fminf(agent_nucleus_radius, CELL_NUCLEUS_RADIUS));
   }
 
+#if CELLFOUNDRY_CELL_ANCHORS
   // Recompute anchor positions from u_ref at current nucleus_radius.
   agent_nucleus_radius = FLAMEGPU->getVariable<float>("nucleus_radius");
   agent_x = FLAMEGPU->getVariable<float>("x");
@@ -485,6 +492,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_cycle, flamegpu::MessageNone, flamegpu::MessageNone
     FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("y_i", i, agent_y + agent_nucleus_radius * agent_u_ref_y_i[i]);
     FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("z_i", i, agent_z + agent_nucleus_radius * agent_u_ref_z_i[i]);
   }
+#endif
 
   FLAMEGPU->setVariable<float>("vx", agent_vx);
   FLAMEGPU->setVariable<float>("vy", agent_vy);

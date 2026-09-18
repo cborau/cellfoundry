@@ -1,3 +1,7 @@
+#ifndef CELLFOUNDRY_CELL_ANCHORS
+#error "Load this kernel with cell_anchors.register_cell_rtc()"
+#endif
+
 /**
  * ccs_clampf
  *
@@ -468,6 +472,7 @@ FLAMEGPU_AGENT_FUNCTION(cell_stress_state_update, flamegpu::MessageNone, flamegp
   //
   // Uses the freshly updated eps_* from this step.
   // -------------------------
+#if CELLFOUNDRY_CELL_ANCHORS
   if (INCLUDE_FOCAL_ADHESIONS) {
     const uint8_t N_ANCHOR_POINTS = 50; // WARNING: must match model.py
     for (unsigned int a = 0; a < N_ANCHOR_POINTS; ++a) {
@@ -485,6 +490,8 @@ FLAMEGPU_AGENT_FUNCTION(cell_stress_state_update, flamegpu::MessageNone, flamegp
       FLAMEGPU->setVariable<float, N_ANCHOR_POINTS>("z_i", a, agent_z + agent_nucleus_radius * duz);
     }
   }
+#endif
+
 
   return flamegpu::ALIVE;
 }

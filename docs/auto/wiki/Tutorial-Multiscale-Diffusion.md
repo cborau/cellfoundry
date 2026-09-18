@@ -45,7 +45,7 @@ After changing the grid, check the corresponding constants:
 python check_hard_coded_values.py --exclude-variants
 ```
 
-The checker reads literal settings in `model.py`, reports mismatches and offers to update them. The automatic check during startup scans files directly in the model folder and the selected variant folder, when a variant is active. Its `--fail-on-mismatch` option applies fixes automatically.
+The checker reads literal settings in `model.py`, reports mismatches and offers to update them. The automatic check during startup scans files directly in the model folder and the selected variant folder, when a variant is active. `--fail-on-mismatch` checks without modifying files or prompting and exits nonzero on mismatches. `--fix` explicitly authorizes repairs without prompting. JSON override runs and optimizer trials use read-only checking and stop on failure; optimization also checks before launching trials.
 
 If you change `N_SPECIES` or `N_CELL_TYPES`, follow [Tutorial: Useful Tools](Tutorial-Useful-Tools) to resize the related arrays as well.
 

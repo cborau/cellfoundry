@@ -35,6 +35,16 @@ python check_hard_coded_values.py
 
 Use it after major parameter-structure edits or merge conflicts.
 
+The default asks before repairing mismatches. For a read-only check of the core and an active variant:
+
+```powershell
+python check_hard_coded_values.py --scan-root . --scan-root variants/radial_glia --no-recursive --fail-on-mismatch
+```
+
+Exit codes are `0` for consistent values or completed repairs, `2` for unrepaired mismatches, and `1` for a reference/scan/repair error. `--fail-on-mismatch` never prompts or writes. Replace it with `--fix` to explicitly repair without prompting; the two flags cannot be combined. Without scan options, the standalone checker scans recursively, including other variants. Model startup and optimizer preflight instead scan core files and the selected variant's immediate files (or just the selected legacy flat module).
+
+The optimizer runs this read-only check before launching trials, using literals in core `model.py`. It also stops the study if a trial fails model validation/execution, produces no pickle, or cannot evaluate its objective. Details remain in the trial's `stdout.log` and `stderr.log`.
+
 ## 3. `benchmark_perf.py`
 
 Runs performance sweeps over combinations such as `N`, `N_CELLS`, FOCAD count, and optional networks.

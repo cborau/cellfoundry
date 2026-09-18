@@ -3,14 +3,16 @@
 Run in flamegpu_py310:
     python tools/validate_variant_refactor.py --output tmp/variant_refactor/gpu
 
-Uses an isolated source copy because the production hard-coded-dimension
-checker rewrites RTC files. No kernel or initialization cache in the checkout
-is modified. Tiny synthetic runs validate wiring, not biological calibration.
+Uses an isolated source copy and explicitly synchronizes its RTC constants
+before validation. Production batch runs only check constants and never repair
+them. No kernel or initialization cache in the checkout is modified. Tiny
+synthetic runs validate wiring, not biological calibration.
 """
 import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 
@@ -19,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from optimizer.optimize import run_trial_subprocess, make_objective, _load_pickle
 from optimizer.objectives import organoid_error
+from check_hard_coded_values import main as check_constants
 
 
 def prepare_workspace(output):
@@ -36,6 +39,28 @@ def prepare_workspace(output):
         target = workspace / source.relative_to(ROOT)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+    # Prepare the core geometry itself. Runtime bounds overrides cannot rebuild
+    # all dependent setup. This small domain belongs only to the test copy.
+    model_path = workspace / "model.py"
+    source, count = re.subn(r"^BOUNDARY_COORDS = .*?$", "BOUNDARY_COORDS = [50., -50., 50., -50., 50., -50.]",
+                            model_path.read_text(encoding="utf-8"), count=1, flags=re.M)
+    assert count == 1
+    model_path.write_text(source, encoding="utf-8")
+    # Keep the RG fixture's explicit PARAMS equal to its selected core build.
+    rg_path = workspace / "variants/radial_glia/__init__.py"
+    source, count = re.subn(r'("BOUNDARY_COORDS"\s*:\s*)\[[^\]]+\]',
+                            r'\g<1>[50., -50., 50., -50., 50., -50.]',
+                            rg_path.read_text(encoding="utf-8"), count=1)
+    assert count == 1
+    rg_path.write_text(source, encoding="utf-8")
+    # Fixture preparation may repair its private copy; optimizer runs must not.
+    roots = [workspace, *(workspace / "variants").iterdir()]
+    args = ["--model-file", str(workspace / "model.py"), "--no-recursive", "--fix"]
+    for root in roots:
+        if root.is_dir() or root.suffix == ".py":
+            args.extend(["--scan-root", str(root)])
+    if check_constants(args):
+        raise RuntimeError("Could not synchronize constants in the isolated validation workspace")
     return workspace
 
 
@@ -110,8 +135,13 @@ def validate(output):
             assert len(results["CELL_SPEED_METRICS"]) >= common["N_CELLS"]
             vtk_files = list(run_dir.rglob("*.vtk"))
             assert vtk_files, f"{name}: VTK output missing"
-            # Exercise anchor stripping as well as raw VTK generation.
-            assert any("no_anchor" in str(p).lower() for p in vtk_files), name
+            # Focal adhesions are disabled: the original CELL files are already
+            # centre-only; no duplicate stripped files should be generated.
+            assert not any("no_anchor" in str(p).lower() for p in vtk_files), name
+            for vtk in run_dir.glob("cells_t*.vtk"):
+                content = vtk.read_text()
+                points = int(re.search(r"^POINTS (\d+)", content, re.M).group(1))
+                assert points == common["N_CELLS"], (name, vtk, points)
             config = results["MODEL_CONFIG"]
             assert config.VARIANT_NAME == variant
             if variant == "radial_glia":

@@ -21,6 +21,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from helper_module import plan_diffusion, validate_diffusion_parameters
+from simulation_errors import reject_trial
 
 
 def load_production_wiring(model, ns):
@@ -37,7 +38,7 @@ def load_production_wiring(model, ns):
     definitions = [node for node in tree.body
                    if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in names]
     assert len(definitions) == len(names)
-    namespace = dict(pyflamegpu=pyflamegpu, math=math, model=model)
+    namespace = dict(pyflamegpu=pyflamegpu, math=math, model=model, reject_trial=reject_trial)
     exec(compile(ast.Module(body=definitions, type_ignores=[]), str(ROOT / "model.py"), "exec"), namespace)
     # Tests use small independent grids/species counts. Only this test adapter
     # substitutes literal dimensions in memory; production uses ordinary files

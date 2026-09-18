@@ -24,6 +24,8 @@ import os
 import pickle
 import matplotlib.pyplot as plt
 import check_hard_coded_values
+from cell_anchors import declare_cell_anchors, register_cell_rtc
+from simulation_errors import reject_trial
 from copy import deepcopy
 from variant_api import (load_variant, register_parameter_defaults, configuration_snapshot,
                          call_hook, VariantContext, core_initial_population_counts)
@@ -51,7 +53,7 @@ SAVE_PICKLE = True  # If True, dumps model configuration into a pickle file for 
 SHOW_PLOTS = False  # Show plots at the end of the simulation
 SAVE_DATA_TO_FILE = True  # If true, agent data is exported to .vtk file every SAVE_EVERY_N_STEPS steps
 SAVE_EVERY_N_STEPS = 20 # Affects both the .vtk files and the Dataframes storing boundary data
-SAVE_NO_ANCHOR_CELL_FILES = True  # If True, runs tools/remove_anchors_from_cell_vtks.py after the simulation to strip anchor points from cell VTK files. Requires SAVE_DATA_TO_FILE=True and SAVE_PICKLE=True.
+SAVE_NO_ANCHOR_CELL_FILES = True  # With focal adhesions, also write stripped cell VTKs. Requires SAVE_DATA_TO_FILE and SAVE_PICKLE. Without focal adhesions, cells_t*.vtk already contains only centres.
 DEBUG_PRINT_INTERVAL = 0  # [steps] Periodic variant stats and multiscale diffusion diagnostics (0 = disabled; diffusion also requires DEBUG_PRINTING).
 
 CURR_PATH = pathlib.Path(__file__).resolve().parent
@@ -485,7 +487,10 @@ DUROTAXIS_USE_STRESS = True   # True: use stress eigenpair, False: use strain ei
 # Variant FILES and construction/runtime hooks are
 # applied later in this file at the appropriate execution points.
 _ACTIVE_VARIANT = None
-_CORE_ECM_N = N  # The fixed lattice above was built before any overrides.
+# Overrides must preserve the compiled dimensions, lattice and initial domain.
+_CORE_STRUCTURAL_SETTINGS = {
+    name: deepcopy(globals()[name]) for name in check_hard_coded_values.CORE_CONTROLLED_PARAMETERS
+}
 _VARIANT_NAME = _CLI_ARGS.variant
 _PARAM_OVERRIDE_PINS = set()
 _ACTIVE_VARIANT = load_variant(CURR_PATH, _VARIANT_NAME)
@@ -515,16 +520,23 @@ if _PARAM_OVERRIDES:
         globals(),
         _PARAM_OVERRIDES,
         pinned=_PARAM_OVERRIDE_PINS,
+        strict=True,
     )
+for _setting, _core_value in _CORE_STRUCTURAL_SETTINGS.items():
+    if globals()[_setting] != _core_value:
+        sys.exit(f"ERROR: {_setting}={globals()[_setting]!r} differs from the core value {_core_value!r}. "
+                 "Initial domain bounds and structural dimensions cannot be changed through variant/JSON overrides. "
+                 "Edit model.py and synchronize kernel constants before running. "
+                 "See docs/auto/wiki/Tutorial-Model-Variants.md.")
 if _RESULT_DIR_OVERRIDE:
     RES_PATH = pathlib.Path(_RESULT_DIR_OVERRIDE)
     RES_PATH.mkdir(parents=True, exist_ok=True)
     print(f"Result directory overridden to: {RES_PATH}")
 
 # When running inside an Optuna trial, suppress verbose summaries.
-_OPTUNA_QUIET = bool(_PARAM_OVERRIDES)
+_OPTUNA_QUIET = _CLI_ARGS.overrides is not None
 print(f"[DIAG] After overrides: STEPS={STEPS}, SAVE_PICKLE={SAVE_PICKLE}, RES_PATH={RES_PATH}, _OPTUNA_QUIET={_OPTUNA_QUIET}")
-if SAVE_NO_ANCHOR_CELL_FILES:
+if SAVE_NO_ANCHOR_CELL_FILES and INCLUDE_FOCAL_ADHESIONS:
     if not SAVE_DATA_TO_FILE:
         print("[WARNING] SAVE_NO_ANCHOR_CELL_FILES is True but SAVE_DATA_TO_FILE is False — no VTK files will be produced; anchor removal will be skipped.")
     if not SAVE_PICKLE:
@@ -563,24 +575,11 @@ print(f"[GEOMETRY] Effective BOUNDARY_COORDS (+X,-X,+Y,-Y,+Z,-Z): {BOUNDARY_COOR
 print(f"[GEOMETRY] Domain lengths (um): {[L0_x, L0_y, L0_z]}")
 print(f"[GEOMETRY] Fixed ECM grid: {ECM_AGENTS_PER_DIR} ({ECM_POPULATION_SIZE} agents); "
       f"nominal spacing (um): {[length / (count - 1) for length, count in zip((L0_x, L0_y, L0_z), ECM_AGENTS_PER_DIR)]}")
-if N != _CORE_ECM_N:
-    print(f"[WARNING] N={N} was overridden, but the ECM grid was constructed using core N={_CORE_ECM_N}. "
-          "Changing N in variant PARAMS or JSON does not resize the grid. "
-          "See docs/auto/wiki/Tutorial-Model-Variants.md.")
-
 critical_error = False
 try:
     # Check the model directory and the active variant, including Optuna runs.
-    hard_coded_check_args = [
-        "--model-file", str(CURR_PATH / "model.py"),
-        "--scan-root", str(CURR_PATH),
-        "--no-recursive",
-    ]
-    if _ACTIVE_VARIANT is not None:
-        # Package variants keep their kernels beside __init__.py. A legacy
-        # flat variant contributes only its own file, not its siblings.
-        variant_scan_root = _variant_path.parent if _variant_path.name == "__init__.py" else _variant_path
-        hard_coded_check_args.extend(["--scan-root", str(variant_scan_root)])
+    hard_coded_check_args = check_hard_coded_values.model_check_arguments(
+        CURR_PATH / "model.py", _variant_path if _ACTIVE_VARIANT is not None else None)
     if _OPTUNA_QUIET:
         hard_coded_check_args.append("--fail-on-mismatch")
 
@@ -588,10 +587,10 @@ try:
           "effective runtime geometry is reported above.")
     hard_coded_check_exit_code = check_hard_coded_values.main(hard_coded_check_args)
     if hard_coded_check_exit_code != 0:
-        print("ERROR: hard-coded value consistency check found mismatches or failed")
-        critical_error = True
+        sys.exit("ERROR: hard-coded value consistency check failed; simulation stopped. "
+                 "Review the mismatch report above and repair constants before running.")
 except Exception as e:
-    print(f"WARNING: failed to execute hard-coded value consistency check: {e}\nSkipping this check. If execution fails later due to hard-coded value mismatches, please run the check separately and fix the issues")
+    sys.exit(f"ERROR: could not execute hard-coded value consistency check: {e}. Simulation stopped.")
 
 msg_poisson = "WARNING: poisson ratio directions are not well defined or might not make sense due to boundary conditions \n"
 if (BOUNDARY_DISP_RATES[0] != 0.0 or BOUNDARY_DISP_RATES[1] != 0.0) and POISSON_DIRS[1] != 0:
@@ -768,7 +767,7 @@ if INCLUDE_CELLS and INCLUDE_FOCAL_ADHESIONS and ENABLE_FOCAD_BIRTH and not _OPT
 
 
 if critical_error:
-    quit()
+    sys.exit("ERROR: invalid model configuration; simulation stopped. See configuration errors above.")
 
 _EFFECTIVE_CONFIG = configuration_snapshot(globals())
 if _ACTIVE_VARIANT is not None:
@@ -803,10 +802,10 @@ class CheckDiffusionStability(pyflamegpu.HostFunction):
     def run(self, api):
         error = api.agent("ECM").maxUInt("diffusion_error")
         if error == 1:
-            raise ValueError("Multiscale diffusion encountered a non-finite concentration, "
+            reject_trial("Multiscale diffusion encountered a non-finite concentration, "
                              "invalid diffusion coefficient, or zero/invalid neighbor distance")
         if error == 2:
-            raise ValueError("Multiscale diffusion exceeded the fixed CFL bound. "
+            reject_trial("Multiscale diffusion exceeded the fixed CFL bound. "
                              "Choose a smaller DIFFUSION_MIN_SPACING or TIME_STEP_DIFFUSION "
                              "and restart; no timestep adaptation is performed.")
 
@@ -1835,17 +1834,12 @@ if INCLUDE_CELLS:
         cfr.setMessageInput("fnode_spatial_location_message")
         cfr.setAgentOutput(FNODE_agent)
     CELL_agent.newRTCFunctionFile("cell_ecm_interaction_metabolism", cell_ecm_interaction_metabolism_file).setMessageInput("ecm_grid_location_message")
-    CELL_agent.newRTCFunctionFile("cell_move", cell_move_file)
+    register_cell_rtc(CELL_agent, "cell_move", cell_move_file, INCLUDE_FOCAL_ADHESIONS)
     if (ORGANOID_ASSAY or MONOLAYER_ASSAY) and INCLUDE_LUMEN:
         CELL_agent.newRTCFunctionFile("cell_lumen_interaction", cell_lumen_interaction_file).setMessageInput("lumen_spatial_location_message")
         cls_fn = CELL_agent.newRTCFunctionFile("cell_lumen_secretion", cell_lumen_secretion_file)
         # agent_out for lumen is set after LUMEN_agent is defined (below)
-    CELL_agent.newVariableArrayFloat("x_i", N_ANCHOR_POINTS) # focal-adhesion anchor point positions on the cell nucleus surface. Unused if INCLUDE_FOCAL_ADHESIONS is False
-    CELL_agent.newVariableArrayFloat("y_i", N_ANCHOR_POINTS) 
-    CELL_agent.newVariableArrayFloat("z_i", N_ANCHOR_POINTS)
-    CELL_agent.newVariableArrayFloat("u_ref_x_i", N_ANCHOR_POINTS) # unit direction vector from the cell center to the anchor point in the reference configuration (used for elastic force calculation). Unused if INCLUDE_FOCAL_ADHESIONS is False
-    CELL_agent.newVariableArrayFloat("u_ref_y_i", N_ANCHOR_POINTS)
-    CELL_agent.newVariableArrayFloat("u_ref_z_i", N_ANCHOR_POINTS)
+    declare_cell_anchors(CELL_agent, INCLUDE_FOCAL_ADHESIONS, N_ANCHOR_POINTS)
     CELL_agent.newVariableFloat("eps_xx", 0.0) # strain tensor
     CELL_agent.newVariableFloat("eps_yy", 0.0)
     CELL_agent.newVariableFloat("eps_zz", 0.0)
@@ -1886,10 +1880,10 @@ if INCLUDE_CELLS:
         CELL_agent.newRTCFunctionFile("cell_bucket_location_data", cell_bucket_location_data_file).setMessageOutput("cell_bucket_location_message")
         cell_focad_update_fn = CELL_agent.newRTCFunctionFile("cell_focad_update", cell_focad_update_file)
         cell_focad_update_fn.setMessageInput("focad_bucket_location_message")
-    CELL_agent.newRTCFunctionFile("cell_stress_state_update", cell_stress_state_update_file)
+    register_cell_rtc(CELL_agent, "cell_stress_state_update", cell_stress_state_update_file, INCLUDE_FOCAL_ADHESIONS)
     if INCLUDE_CELL_CYCLE:
         CELL_agent.newRTCFunctionFile("cell_MaxID_update", cell_maxid_update_file)
-        ccf = CELL_agent.newRTCFunctionFile("cell_cycle", cell_cycle_file)
+        ccf = register_cell_rtc(CELL_agent, "cell_cycle", cell_cycle_file, INCLUDE_FOCAL_ADHESIONS)
         ccf.setAgentOutput(CELL_agent)
         ccf.setAllowAgentDeath(True) 
         
@@ -2320,10 +2314,11 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableArrayFloat("chemokinesis_inhibitory_adapt_state", [r * CELL_INIT_CONCENTRATION_MULTIPLIER[cell_type_i] for r in INIT_CELL_CONCENTRATION_VALS])
                 _VARIANT_CONTEXT.initialize_agent("CELL", instance, np.random)
 
-                anchor_pos = getRandomCoordsAroundPoint(N_ANCHOR_POINTS, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_NUCLEUS_RADIUS[cell_type_i], on_surface=True)
-                instance.setVariableArrayFloat("x_i", anchor_pos[:, 0].tolist())
-                instance.setVariableArrayFloat("y_i", anchor_pos[:, 1].tolist())
-                instance.setVariableArrayFloat("z_i", anchor_pos[:, 2].tolist())
+                if INCLUDE_FOCAL_ADHESIONS:
+                    anchor_pos = getRandomCoordsAroundPoint(N_ANCHOR_POINTS, cell_pos[i, 0], cell_pos[i, 1], cell_pos[i, 2], CELL_NUCLEUS_RADIUS[cell_type_i], on_surface=True)
+                    instance.setVariableArrayFloat("x_i", anchor_pos[:, 0].tolist())
+                    instance.setVariableArrayFloat("y_i", anchor_pos[:, 1].tolist())
+                    instance.setVariableArrayFloat("z_i", anchor_pos[:, 2].tolist())
                 instance.setVariableFloat("eps_xx", 0.0)
                 instance.setVariableFloat("eps_yy", 0.0)
                 instance.setVariableFloat("eps_zz", 0.0)
@@ -2360,10 +2355,11 @@ class initAgentPopulations(pyflamegpu.HostFunction):
                 instance.setVariableFloat("eps_eigvec3_x", 0.0)
                 instance.setVariableFloat("eps_eigvec3_y", 0.0)
                 instance.setVariableFloat("eps_eigvec3_z", 0.0)
-                u_ref = compute_u_ref_from_anchor_pos(anchor_pos, cell_pos[i, :])
-                instance.setVariableArrayFloat("u_ref_x_i", u_ref[:, 0].tolist())
-                instance.setVariableArrayFloat("u_ref_y_i", u_ref[:, 1].tolist())
-                instance.setVariableArrayFloat("u_ref_z_i", u_ref[:, 2].tolist())
+                if INCLUDE_FOCAL_ADHESIONS:
+                    u_ref = compute_u_ref_from_anchor_pos(anchor_pos, cell_pos[i, :])
+                    instance.setVariableArrayFloat("u_ref_x_i", u_ref[:, 0].tolist())
+                    instance.setVariableArrayFloat("u_ref_y_i", u_ref[:, 1].tolist())
+                    instance.setVariableArrayFloat("u_ref_z_i", u_ref[:, 2].tolist())
                 if N_CELLS >= 100000 and ((i + 1) % cell_progress_interval == 0 or (i + 1) == N_CELLS):
                     print(f"  |-> Cells initialized: {i + 1}/{N_CELLS}")
 
@@ -2899,7 +2895,7 @@ class CheckFNODEStability(pyflamegpu.HostFunction):
         unstable_moves = FLAMEGPU.agent("FNODE").sumUInt8("unstable_move")
         if unstable_moves > 0:
             stepCounter = FLAMEGPU.getStepCounter() + 1
-            raise RuntimeError(
+            reject_trial(
                 "Unstable FNODE motion detected at step "
                 f"{stepCounter}: {unstable_moves} node(s) exceeded "
                 f"FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE:{FIBRE_SEGMENT_EQUILIBRIUM_DISTANCE} in a single step."
@@ -3750,7 +3746,7 @@ else:
     steps = logs.getStepLog()
     print(f"[DIAG] Got {len(steps)} step log entries")
     manageLogs(steps, ENSEMBLE, 0)
-if SAVE_NO_ANCHOR_CELL_FILES and SAVE_DATA_TO_FILE and SAVE_PICKLE:
+if INCLUDE_FOCAL_ADHESIONS and SAVE_NO_ANCHOR_CELL_FILES and SAVE_DATA_TO_FILE and SAVE_PICKLE:
     _anchor_script = CURR_PATH / 'tools' / 'remove_anchors_from_cell_vtks.py'
     _pickle_path = RES_PATH / 'output_data_0.pickle'
     print(f"[INFO] Running anchor-removal script: {_anchor_script}")
@@ -3760,6 +3756,6 @@ if SAVE_NO_ANCHOR_CELL_FILES and SAVE_DATA_TO_FILE and SAVE_PICKLE:
          '--pickle-path', str(_pickle_path)],
         check=True,
     )
-elif SAVE_NO_ANCHOR_CELL_FILES:
+elif INCLUDE_FOCAL_ADHESIONS and SAVE_NO_ANCHOR_CELL_FILES:
     print("[WARNING] SAVE_NO_ANCHOR_CELL_FILES is True but SAVE_DATA_TO_FILE or SAVE_PICKLE is False — anchor removal skipped.")
 print("[DIAG] All done.")

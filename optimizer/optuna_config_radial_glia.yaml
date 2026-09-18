@@ -7,8 +7,7 @@
 # rosette clusters by day 7.
 #
 # Usage:
-#    python -m optimizer.optimize \
-#        --config optimizer/optuna_config_radial_glia.yaml
+#    python -m optimizer.optimize --config optimizer/optuna_config_radial_glia.yaml
 #
 # Objectives (minimized simultaneously via NSGA-II Pareto front):
 #   1. rg_rosette_error / n_large_rg_clusters    — target large cluster count (>=5 cells; CSV)

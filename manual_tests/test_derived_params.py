@@ -19,6 +19,19 @@ class RadiusDerivedParameterTests(unittest.TestCase):
     ADHESION_MULTIPLIER = 1.0
     FOCAD_MULTIPLIER = 4.0
 
+    def test_strict_overrides_reject_misspellings_and_invalid_indices(self):
+        for key in ("CELL_RADIUSS", "CELL_RADIUS[9]", "MISSING[0]", "STEPS[0]"):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                apply_param_overrides({"CELL_RADIUS": [3., 3., 3.], "STEPS": 1},
+                                      {key: 2}, strict=True)
+
+    def test_strict_overrides_keep_broadcasting_and_indexed_values(self):
+        ns = {"CELL_RADIUS": [3., 3., 3.], "CELL_CELL_ADHESION_RANGE_RADIUS_MULTIPLIER": 1.,
+              "MAX_FOCAD_ARM_LENGTH_RADIUS_MULTIPLIER": 4.}
+        apply_param_overrides(ns, {"CELL_RADIUS": 5.}, strict=True)
+        apply_param_overrides(ns, {"CELL_RADIUS[1]": 7.}, strict=True)
+        self.assertEqual(ns["CELL_RADIUS"], [5., 7., 5.])
+
     def test_canonical_formulas_support_per_type_radii(self):
         radii = [5.0, 7.5, 10.0]
 
@@ -182,7 +195,9 @@ class RadiusDerivedParameterTests(unittest.TestCase):
 
 
 class DomainDerivedParameterTests(unittest.TestCase):
-    def test_variant_bounds_change_geometry_but_n_does_not_resize_core_grid(self):
+    def test_recomputation_alone_does_not_resize_the_core_grid(self):
+        # Low-level helper behavior, not permission to override core geometry.
+        # model.py separately rejects changes to initial bounds/dimensions.
         namespace = {"N": 11, "BOUNDARY_COORDS": [50., -50.] * 3,
                      "ECM_AGENTS_PER_DIR": [11, 11, 11], "ECM_POPULATION_SIZE": 1331}
         bounds = [500., -500., 500., -500., 25., -25.]
@@ -196,7 +211,7 @@ class DomainDerivedParameterTests(unittest.TestCase):
         self.assertEqual(namespace["ECM_ECM_EQUILIBRIUM_DISTANCE"], 100.)
         self.assertEqual(namespace["MAX_SEARCH_RADIUS_CELL_ECM_INTERACTION"], 100.)
 
-        # A later JSON layer has final precedence, still using the same grid.
+        # Recomputing with another geometry still cannot rebuild this grid.
         apply_param_overrides(namespace, {"BOUNDARY_COORDS": [100., -100.] * 3}, pinned=pins)
         self.assertEqual(namespace["ECM_AGENTS_PER_DIR"], [11, 11, 11])
         self.assertEqual(namespace["ECM_POPULATION_SIZE"], 1331)

@@ -40,6 +40,8 @@ Requirements
 """
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import pickle
@@ -48,9 +50,50 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 import yaml
+
+# Also support launching optimize.py directly from optimizer/.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import check_hard_coded_values
+from simulation_errors import TrialRejected
+
+
+class OptimizationError(RuntimeError):
+    """A configuration or unexpected failure that must stop the study."""
+
+
+def check_model_preflight(model_script: str, variant: str | None = None):
+    """Read-only constants check before creating a study or launching any trials.
+
+    Read core literals without importing model.py or initializing CUDA. The model
+    repeats this check at startup, including if sources change during a study.
+    """
+    model_path = Path(model_script).resolve()
+    variant_path = None
+    if variant:
+        if not isinstance(variant, str) or not variant.isidentifier():
+            raise OptimizationError(f"Invalid variant name: {variant!r}")
+        directory = model_path.parent / "variants"
+        package = directory / variant / "__init__.py"
+        variant_path = package if package.is_file() else directory / f"{variant}.py"
+        if not variant_path.is_file():
+            raise OptimizationError(f"Variant {variant!r} not found in {directory}.")
+    args = check_hard_coded_values.model_check_arguments(model_path, variant_path)
+    report = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(report), contextlib.redirect_stderr(report):
+            status = check_hard_coded_values.main([*args, "--fail-on-mismatch"])
+    except Exception as e:
+        raise OptimizationError(f"Could not complete the kernel constants preflight: {e}\n{report.getvalue()}") from e
+    if status:
+        raise OptimizationError(
+            f"Kernel constants preflight failed. No trials were launched and no source files were changed.\n"
+            f"{report.getvalue()}"
+        )
+    print(f"[preflight] Kernel constants match core model.py literals (variant: {variant or 'base'}).")
 
 # ---------------------------------------------------------------------------
 # Safe unpickler (stubs ModelParameterConfig so old pickles load cleanly)
@@ -168,33 +211,46 @@ def run_trial_subprocess(
     t0 = time.time()
     stdout_log = os.path.join(result_dir, "stdout.log")
     stderr_log = os.path.join(result_dir, "stderr.log")
+    rejection_path = Path(result_dir).resolve() / "trial_rejection.json"
+    token = uuid.uuid4().hex
+    process_env = dict(os.environ, CELLFOUNDRY_TRIAL_REJECTION_FILE=str(rejection_path),
+                       CELLFOUNDRY_TRIAL_TOKEN=token)
     with open(stdout_log, "w", encoding="utf-8", errors="replace") as stdout_handle, open(
         stderr_log, "w", encoding="utf-8", errors="replace"
     ) as stderr_handle:
         proc = subprocess.run(
             cmd,
+            stdin=subprocess.DEVNULL,
             stdout=stdout_handle,
             stderr=stderr_handle,
             text=True,
             timeout=timeout if timeout > 0 else None,
+            env=process_env,
         )
     elapsed = time.time() - t0
     print(f"  [trial] Finished in {elapsed:.1f}s (exit code {proc.returncode})")
 
     if proc.returncode != 0:
-        stderr_tail = _read_log_tail(stderr_log, 500)
-        raise RuntimeError(
+        if rejection_path.is_file():
+            rejection = json.loads(rejection_path.read_text(encoding="utf-8"))
+            if rejection.get("token") == token:
+                raise TrialRejected(f"{rejection['reason']}\nFull logs: {stdout_log} and {stderr_log}")
+        stderr_tail = _read_log_tail(stderr_log, 3000)
+        stdout_tail = _read_log_tail(stdout_log, 3000)
+        raise OptimizationError(
             f"model.py exited with code {proc.returncode}. "
-            f"See {stderr_log} for details.\n"
-            f"Last 500 chars of stderr:\n{stderr_tail}"
+            f"Optimization stopped; correct the configuration/model before restarting.\n"
+            f"Full logs: {stdout_log} and {stderr_log}\n"
+            f"Last stdout:\n{stdout_tail}\nLast stderr:\n{stderr_tail}"
         )
 
     # Find the pickle file
     pickle_path = os.path.join(result_dir, "output_data_0.pickle")
     if not os.path.isfile(pickle_path):
         stdout_tail = _read_log_tail(stdout_log, 1500)
-        raise FileNotFoundError(
+        raise OptimizationError(
             f"Expected pickle not found at {pickle_path}. "
+            "Optimization stopped. Check SAVE_PICKLE and model output configuration. "
             f"Full stdout saved to {stdout_log}.\n"
             f"model.py stdout (last 1500 chars):\n{stdout_tail}"
         )
@@ -251,6 +307,15 @@ def make_objective(config: dict, model_script: str, base_result_dir: str):
     trial_timeout = config.get("model", {}).get("timeout", 0)
     cleanup_trials = config.get("model", {}).get("cleanup_trials", False)
     variant_name = config.get("model", {}).get("variant", None)
+    if model_overrides.get("SAVE_PICKLE") is False:
+        raise OptimizationError("Optimization requires SAVE_PICKLE=True to evaluate trial results.")
+    # These dimensions require a coordinated core/kernel edit, never trial sampling.
+    structural = set(check_hard_coded_values.CORE_CONTROLLED_PARAMETERS)
+    forbidden = sorted(name for name in param_defs if name.split("[", 1)[0] in structural)
+    if forbidden:
+        raise OptimizationError(f"Cannot optimize structural dimensions: {', '.join(forbidden)}. "
+                                "Configure them in model.py and synchronize kernel constants first.")
+    check_model_preflight(model_script, variant_name)
 
     def objective(trial: "optuna.Trial"):
         # 1. Suggest parameter values
@@ -307,9 +372,14 @@ def make_objective(config: dict, model_script: str, base_result_dir: str):
                 timeout=trial_timeout,
                 variant=variant_name,
             )
-        except (RuntimeError, FileNotFoundError, subprocess.TimeoutExpired) as e:
-            print(f"  [trial {trial.number}] FAILED: {e}")
-            raise optuna.TrialPruned()
+        except subprocess.TimeoutExpired as e:
+            print(f"  [trial {trial.number}] TIMEOUT: {e}")
+            trial.set_user_attr("prune_reason", "Simulation exceeded the configured timeout")
+            raise optuna.TrialPruned() from e
+        except TrialRejected as e:
+            trial.set_user_attr("prune_reason", str(e))
+            print(f"  [trial {trial.number}] INFEASIBLE: {e}")
+            raise optuna.TrialPruned(str(e)) from e
 
         # 4. Compute objective(s)
         errors = []
@@ -340,9 +410,14 @@ def make_objective(config: dict, model_script: str, base_result_dir: str):
                 error, display_text = _normalize_objective_result(raw_result)
                 errors.append(error)
                 display_texts.append(display_text)
+            except TrialRejected as e:
+                trial.set_user_attr("prune_reason", str(e))
+                raise optuna.TrialPruned(str(e)) from e
             except Exception as e:
-                print(f"  [trial {trial.number}] Objective '{obj['name']}' failed: {e}")
-                raise optuna.TrialPruned()
+                raise OptimizationError(
+                    f"Objective '{obj['name']}' failed for trial {trial.number}: {e}. "
+                    f"Optimization stopped; inspect the objective configuration and outputs in {trial_dir}."
+                ) from e
             finally:
                 if _temp_ref is not None:
                     try:
@@ -547,4 +622,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except OptimizationError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        raise SystemExit(1)

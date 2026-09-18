@@ -1,8 +1,9 @@
-# check_hard_coded_varaibles.py
+"""Check core structural constants; repairs require a prompt or explicit --fix."""
 from __future__ import annotations
 
 import argparse
 import ast
+import math
 import os
 import re
 import sys
@@ -33,6 +34,13 @@ EXCLUDED_FILE_BASENAMES_RE = re.compile(
 )
 
 DEFAULT_EXTS = {".py", ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp", ".hh", ".hxx", ".cu", ".cuh"}
+
+# These are resolved by core setup before variants/JSON are applied. Changing
+# them later does not rebuild every dependent grid, message or assay setting.
+CORE_CONTROLLED_PARAMETERS = (
+    "N", "BOUNDARY_COORDS", "N_SPECIES", "N_CELL_TYPES", "MAX_CONNECTIVITY",
+    "N_ANCHOR_POINTS", "MAX_VASC_CONNECTIVITY", "ECM_AGENTS_PER_DIR", "ECM_POPULATION_SIZE",
+)
 
 
 @dataclass(frozen=True)
@@ -132,8 +140,8 @@ def load_reference_values(model_path: str) -> ReferenceValues:
         if name not in assigns:
             raise RuntimeError(f"Could not find literal assignment {name} = <int> in {model_path}")
         v = assigns[name]
-        if not isinstance(v, int):
-            raise RuntimeError(f"{name} must be an integer literal in {model_path}, found: {v!r}")
+        if type(v) is not int or v < 1:
+            raise RuntimeError(f"{name} must be a positive integer literal in {model_path}, found: {v!r}")
         return v
 
     def need_boundary() -> List[Number]:
@@ -153,6 +161,12 @@ def load_reference_values(model_path: str) -> ReferenceValues:
     N_ANCHOR_POINTS = need_int("N_ANCHOR_POINTS")
     MAX_VASC_CONNECTIVITY = need_int("MAX_VASC_CONNECTIVITY")
     BOUNDARY_COORDS = need_boundary()
+    if N < 2:
+        raise ValueError("N must be >= 2.")
+    if not all(math.isfinite(x) for x in BOUNDARY_COORDS) or any(
+        BOUNDARY_COORDS[i] <= BOUNDARY_COORDS[i + 1] for i in (0, 2, 4)
+    ):
+        raise ValueError("BOUNDARY_COORDS must contain finite (+axis, -axis) pairs with positive lengths.")
 
     diff_x = abs(BOUNDARY_COORDS[0] - BOUNDARY_COORDS[1])
     diff_y = abs(BOUNDARY_COORDS[2] - BOUNDARY_COORDS[3])
@@ -210,8 +224,12 @@ def iter_project_files(root: str, exts: set, excluded_dirs: set, recursive: bool
     root = os.path.abspath(root)
     if os.path.isfile(root):
         return [root] if os.path.splitext(root)[1].lower() in exts else []
+    if not os.path.isdir(root):
+        raise FileNotFoundError(f"Scan root not found: {root}")
+    def walk_error(error):
+        raise error
     files: List[str] = []
-    for dirpath, dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root, onerror=walk_error):
         # Accept directory basenames (e.g. variants) or root-relative paths
         # (e.g. variants/radial_glia) without excluding the active variant.
         dirnames[:] = [d for d in dirnames if d not in excluded_dirs
@@ -357,6 +375,17 @@ def apply_fixes(mismatches: List[Mismatch]) -> None:
 # CLI / Output
 # -----------------------------
 
+def model_check_arguments(model_file, variant_path=None) -> List[str]:
+    """The shared startup/optimizer scope: core files and the selected variant."""
+    model_file = os.path.abspath(model_file)
+    args = ["--model-file", model_file, "--scan-root", os.path.dirname(model_file), "--no-recursive"]
+    if variant_path is not None:
+        variant_path = os.path.abspath(variant_path)
+        root = os.path.dirname(variant_path) if os.path.basename(variant_path) == "__init__.py" else variant_path
+        args.extend(["--scan-root", root])
+    return args
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-file", default="model.py")
@@ -383,11 +412,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="Scan only files directly in each scan root, without entering subdirectories.",
     )
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--fail-on-mismatch",
         action="store_true",
-        help="Run non-interactively: automatically apply fixes instead of prompting.",
+        help="Check only: return exit code 2 on mismatches, without prompting or writing files.",
     )
+    mode.add_argument("--fix", action="store_true",
+                      help="Explicitly apply repairs without prompting. Default: ask before repairing.")
     args = parser.parse_args(argv)
 
     model_file = os.path.abspath(args.model_file)
@@ -441,15 +473,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("")
 
     mismatches = []
-    for scan_root in scan_roots:
-        mismatches.extend(find_mismatches(
-            scan_root=scan_root,
-            expected=expected,
-            excluded_files_abs=excluded_files_abs,
-            exts=exts,
-            excluded_dirs=excluded_dirs,
-            recursive=not args.no_recursive,
-        ))
+    try:
+        for scan_root in scan_roots:
+            mismatches.extend(find_mismatches(
+                scan_root=scan_root,
+                expected=expected,
+                excluded_files_abs=excluded_files_abs,
+                exts=exts,
+                excluded_dirs=excluded_dirs,
+                recursive=not args.no_recursive,
+            ))
+    except OSError as e:
+        print(f"ERROR: could not complete consistency check: {e}", file=sys.stderr)
+        return 1
     # Overlapping scan roots can find the same assignment more than once.
     mismatches = list(dict.fromkeys(mismatches))
 
@@ -473,17 +509,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"  {var} = {val}")
 
     if args.fail_on_mismatch:
-        print("\nAuto-applying fixes because --fail-on-mismatch was provided.")
-        apply_fixes(mismatches)
-        return 0
+        print("\nERROR: hard-coded constants do not match model.py. No files changed. "
+              "Review the mismatches and run the checker interactively or with --fix to repair them.",
+              file=sys.stderr)
+        return 2
 
-    answer = input(
-        "\nDo you want to automatically update the variables to their expected values "
-        f"{list(unique_expected.items())}? [y/N]: "
-    ).strip().lower()
+    answer = "yes" if args.fix else "no"
+    if not args.fix:
+        try:
+            answer = input(
+                "\nDo you want to automatically update the variables to their expected values "
+                f"{list(unique_expected.items())}? [y/N]: "
+            ).strip().lower()
+        except EOFError:
+            print("No interactive input available; no changes applied.", file=sys.stderr)
+            return 2
 
     if answer in {"y", "yes"}:
-        apply_fixes(mismatches)
+        try:
+            apply_fixes(mismatches)
+        except OSError as e:
+            print(f"ERROR: could not complete repairs: {e}", file=sys.stderr)
+            return 1
         return 0
     else:
         print("No changes applied.")

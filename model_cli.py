@@ -19,9 +19,9 @@ def parse_model_args(args=None):
 
 Parameter precedence: JSON overrides > variant PARAMS > model.py defaults.
 Model parameters (e.g. STEPS) go in the overrides JSON, not individual CLI flags.
-BOUNDARY_COORDS overrides physical bounds but does not resize the fixed ECM grid.
-Structural settings (N, grid/array extents, species counts) require coordinated
-changes in model.py and RTC constants; variant PARAMS does not synchronize them.
+Initial BOUNDARY_COORDS and structural settings (N, grid/array extents, species
+counts) are core-controlled. Differing variant/JSON overrides are rejected.
+Change these settings in model.py and synchronize RTC constants before running.
 See docs/auto/wiki/Tutorial-Model-Variants.md for details.
 """,
     )

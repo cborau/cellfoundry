@@ -35,6 +35,24 @@ optimizer/
 
 The main simulation script (`model.py`) is **not modified** during optimization. Instead, it receives parameter overrides via command-line arguments (`--overrides`, `--result-dir`).
 
+### Configuration checks and stopping on errors
+
+Before creating/loading the study or launching trials, the runner checks hard-coded constants in core source files and the selected variant against the literal structural settings in `model.py`. This check is read-only. A mismatch, unreadable reference, or missing variant stops optimization with a nonzero exit and a diagnostic report. The model repeats the check at each trial's startup, including with empty JSON overrides. No optimizer path repairs source files or asks for keyboard input.
+
+To review and repair a mismatch deliberately, run this separately from the repository root (replace the variant name as needed):
+
+```powershell
+python check_hard_coded_values.py --scan-root . --scan-root variants/radial_glia --no-recursive
+```
+
+This prompts before changing files. Append `--fail-on-mismatch` to check without writing, or `--fix` for explicitly requested repairs without a prompt. The reference remains core `model.py`; the checker does not derive new structural dimensions from variant parameters.
+
+Do not put `BOUNDARY_COORDS`, `N`, `N_SPECIES`, `N_CELL_TYPES`, `MAX_CONNECTIVITY`, `N_ANCHOR_POINTS`, `MAX_VASC_CONNECTIVITY`, `ECM_AGENTS_PER_DIR`, or `ECM_POPULATION_SIZE` in the search space. Configure initial bounds and dimensions in the core and synchronize the kernels before starting optimization. Fixed variant/JSON overrides must agree with the core values, including indexed boundary changes. Bounds cannot safely change after the initial grid and assay setup; domain/resolution studies require separately prepared core builds. Unknown JSON parameter names and invalid array indices are errors, so a misspelling cannot silently disable a trial's intended override.
+
+Detected configuration errors, any nonzero model exit, missing output pickle, and objective evaluation exceptions **stop the whole study**. A failure during a trial is recorded as `FAIL`, retains its output directory, and no subsequent trials are launched. The terminal reports the cause and paths to `stdout.log` and `stderr.log`; earlier successful trials remain in the study. This conservative policy avoids guessing whether a failed model is caused by shared configuration or sampled parameters. An explicitly configured timeout remains a trial-level `PRUNED` result and allows the study to continue. Optimization requires `SAVE_PICKLE=True`.
+
+The constants check covers the named literal assignments, not every possible model constraint. Variant validation and model startup check the effective configuration; numerical and biological validity still need suitable tests for the chosen model.
+
 ---
 
 ## 2. Configuration file (YAML)

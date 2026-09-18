@@ -1667,9 +1667,10 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             damage_ai = ai.getVariableFloat("damage")
             dead_ai = ai.getVariableInt("dead")
             dead_by_ai = ai.getVariableInt("dead_by")
-            cell_anchor_points_x.append(ai.getVariableArrayFloat("x_i"))
-            cell_anchor_points_y.append(ai.getVariableArrayFloat("y_i"))
-            cell_anchor_points_z.append(ai.getVariableArrayFloat("z_i"))
+            if include_focal_adhesions:
+                cell_anchor_points_x.append(ai.getVariableArrayFloat("x_i"))
+                cell_anchor_points_y.append(ai.getVariableArrayFloat("y_i"))
+                cell_anchor_points_z.append(ai.getVariableArrayFloat("z_i"))
             c_sp_multi.append(ai.getVariableArrayFloat("C_sp"))
             cell_coords.append(coords_ai)
             cell_velocity.append(velocity_ai)
@@ -1688,14 +1689,15 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             for line in save_context["celldata"]:
                 file.write(line + '\n')
             num_cells = len(cell_ids)
-            num_anchor_points = FLAMEGPU.environment.getPropertyUInt("N_ANCHOR_POINTS")
+            num_anchor_points = FLAMEGPU.environment.getPropertyUInt("N_ANCHOR_POINTS") if include_focal_adhesions else 0
+            anchor_cells = range(num_cells) if include_focal_adhesions else ()
             num_total_anchor_points = num_cells * num_anchor_points
             num_points = num_cells + num_total_anchor_points
 
             file.write("POINTS {} float \n".format(num_cells + num_total_anchor_points))
             for coords_ai in cell_coords:
                 file.write("{} {} {} \n".format(coords_ai[0], coords_ai[1], coords_ai[2]))
-            for i in range(num_cells):
+            for i in anchor_cells:
                 for j in range(num_anchor_points):
                     file.write("{} {} {} \n".format(cell_anchor_points_x[i][j], cell_anchor_points_y[i][j], cell_anchor_points_z[i][j]))
             
@@ -1718,7 +1720,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             file.write("LOOKUP_TABLE default\n")
             for id_ai in cell_ids:
                 file.write("{} \n".format(id_ai))
-            for i in range(num_cells):
+            for i in anchor_cells:
                 for _ in range(num_anchor_points):
                     file.write("{} \n".format(cell_ids[i]))
             
@@ -1726,7 +1728,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             file.write("LOOKUP_TABLE default\n")
             for a_ai in cell_alignment:
                 file.write("{:.4f} \n".format(a_ai))
-            for i in range(num_cells):
+            for i in anchor_cells:
                 for _ in range(num_anchor_points):
                     file.write("{:.4f} \n".format(cell_alignment[i]))
 
@@ -1734,7 +1736,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             file.write("LOOKUP_TABLE default\n")
             for r_ai in cell_radius:
                 file.write("{:.4f} \n".format(r_ai))
-            for i in range(num_cells):
+            for i in anchor_cells:
                 for _ in range(num_anchor_points):
                     file.write("{:.4f} \n".format(cell_radius[i] / 10.0))
 
@@ -1742,7 +1744,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             file.write("LOOKUP_TABLE default\n")
             for c_ai in cell_clock:
                 file.write("{:.4f} \n".format(c_ai))
-            for i in range(num_cells):
+            for i in anchor_cells:
                 for _ in range(num_anchor_points):
                     file.write("{:.4f} \n".format(cell_clock[i]))
 
@@ -1750,7 +1752,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             file.write("LOOKUP_TABLE default\n")
             for ccp_ai in cell_cycle_phase:
                 file.write("{} \n".format(ccp_ai))
-            for i in range(num_cells):
+            for i in anchor_cells:
                 for _ in range(num_anchor_points):
                     file.write("{} \n".format(cell_cycle_phase[i]))
                     
@@ -1758,7 +1760,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             file.write("LOOKUP_TABLE default\n")
             for cc_ai in cell_completed_cycles:
                 file.write("{} \n".format(cc_ai))
-            for i in range(num_cells):
+            for i in anchor_cells:
                 for _ in range(num_anchor_points):
                     file.write("{} \n".format(cell_completed_cycles[i]))
 
@@ -1766,7 +1768,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             file.write("LOOKUP_TABLE default\n")
             for ct_ai in cell_type:
                 file.write("{} \n".format(ct_ai))
-            for i in range(num_cells):
+            for i in anchor_cells:
                 for _ in range(num_anchor_points):
                     file.write("{} \n".format(cell_type[i]))
 
@@ -1774,7 +1776,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             file.write("LOOKUP_TABLE default\n")
             for d_ai in cell_damage:
                 file.write("{:.4f} \n".format(d_ai))
-            for i in range(num_cells):
+            for i in anchor_cells:
                 for _ in range(num_anchor_points):
                     file.write("{:.4f} \n".format(cell_damage[i]))
 
@@ -1782,7 +1784,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             file.write("LOOKUP_TABLE default\n")
             for d_ai in cell_dead:
                 file.write("{} \n".format(d_ai))
-            for i in range(num_cells):
+            for i in anchor_cells:
                 for _ in range(num_anchor_points):
                     file.write("{} \n".format(cell_dead[i]))
 
@@ -1790,7 +1792,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
             file.write("LOOKUP_TABLE default\n")
             for d_ai in cell_dead_by:
                 file.write("{} \n".format(d_ai))
-            for i in range(num_cells):
+            for i in anchor_cells:
                 for _ in range(num_anchor_points):
                     file.write("{} \n".format(cell_dead_by[i]))
 
@@ -1799,7 +1801,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
                 file.write("LOOKUP_TABLE default\n")
                 for c_ai in c_sp_multi:
                     file.write("{:.4f} \n".format(c_ai[s]))
-                for i in range(num_cells):
+                for i in anchor_cells:
                     for _ in range(num_anchor_points):
                         file.write("{:.4f} \n".format(c_sp_multi[i][s]))
 
@@ -1826,7 +1828,7 @@ def save_data_to_file_step(FLAMEGPU, save_context, config):
                     extra_data.append(val)
                 for val in extra_data:
                     file.write(fmt.format(val))
-                for i in range(num_cells):
+                for i in anchor_cells:
                     for _ in range(num_anchor_points):
                         file.write(fmt.format(extra_data[i]))
 
@@ -3875,6 +3877,7 @@ def apply_param_overrides(
     ns: dict,
     overrides: dict,
     pinned: set[str] | None = None,
+    *, strict: bool = False,
 ) -> set[str]:
     """Apply parameter overrides to a namespace dict and recompute derived values.
 
@@ -3890,6 +3893,9 @@ def apply_param_overrides(
         *   Element override:   ``{"CELL_RADIUS[1]": 9.0}``
     pinned : set[str] or None
         Base parameter names explicitly set by an earlier override layer.
+    strict : bool
+        Reject unknown parameters and invalid array indices instead of ignoring
+        them. Used for JSON/batch overrides so optimizer settings cannot be lost.
 
     Returns
     -------
@@ -3899,6 +3905,11 @@ def apply_param_overrides(
     """
     import re
     _idx_re = re.compile(r'^(\w+)\[(\d+)\]$')
+
+    def invalid_override(message):
+        if strict:
+            raise ValueError(message)
+        print(f"WARNING: {message}, ignoring")
 
     for key, val in overrides.items():
         if key.startswith("_"):
@@ -3914,9 +3925,9 @@ def apply_param_overrides(
                     lst[idx] = type(lst[idx])(val)
                     ns[base_name] = lst
                 else:
-                    print(f"WARNING: index {idx} out of range for '{base_name}' (len={len(lst)}), ignoring")
+                    invalid_override(f"index {idx} out of range for '{base_name}' (len={len(lst)})")
             else:
-                print(f"WARNING: override key '{key}' — base param '{base_name}' not found or not a list, ignoring")
+                invalid_override(f"override key '{key}' — base param '{base_name}' not found or not a list")
         elif key in ns:
             existing = ns[key]
             # Scalar-to-list broadcasting: if the model param is a list but the
@@ -3926,7 +3937,7 @@ def apply_param_overrides(
             else:
                 ns[key] = val
         else:
-            print(f"WARNING: override key '{key}' not found in model parameters, ignoring")
+            invalid_override(f"override key '{key}' not found in model parameters")
 
     # Accumulate base parameter names explicitly overridden in this and earlier
     # precedence layers so recomputation cannot clobber them. Element-wise keys

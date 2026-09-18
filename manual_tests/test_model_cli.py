@@ -45,7 +45,7 @@ class ModelCliTests(unittest.TestCase):
                     if exit_code == 0:
                         for flag in ("--variant", "--overrides", "--result-dir", "--help"):
                             self.assertIn(flag, result.stdout)
-                        self.assertIn("does not resize the fixed ECM grid", result.stdout)
+                        self.assertIn("Differing variant/JSON overrides are rejected", result.stdout)
                     else:
                         self.assertIn("error:", result.stderr)
                     self.assertNotIn("Traceback", result.stderr)
