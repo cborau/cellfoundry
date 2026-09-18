@@ -58,7 +58,7 @@ import yaml
 # Also support launching optimize.py directly from optimizer/.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import check_hard_coded_values
-from simulation_errors import TrialRejected
+from helper_module import TrialRejected
 
 
 class OptimizationError(RuntimeError):

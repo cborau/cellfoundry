@@ -27,7 +27,7 @@ import ast, json, pickle, sys
 from pathlib import Path
 sys.path.insert(0, ROOT_PATH)
 import pyflamegpu
-from simulation_errors import reject_trial
+from helper_module import reject_trial
 overrides = json.loads(Path(sys.argv[sys.argv.index("--overrides") + 1]).read_text())
 output = Path(sys.argv[sys.argv.index("--result-dir") + 1])
 tree = ast.parse((Path(ROOT_PATH) / "model.py").read_text(encoding="utf-8"))

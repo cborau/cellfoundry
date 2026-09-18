@@ -1,16 +1,118 @@
+"""Shared CellFoundry helpers for construction, configuration and analysis.
+
+Importing this module uses only the standard library so CLI help and optimizer
+preflight work without simulation dependencies. Numerical, plotting and GPU
+libraries are imported by the helpers that actually use them.
+"""
+from __future__ import annotations
+
+import argparse
+import json
 import math
 import os
 import pickle
+import re
 import time
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-import re
+from typing import TYPE_CHECKING
 
-import numpy as np
-import matplotlib.pyplot as plt
+if TYPE_CHECKING:  # only for type hints; never imported at runtime
+    import numpy as np
+
+# ---------------------------------------------------------------------------
+# Command-line arguments (before simulation setup)
+# ---------------------------------------------------------------------------
+def parse_model_args(args=None):
+    """Parse arguments excluding the script name (default: sys.argv[1:])."""
+    parser = argparse.ArgumentParser(
+        description="Run the CellFoundry model, optionally with a model variant.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        allow_abbrev=False,
+        epilog="""Examples:
+  python model.py --variant radial_glia --result-dir "results/radial_glia_test"
+  python model.py --variant organoid --overrides configs/my_overrides.json
+
+Parameter precedence: JSON overrides > variant PARAMS > model.py defaults.
+Model parameters (e.g. STEPS) go in the overrides JSON, not individual CLI flags.
+Initial BOUNDARY_COORDS and structural settings (N, grid/array extents, species
+counts) are core-controlled. Differing variant/JSON overrides are rejected.
+Change these settings in model.py and synchronize RTC constants before running.
+See docs/auto/wiki/Tutorial-Model-Variants.md for details.
+""",
+    )
+    parser.add_argument(
+        "--variant", metavar="NAME",
+        help="variant under variants/<NAME>/ (default: generic core model)",
+    )
+    parser.add_argument(
+        "--overrides", metavar="JSON",
+        help="JSON object of parameter overrides, applied after variant PARAMS",
+    )
+    parser.add_argument(
+        "--result-dir", metavar="DIR",
+        help="results directory (default: result_files beside model.py); "
+             "relative paths use the current working directory",
+    )
+    return parser.parse_args(args)
 
 
+# ---------------------------------------------------------------------------
+# Optional CELL anchors, controlled by INCLUDE_FOCAL_ADHESIONS
+# ---------------------------------------------------------------------------
+ANCHOR_ARRAYS = ("x_i", "y_i", "z_i", "u_ref_x_i", "u_ref_y_i", "u_ref_z_i")
+
+
+def declare_cell_anchors(agent, include_focal_adhesions, count):
+    """Omit the arrays entirely when focal adhesions are disabled."""
+    if include_focal_adhesions:
+        for name in ANCHOR_ARRAYS:
+            agent.newVariableArrayFloat(name, count)
+
+
+def register_cell_rtc(agent, name, filename, include_focal_adhesions):
+    """Register an anchor-aware CELL kernel, including variant FILES overrides.
+
+    Compile out every anchor access/local array in a model without focal
+    adhesions. #line retains the original filename/line in RTC diagnostics.
+    No generated source files or kernel constants are written to disk.
+    """
+    path = Path(filename).resolve()
+    source = (
+        f"#define CELLFOUNDRY_CELL_ANCHORS {int(bool(include_focal_adhesions))}\n"
+        f"#line 1 {json.dumps(path.as_posix())}\n"
+        + path.read_text(encoding="utf-8")
+    )
+    return agent.newRTCFunction(name, source)
+
+
+# ---------------------------------------------------------------------------
+# Explicit rejection of infeasible optimizer trials
+# ---------------------------------------------------------------------------
+class TrialRejected(RuntimeError):
+    """This parameter combination cannot produce a valid simulation/objective."""
+
+
+def reject_trial(reason):
+    """Abort a simulation and, under the optimizer, prune only this trial.
+
+    Host-function exceptions can be wrapped by FLAMEGPU. Persist an explicit
+    signal before raising so classification does not depend on exception text.
+    The optimizer supplies a fresh token for each subprocess invocation.
+    Outside optimization this simply raises a clear RuntimeError subclass.
+    Use only for known infeasible states; ordinary errors should propagate.
+    """
+    path = os.environ.get("CELLFOUNDRY_TRIAL_REJECTION_FILE")
+    token = os.environ.get("CELLFOUNDRY_TRIAL_TOKEN")
+    if path and token:
+        Path(path).write_text(json.dumps({"token": token, "reason": str(reason)}), encoding="utf-8")
+    raise TrialRejected(str(reason))
+
+
+# ---------------------------------------------------------------------------
+# Geometry, initialization, output and numerical helpers
+# ---------------------------------------------------------------------------
 def derive_cell_cell_adhesion_range(cell_radius, radius_multiplier):
     """Return the per-type adhesive-shell thickness derived from cell radius."""
     if isinstance(cell_radius, (list, tuple)):
@@ -98,6 +200,7 @@ def load_fibre_network(
     fibre_segment_equilibrium_distance,
     allow_warning_on_mismatch=False, # for special cases like single-fibre network tests
 ):
+    import numpy as np
     critical_error = False
     nodes = None
     connectivity = None
@@ -430,6 +533,7 @@ def getRandomCoords3D(n, minx, maxx, miny, maxy, minz, maxz):
     Returns:
         numpy.ndarray: Array of random numbers with shape (n, 3).
     """
+    import numpy as np
     return np.random.uniform(low=[minx, miny, minz], high=[maxx, maxy, maxz], size=(n, 3))
     
 
@@ -442,6 +546,7 @@ def randomVector3D():
     (x,y,z) : tuple
         Coordinates of the vector.
     """
+    import numpy as np
     np.random.seed()
     phi = np.random.uniform(0.0, np.pi * 2.0)
     costheta = np.random.uniform(-1.0, 1.0)
@@ -465,6 +570,7 @@ def getRandomVectors3D(n_vectors: int):
     v_array : Numpy array
         Coordinates of the vectors. Shape: [n_vectors, 3].
     """
+    import numpy as np
     phi = np.random.uniform(0.0, 2.0 * np.pi, size=n_vectors)
     costheta = np.random.uniform(-1.0, 1.0, size=n_vectors)
     sintheta = np.sqrt(np.maximum(0.0, 1.0 - costheta * costheta))
@@ -482,6 +588,7 @@ def getCellInitCachePath(cache_dir, n_cells: int):
 
 
 def generateCellInitializationData(n_cells: int, boundary_coords):
+    import numpy as np
     boundary_coords = np.asarray(boundary_coords, dtype=float)
     cell_pos = getRandomCoords3D(
         n_cells,
@@ -494,6 +601,7 @@ def generateCellInitializationData(n_cells: int, boundary_coords):
 
 
 def saveCellInitializationCache(n_cells: int, boundary_coords, cache_dir, extra_data=None):
+    import numpy as np
     os.makedirs(cache_dir, exist_ok=True)
     boundary_coords = np.asarray(boundary_coords, dtype=float)
 
@@ -532,6 +640,7 @@ def saveCellInitializationCache(n_cells: int, boundary_coords, cache_dir, extra_
 
 
 def loadCachedCellInitialization(n_cells: int, boundary_coords, cache_dir, atol=1.0e-10):
+    import numpy as np
     cache_path = getCellInitCachePath(cache_dir, n_cells)
     if not os.path.exists(cache_path):
         return None
@@ -589,6 +698,7 @@ def getFixedVectors3D(n_vectors: int, v_dir: np.array):
     v_array : Numpy array
         Coordinates of the vectors. Shape: [n_vectors, 3].
     """
+    import numpy as np
     v_array = np.tile(v_dir, (n_vectors, 1))
 
     return v_array
@@ -618,6 +728,7 @@ def getRandomCoordsAroundPoint(n, px, py, pz, radius, on_surface=False):
     coords
         A numpy array of randomly generated 3D coordinates with shape (n, 3).
     """
+    import numpy as np
     central_point = np.asarray([px, py, pz], dtype=float)
     rand_dirs = getRandomVectors3D(n)
     if on_surface:
@@ -662,6 +773,7 @@ def getRadialOrientations(
     orientations : (N, 3) np.ndarray
         Unit vectors, one per agent, pointing roughly radially outward.
     """
+    import numpy as np
     positions = np.asarray(positions, dtype=np.float64)
     if positions.ndim == 1:
         positions = positions[None, :]
@@ -814,6 +926,7 @@ def getCoordsOnPlane(
     coords : np.ndarray
         Array of shape (n_points, 3), containing coordinates [x, y, z].
     """
+    import numpy as np
 
     plane_axis = plane_axis.lower()
     mode = mode.lower()
@@ -1051,6 +1164,7 @@ def getRandomOrientationOnPlane(plane_axis, n_points):
 
     >>> orientations = getRandomOrientationOnPlane("x", 5)
     """
+    import numpy as np
 
     plane_axis = plane_axis.lower()
 
@@ -1079,8 +1193,6 @@ def getRandomOrientationOnPlane(plane_axis, n_points):
         orientations[:, 1] = np.sin(angles)
 
     return orientations.astype(float)
-
-import numpy as np
 
 
 def getCellTypeList(n_cells, n_cell_types, ratios, shuffle=False):
@@ -1128,6 +1240,7 @@ def getCellTypeList(n_cells, n_cell_types, ratios, shuffle=False):
     cell_type_list : list of int
         List of length n_cells containing cell type IDs.
     """
+    import numpy as np
 
     if not isinstance(n_cells, int) or n_cells <= 0:
         raise ValueError("n_cells must be a positive integer.")
@@ -1204,6 +1317,7 @@ def compute_u_ref_from_anchor_pos(anchor_pos: np.ndarray,
     u_ref : (N, 3) np.ndarray
         Unit vectors pointing from nucleus center to each anchor.
     """
+    import numpy as np
     anchor_pos = np.asarray(anchor_pos, dtype=np.float64)
     cell_center = np.asarray(cell_center, dtype=np.float64).reshape(3,)
 
@@ -1327,6 +1441,7 @@ def build_save_data_context(ecm_agents_per_dir, include_fibre_network, n_nodes):
 
 
 def save_data_to_file_step(FLAMEGPU, save_context, config):
+    import numpy as np
     save_data_to_file = config["SAVE_DATA_TO_FILE"]
     save_every_n_steps = config["SAVE_EVERY_N_STEPS"]
     n_species = config["N_SPECIES"]
@@ -3228,6 +3343,7 @@ class ModelParameterConfig:
         print("\n")    
          
     def plot_boundary_positions(self, bpos_over_time, ax=None, show=True):
+        import matplotlib.pyplot as plt
         if bpos_over_time is None:
             return None
         if ax is None:
@@ -3240,6 +3356,7 @@ class ModelParameterConfig:
         return ax
 
     def plot_boundary_forces(self, bforce_over_time, ax=None, show=True):
+        import matplotlib.pyplot as plt
         if bforce_over_time is None:
             return None
         if ax is None:
@@ -3252,6 +3369,7 @@ class ModelParameterConfig:
         return ax
 
     def plot_boundary_shear_forces(self, bforce_shear_over_time, ax=None, show=True):
+        import matplotlib.pyplot as plt
         if bforce_shear_over_time is None:
             return None
         if ax is None:
@@ -3264,6 +3382,7 @@ class ModelParameterConfig:
         return ax
 
     def plot_poisson_ratio(self, poisson_ratio_over_time, ax=None, show=True):
+        import matplotlib.pyplot as plt
         if poisson_ratio_over_time is None:
             return None
         if ax is None:
@@ -3276,6 +3395,7 @@ class ModelParameterConfig:
         return ax
 
     def plot_oscillatory_strain(self, oscillatory_strain_over_time, ax=None, show=True):
+        import matplotlib.pyplot as plt
         if oscillatory_strain_over_time is None:
             return None
         if ax is None:
@@ -3295,6 +3415,7 @@ class ModelParameterConfig:
         poisson_ratio_over_time=None,
         show=True,
     ):
+        import matplotlib.pyplot as plt
         fig = plt.figure()
         gs = fig.add_gridspec(2, 3)
         ax1 = fig.add_subplot(gs[0, 0])
@@ -3354,6 +3475,8 @@ class ModelParameterConfig:
         max_strain=None,
         show=True,
     ):
+        import numpy as np
+        import matplotlib.pyplot as plt
         if oscillatory_strain_over_time is None or bforce_shear_over_time is None:
             return None
         strain_series = oscillatory_strain_over_time["strain"]
@@ -3961,7 +4084,7 @@ def load_param_overrides_from_cli(argv=None, *, parsed_args=None):
         *before* pyflamegpu imports, since FLAMEGPU may strip or modify
         sys.argv).  Falls back to ``sys.argv`` if *None*.
     parsed_args : argparse.Namespace or None
-        Already parsed arguments from model_cli.parse_model_args. When supplied,
+        Already parsed arguments from parse_model_args. When supplied,
         these are used instead of parsing argv again.
 
     Returns
@@ -3973,7 +4096,6 @@ def load_param_overrides_from_cli(argv=None, *, parsed_args=None):
     """
     import json
     if parsed_args is None:
-        from model_cli import parse_model_args
         parsed_args = parse_model_args(None if argv is None else argv[1:])
 
     overrides_path = parsed_args.overrides
@@ -3992,13 +4114,13 @@ def load_param_overrides_from_cli(argv=None, *, parsed_args=None):
     return overrides, result_dir
 
 
-import numpy as np
 
 
 def smoothstep(edge0, edge1, x):
     """
     Smooth transition from 0 to 1 between edge0 and edge1.
     """
+    import numpy as np
     t = (x - edge0) / (edge1 - edge0)
     t = np.clip(t, 0.0, 1.0)
     return t * t * (3.0 - 2.0 * t)
@@ -4017,7 +4139,7 @@ def create_u_shaped_scalar_profile(
     decay_length=0.60,
     decay_power=1.0,
     front_smoothing=0.08,
-    dtype=np.float32,
+    dtype="float32",  # NumPy resolves this dtype when the function is called.
 ):
     """
     Create a flattened scalar profile over a regular ECM grid.
@@ -4153,6 +4275,7 @@ def create_u_shaped_scalar_profile(
 
             grid_lin_id = i * Ny * Nz + j * Nz + k
     """
+    import numpy as np
 
     Nx, Ny, Nz = map(int, ecm_agents_per_dir)
     X_POS, X_NEG, Y_POS, Y_NEG, Z_POS, Z_NEG = map(float, coords_boundaries)

@@ -10,8 +10,7 @@ import sys
 import tempfile
 import unittest
 
-from model_cli import parse_model_args
-from helper_module import load_param_overrides_from_cli
+from helper_module import parse_model_args, load_param_overrides_from_cli
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,11 +26,11 @@ class ModelCliTests(unittest.TestCase):
                                      "result_dir": "results/my run"})
 
     def test_help_and_errors_exit_before_model_imports_or_writes(self):
-        # Only the entry point and its stdlib parser are available. -S disables
+        # Only the entry point and shared helpers are available. -S disables
         # site-packages, so a FLAMEGPU/numpy import would fail this test.
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory)
-            for name in ("model.py", "model_cli.py"):
+            for name in ("model.py", "helper_module.py"):
                 shutil.copy2(ROOT / name, destination / name)
             for arguments, exit_code in ((["--help"], 0), (["-h"], 0),
                                          (["--variant"], 2), (["--overrides"], 2),
@@ -50,7 +49,7 @@ class ModelCliTests(unittest.TestCase):
                         self.assertIn("error:", result.stderr)
                     self.assertNotIn("Traceback", result.stderr)
                     self.assertEqual({p.name for p in destination.iterdir()},
-                                     {"model.py", "model_cli.py"})
+                                     {"model.py", "helper_module.py"})
 
     def test_unknown_and_abbreviated_flags_are_rejected(self):
         for args in (["--results-dir", "out"], ["--vari", "radial_glia"]):

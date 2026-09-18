@@ -1,5 +1,5 @@
 #ifndef CELLFOUNDRY_CELL_ANCHORS
-#error "Load this kernel with cell_anchors.register_cell_rtc()"
+#error "Load this kernel with helper_module.register_cell_rtc()"
 #endif
 
 // -----------------------------------------------------------------------------

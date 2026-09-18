@@ -11,7 +11,7 @@ import sys as _sys
 import sys                                     # keep 'sys' available for existing usage
 import pathlib
 _ORIGINAL_ARGV = list(_sys.argv)          # snapshot BEFORE pyflamegpu touches sys.argv
-from model_cli import parse_model_args
+from helper_module import parse_model_args
 _CLI_ARGS = parse_model_args(_ORIGINAL_ARGV[1:])  # --help exits before simulation imports/setup
 from pyflamegpu import *
 import subprocess
@@ -24,8 +24,7 @@ import os
 import pickle
 import matplotlib.pyplot as plt
 import check_hard_coded_values
-from cell_anchors import declare_cell_anchors, register_cell_rtc
-from simulation_errors import reject_trial
+from helper_module import declare_cell_anchors, register_cell_rtc, reject_trial
 from copy import deepcopy
 from variant_api import (load_variant, register_parameter_defaults, configuration_snapshot,
                          call_hook, VariantContext, core_initial_population_counts)

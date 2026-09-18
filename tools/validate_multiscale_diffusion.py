@@ -21,7 +21,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from helper_module import plan_diffusion, validate_diffusion_parameters
-from simulation_errors import reject_trial
+from helper_module import reject_trial
 
 
 def load_production_wiring(model, ns):

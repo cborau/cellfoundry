@@ -56,7 +56,7 @@ An explicitly detected infeasible parameter combination **prunes only that trial
 For a variant-specific numerical/biological rejection, use a host check at the appropriate point in the variant schedule:
 
 ```python
-from simulation_errors import reject_trial
+from helper_module import reject_trial
 
 def check_growth(host):
     count = host.agent("CELL").count()
@@ -66,7 +66,7 @@ def check_growth(host):
 
 `reject_trial()` aborts the simulation. Outside optimization it raises a clear exception; under optimization it also writes a per-invocation `trial_rejection.json` signal because FLAMEGPU can wrap Python host exceptions. The optimizer records `prune_reason` and retains logs/partial files for diagnosis, without evaluating their objective. Use this only for understood infeasible states. An unclassified crash (including an arbitrary CUDA error) remains fatal: the runner cannot reliably infer whether it came from sampled parameters or a programming defect. Place guards before unsafe operations when a known parameter-dependent failure is possible. For GPU checks, publish an error flag and inspect it in a following host layer.
 
-An objective can explicitly reject otherwise readable results with `raise TrialRejected(reason)` (imported from `simulation_errors`). Other objective exceptions remain fatal. Standard output and error are saved in `stdout.log` and `stderr.log`; rejection messages identify both paths. A fresh invocation token prevents an old rejection file from masking a new unrelated error when reusing a result directory.
+An objective can explicitly reject otherwise readable results with `raise TrialRejected(reason)` (imported from `helper_module`). Other objective exceptions remain fatal. Standard output and error are saved in `stdout.log` and `stderr.log`; rejection messages identify both paths. A fresh invocation token prevents an old rejection file from masking a new unrelated error when reusing a result directory.
 
 The constants check covers the named literal assignments, not every possible model constraint. Variant validation and model startup check the effective configuration; numerical and biological validity still need suitable tests for the chosen model.
 
