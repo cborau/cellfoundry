@@ -50,9 +50,6 @@ Official references:
 - FLAME GPU documentation: https://docs.flamegpu.com/
 - Installation guide: https://docs.flamegpu.com/guide/index.html
 - Official wheelhouse (latest releases): https://whl.flamegpu.com/
-- Cellfoundry-specific wheels*: https://m2be.unizar.es/people/cborau/cellfoundry_wheels/  
-
-**These wheels include specific features, such as atomic operations on macro variables, that are not yet included in the official FLAMEGPU release. Since some customizable agent functions rely on these operations, the code in this repository may not run correctly with the official FLAMEGPU release and can throw runtime or compilation errors.*
 
 If you encounter issues, always refer to the official FLAME GPU installation guide.
 
